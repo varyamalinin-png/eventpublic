@@ -1,0 +1,1792 @@
+import React, { createContext, useContext, useState, ReactNode } from 'react';
+import { getReliableImageUrl } from '../utils/imageUtils';
+
+export interface Event {
+  id: string;
+  title: string;
+  description: string;
+  date: string; // Формат: "2024-05-15"
+  time: string; // Формат: "18:00"
+  displayDate: string; // Формат: "15 мая" - для отображения
+  displayTime: string; // Формат: "18:00" - для отображения
+  location: string;
+  coordinates?: {
+    latitude: number;
+    longitude: number;
+  };
+  price: string;
+  participants: number;
+  maxParticipants: number;
+  organizerAvatar: string;
+  organizerId: string;
+  mediaUrl?: string;
+  mediaType?: 'image' | 'video';
+  mediaAspectRatio?: number;
+  participantsList?: string[];
+  participantsData?: Array<{ avatar: string; userId: string; name?: string }>;
+  createdAt: Date;
+}
+
+export interface FriendRequest {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: Date;
+}
+
+export interface User {
+  id: string;
+  name: string;
+  username: string;
+  avatar: string;
+  age: string;
+  bio: string;
+  geoPosition: string;
+}
+
+export interface UserFolder {
+  id: string;
+  name: string;
+  userIds: string[];
+}
+
+export interface Message {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  text: string;
+  createdAt: Date;
+}
+
+export interface EventRequest {
+  id: string;
+  eventId: string;
+  userId: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: Date;
+}
+
+export interface EventProfilePost {
+  id: string;
+  eventId: string;
+  authorId: string;
+  type: 'photo' | 'video' | 'text' | 'music';
+  content: string; // URL для медиа или текст
+  caption?: string;
+  title?: string; // Для музыки: название трека
+  artist?: string; // Для музыки: исполнитель
+  artwork_url?: string; // Для музыки: обложка трека
+  createdAt: Date;
+  showInProfile?: boolean; // Флаг для отображения в профиле пользователя
+}
+
+export interface EventProfile {
+  id: string;
+  eventId: string;
+  name: string; // название события
+  description: string; // описание события
+  date: string;
+  location: string;
+  participants: string[]; // ID участников
+  organizerId: string;
+  isCompleted: boolean;
+  posts: EventProfilePost[];
+  createdAt: Date;
+}
+
+interface EventsContextType {
+  events: Event[];
+  addEvent: (event: Omit<Event, 'id' | 'createdAt'>) => void;
+  updateEvent: (id: string, updates: Partial<Event>) => void;
+  deleteEvent: (id: string) => void;
+  getUserData: (userId: string) => { name: string; username: string; avatar: string; age: string; bio: string; geoPosition: string };
+  getOrganizerStats: (organizerId: string) => {
+    totalEvents: number;
+    organizedEvents: number;
+    participatedEvents: number;
+    complaints: number;
+    friends: number;
+  };
+  // Система друзей
+  friends: string[]; // ID друзей текущего пользователя
+  friendRequests: FriendRequest[];
+  sendFriendRequest: (toUserId: string) => void;
+  respondToFriendRequest: (requestId: string, accepted: boolean) => void;
+  getFriendsList: () => User[];
+  isFriend: (userId: string) => boolean;
+  getFriendsForEvents: () => Event[];
+  // Система папок пользователей
+  userFolders: UserFolder[];
+  addUserToFolder: (userId: string, folderId: string) => void;
+  createUserFolder: (name: string) => void;
+  getEventsByUserFolder: (folderId: string) => Event[];
+  // Система сообщений
+  messages: Message[];
+  addMessage: (message: Omit<Message, 'id' | 'createdAt'>) => void;
+  getMessagesByUserFolder: (folderId: string) => Message[];
+  // Система профилей событий
+  eventRequests: EventRequest[];
+  eventProfiles: EventProfile[];
+  sendEventRequest: (eventId: string, userId: string) => void;
+  respondToEventRequest: (requestId: string, accepted: boolean) => void;
+  getEventProfile: (eventId: string) => EventProfile | null;
+  createEventProfile: (eventId: string) => void;
+  addEventProfilePost: (eventId: string, post: Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>) => void;
+  updateEventProfile: (eventId: string, updates: Partial<EventProfile>) => void;
+  updateEventProfilePost: (eventId: string, postId: string, updates: Partial<EventProfilePost>) => void;
+  getEventParticipants: (eventId: string) => string[];
+  canEditEventProfile: (eventId: string, userId: string) => boolean;
+}
+
+const EventsContext = createContext<EventsContextType | undefined>(undefined);
+
+export const useEvents = () => {
+  const context = useContext(EventsContext);
+  if (context === undefined) {
+    throw new Error('useEvents must be used within an EventsProvider');
+  }
+  return context;
+};
+
+interface EventsProviderProps {
+  children: ReactNode;
+}
+
+export const EventsProvider: React.FC<EventsProviderProps> = ({ children }) => {
+  const [events, setEvents] = useState<Event[]>([
+    // БУДУЩИЕ СОБЫТИЯ (GLOB и FRIENDS)
+    
+    // События на сегодня и завтра
+    {
+      id: '1',
+      title: 'Утренняя пробежка',
+      description: 'Легкая пробежка по набережной для всех уровней подготовки',
+      date: '2025-01-19',
+      time: '07:00',
+      displayDate: '19 января',
+      displayTime: '07:00',
+      location: 'Набережная Москвы-реки',
+      coordinates: { latitude: 55.7447, longitude: 37.6178 },
+      price: 'Бесплатно',
+      participants: 8,
+      maxParticipants: 15,
+      organizerAvatar: getReliableImageUrl('avatar', 1),
+      organizerId: 'organizer-1',
+      mediaUrl: getReliableImageUrl('photo', 1),
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [
+        getReliableImageUrl('avatar', 2),
+        getReliableImageUrl('avatar', 3),
+        getReliableImageUrl('avatar', 4),
+        getReliableImageUrl('avatar', 5),
+        getReliableImageUrl('avatar', 6),
+        getReliableImageUrl('avatar', 7),
+        getReliableImageUrl('avatar', 8),
+        getReliableImageUrl('avatar', 9)
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '2',
+      title: 'Мастер-класс по рисованию',
+      description: 'Изучаем акварельную технику с профессиональным художником',
+      date: '2025-01-19',
+      time: '14:00',
+      displayDate: '19 января',
+      displayTime: '14:00',
+      location: 'Арт-студия "Кисточка"',
+      coordinates: { latitude: 55.7616, longitude: 37.6094 },
+      price: '2500 руб',
+      participants: 3,
+      maxParticipants: 8,
+      organizerAvatar: getReliableImageUrl('avatar', 2),
+      organizerId: 'organizer-2',
+      mediaUrl: getReliableImageUrl('photo', 2),
+      mediaType: 'image',
+      mediaAspectRatio: 1.33,
+      participantsList: [
+        getReliableImageUrl('avatar', 3),
+        getReliableImageUrl('avatar', 4),
+        getReliableImageUrl('avatar', 5)
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '3',
+      title: 'Танцевальный вечер',
+      description: 'Латиноамериканские танцы для начинающих и продолжающих',
+      date: '2025-01-20',
+      time: '19:30',
+      displayDate: '20 января',
+      displayTime: '19:30',
+      location: 'Танцевальная школа "Пассион"',
+      coordinates: { latitude: 55.7522, longitude: 37.6156 },
+      price: '800 руб',
+      participants: 12,
+      maxParticipants: 20,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-3',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      participantsData: [
+        { avatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        { avatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        { avatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        { avatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        { avatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '4',
+      title: 'Поход в горы',
+      description: 'Восхождение на ближайшие горы с ночевкой в палатках',
+      date: '2025-01-21',
+      time: '06:00',
+      displayDate: '21 января',
+      displayTime: '06:00',
+      location: 'Эльбрус, Кабардино-Балкария',
+      coordinates: { latitude: 43.3550, longitude: 42.4392 },
+      price: '5000 руб',
+      participants: 5,
+      maxParticipants: 10,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-4',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 1.33,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '5',
+      title: 'Кулинарный мастер-класс',
+      description: 'Готовим итальянскую пасту от шеф-повара ресторана',
+      date: '2025-01-22',
+      time: '16:00',
+      displayDate: '22 января',
+      displayTime: '16:00',
+      location: 'Кулинарная студия "Вкус"',
+      coordinates: { latitude: 55.7749, longitude: 37.6326 },
+      price: '3500 руб',
+      participants: 6,
+      maxParticipants: 12,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-5',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '6',
+      title: 'Встреча IT-сообщества',
+      description: 'Обсуждаем новые технологии и обмениваемся опытом',
+      date: '2025-01-23',
+      time: '18:30',
+      displayDate: '23 января',
+      displayTime: '18:30',
+      location: 'Коворкинг "Сколково"',
+      coordinates: { latitude: 55.6938, longitude: 37.3356 },
+      price: '500 руб',
+      participants: 15,
+      maxParticipants: 25,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-6',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 1.33,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '7',
+      title: 'Йога в парке',
+      description: 'Расслабляющая практика йоги на свежем воздухе',
+      date: '2025-01-24',
+      time: '09:00',
+      displayDate: '24 января',
+      displayTime: '09:00',
+      location: 'Парк Царицыно',
+      coordinates: { latitude: 55.6209, longitude: 37.6815 },
+      price: 'Бесплатно',
+      participants: 0,
+      maxParticipants: 15,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-7',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [],
+      createdAt: new Date()
+    },
+
+    // СОБЫТИЯ, ОРГАНИЗОВАННЫЕ ТЕКУЩИМ ПОЛЬЗОВАТЕЛЕМ
+    {
+      id: '8',
+      title: 'Встреча выпускников',
+      description: 'Встречаемся с одноклассниками после долгой разлуки',
+      date: '2025-01-25',
+      time: '19:00',
+      displayDate: '25 января',
+      displayTime: '19:00',
+      location: 'Ресторан "Маяк"',
+      coordinates: { latitude: 55.7558, longitude: 37.6176 },
+      price: '3000 руб',
+      participants: 12,
+      maxParticipants: 20,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'own-profile-1',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 1.33,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '9',
+      title: 'Благотворительная ярмарка',
+      description: 'Продаем handmade товары в пользу детского дома',
+      date: '2025-01-26',
+      time: '12:00',
+      displayDate: '26 января',
+      displayTime: '12:00',
+      location: 'ТЦ "Галерея"',
+      coordinates: { latitude: 55.7616, longitude: 37.6094 },
+      price: 'Бесплатно',
+      participants: 8,
+      maxParticipants: 15,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'own-profile-1',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '10',
+      title: 'Новогодняя вечеринка',
+      description: 'Встречаем Новый год в кругу друзей с фейерверками',
+      date: '2025-01-29',
+      time: '21:00',
+      displayDate: '29 января',
+      displayTime: '21:00',
+      location: 'Загородный дом, Подмосковье',
+      coordinates: { latitude: 55.7558, longitude: 37.6176 },
+      price: '2000 руб',
+      participants: 18,
+      maxParticipants: 30,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'own-profile-1',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 1.33,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+
+    // СОБЫТИЯ, В КОТОРЫХ УЧАСТВУЕТ ТЕКУЩИЙ ПОЛЬЗОВАТЕЛЬ
+    {
+      id: '11',
+      title: 'Книжный клуб',
+      description: 'Обсуждаем роман "1984" Джорджа Оруэлла',
+      date: '2025-01-30',
+      time: '16:00',
+      displayDate: '30 января',
+      displayTime: '16:00',
+      location: 'Библиотека им. Ленина',
+      coordinates: { latitude: 55.7522, longitude: 37.6156 },
+      price: 'Бесплатно',
+      participants: 6,
+      maxParticipants: 10,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-8',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '12',
+      title: 'Винная дегустация',
+      description: 'Знакомимся с французскими винами с сомелье',
+      date: '2025-01-31',
+      time: '19:30',
+      displayDate: '31 января',
+      displayTime: '19:30',
+      location: 'Винный бар "Сомелье"',
+      coordinates: { latitude: 55.7458, longitude: 37.6376 },
+      price: '4500 руб',
+      participants: 4,
+      maxParticipants: 8,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-9',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 1.33,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+
+    // АРХИВНЫЕ СОБЫТИЯ (прошлые даты)
+    {
+      id: '13',
+      title: 'Встреча в кафе (архив)',
+      description: 'Прошедшая встреча друзей в уютном кафе',
+      date: '2024-11-20',
+      time: '19:00',
+      displayDate: '20 ноября',
+      displayTime: '19:00',
+      location: 'Кафе "Друзья"',
+      coordinates: { latitude: 55.7616, longitude: 37.6094 },
+      price: '800 руб',
+      participants: 4,
+      maxParticipants: 6,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'own-profile-1',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 1.33,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '14',
+      title: 'Спортивная тренировка (архив)',
+      description: 'Завершенная тренировка по кроссфиту',
+      date: '2024-11-15',
+      time: '10:00',
+      displayDate: '15 ноября',
+      displayTime: '10:00',
+      location: 'Фитнес-клуб "СпортАктив"',
+      coordinates: { latitude: 55.7500, longitude: 37.6200 },
+      price: '1200 руб',
+      participants: 8,
+      maxParticipants: 12,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'own-profile-1',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '15',
+      title: 'Кино на открытом воздухе (архив)',
+      description: 'Смотрели фильм под звездным небом',
+      date: '2024-10-30',
+      time: '20:00',
+      displayDate: '30 октября',
+      displayTime: '20:00',
+      location: 'Парк Горького',
+      coordinates: { latitude: 55.7317, longitude: 37.6014 },
+      price: 'Бесплатно',
+      participants: 25,
+      maxParticipants: 50,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-10',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+
+    // ДОПОЛНИТЕЛЬНЫЕ СОБЫТИЯ РАЗНЫХ ТИПОВ
+    {
+      id: '16',
+      title: 'Фотосессия в студии',
+      description: 'Профессиональная съемка портретов с ретушью',
+      date: '2025-02-01',
+      time: '15:00',
+      displayDate: '1 февраля',
+      displayTime: '15:00',
+      location: 'Фотостудия "Образ"',
+      coordinates: { latitude: 55.7800, longitude: 37.6100 },
+      price: '6000 руб',
+      participants: 1,
+      maxParticipants: 2,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-11',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '17',
+      title: 'Бесплатный концерт',
+      description: 'Выступление местных музыкальных групп на открытой площадке',
+      date: '2025-02-02',
+      time: '18:00',
+      displayDate: '2 февраля',
+      displayTime: '18:00',
+      location: 'Культурный центр "АртПлаза"',
+      coordinates: { latitude: 55.7900, longitude: 37.6300 },
+      price: 'Бесплатно',
+      participants: 45,
+      maxParticipants: 100,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-12',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 1.33,
+      participantsList: Array.from({ length: 45 }, (_, i) => 
+        `getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ),
+      createdAt: new Date()
+    },
+
+    // ДОПОЛНИТЕЛЬНЫЕ СОБЫТИЯ ДЛЯ НАПОЛНЕНИЯ ЛЕНТ
+    {
+      id: '18',
+      title: 'Вечер настольных игр',
+      description: 'Играем в Монополию, Манчкин и другие классные игры',
+      date: '2025-01-20',
+      time: '18:00',
+      displayDate: '20 января',
+      displayTime: '18:00',
+      location: 'Кафе "Игротека"',
+      coordinates: { latitude: 55.7522, longitude: 37.6156 },
+      price: '500 руб',
+      participants: 6,
+      maxParticipants: 12,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-13',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 1.33,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '19',
+      title: 'Тренировка по боксу',
+      description: 'Интенсивная тренировка для начинающих и продолжающих',
+      date: '2025-01-21',
+      time: '19:00',
+      displayDate: '21 января',
+      displayTime: '19:00',
+      location: 'Спортивный зал "Удар"',
+      coordinates: { latitude: 55.7737, longitude: 37.6056 },
+      price: '1500 руб',
+      participants: 10,
+      maxParticipants: 15,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-14',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '20',
+      title: 'Лекция по дизайну',
+      description: 'Современные тренды в веб-дизайне и UX',
+      date: '2025-01-22',
+      time: '16:00',
+      displayDate: '22 января',
+      displayTime: '16:00',
+      location: 'Коворкинг "ДизайнХаб"',
+      coordinates: { latitude: 55.7616, longitude: 37.6094 },
+      price: 'Бесплатно',
+      participants: 25,
+      maxParticipants: 40,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-15',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 1.33,
+      participantsList: Array.from({ length: 25 }, (_, i) => 
+        `getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ),
+      createdAt: new Date()
+    },
+    {
+      id: '21',
+      title: 'Поход в кино',
+      description: 'Смотрим новый блокбастер в IMAX',
+      date: '2025-01-23',
+      time: '20:00',
+      displayDate: '23 января',
+      displayTime: '20:00',
+      location: 'Кинотеатр "Октябрь"',
+      coordinates: { latitude: 55.7588, longitude: 37.6191 },
+      price: '800 руб',
+      participants: 4,
+      maxParticipants: 8,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-16',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '22',
+      title: 'Сбор вещей для приюта',
+      description: 'Собираем корм и игрушки для бездомных животных',
+      date: '2025-01-24',
+      time: '12:00',
+      displayDate: '24 января',
+      displayTime: '12:00',
+      location: 'Волонтерский центр "Добро"',
+      coordinates: { latitude: 55.7458, longitude: 37.6376 },
+      price: 'Бесплатно',
+      participants: 12,
+      maxParticipants: 20,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-17',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 1.33,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '23',
+      title: 'Караоке-вечер',
+      description: 'Поем любимые песни в хорошей компании',
+      date: '2025-01-25',
+      time: '19:30',
+      displayDate: '25 января',
+      displayTime: '19:30',
+      location: 'Караоке-бар "Микрофон"',
+      coordinates: { latitude: 55.7800, longitude: 37.6100 },
+      price: '1200 руб',
+      participants: 8,
+      maxParticipants: 15,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-18',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '24',
+      title: 'Рыбалка на выходных',
+      description: 'Утренняя рыбалка на подмосковном озере',
+      date: '2025-01-26',
+      time: '06:30',
+      displayDate: '26 января',
+      displayTime: '06:30',
+      location: 'Озеро Бисерово',
+      coordinates: { latitude: 55.8500, longitude: 38.0000 },
+      price: '800 руб',
+      participants: 3,
+      maxParticipants: 6,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-19',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: [
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+        'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ],
+      createdAt: new Date()
+    },
+    {
+      id: '25',
+      title: 'Лекция по астрономии',
+      description: 'Наблюдаем за звездами через телескоп',
+      date: '2025-01-27',
+      time: '21:00',
+      displayDate: '27 января',
+      displayTime: '21:00',
+      location: 'Планетарий Москвы',
+      coordinates: { latitude: 55.7606, longitude: 37.6107 },
+      price: '600 руб',
+      participants: 15,
+      maxParticipants: 25,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-20',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 1.33,
+      participantsList: Array.from({ length: 15 }, (_, i) => 
+        `getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ),
+      createdAt: new Date()
+    },
+    {
+      id: '26',
+      title: 'Пробег на 5км',
+      description: 'Городской забег с медалями для всех участников',
+      date: '2025-01-28',
+      time: '10:00',
+      displayDate: '28 января',
+      displayTime: '10:00',
+      location: 'Парк Сокольники',
+      coordinates: { latitude: 55.7922, longitude: 37.6706 },
+      price: 'Бесплатно',
+      participants: 28,
+      maxParticipants: 50,
+      organizerAvatar: 'getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      organizerId: 'organizer-21',
+      mediaUrl: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+      mediaType: 'image',
+      mediaAspectRatio: 0.67,
+      participantsList: Array.from({ length: 28 }, (_, i) => 
+        `getReliableImageUrl('avatar', Math.floor(Math.random() * 10))
+      ),
+      createdAt: new Date()
+    }
+  ]);
+
+  // Состояние друзей
+  const [friends, setFriends] = useState<string[]>([
+    'organizer-2', // Анна К.
+    'organizer-3', // Дмитрий Р.
+    'organizer-5', // Игорь М.
+    'organizer-10', // Сергей Д. (принятый друг)
+  ]);
+
+  // Состояние заявок в друзья
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([
+    // Входящие запросы (к текущему пользователю)
+    {
+      id: 'req-1',
+      fromUserId: 'organizer-7',
+      toUserId: 'own-profile-1',
+      status: 'pending',
+      createdAt: new Date(Date.now() - 86400000) // вчера
+    },
+    {
+      id: 'req-2',
+      fromUserId: 'organizer-8',
+      toUserId: 'own-profile-1',
+      status: 'pending',
+      createdAt: new Date(Date.now() - 172800000) // позавчера
+    },
+    // Исходящие запросы (от текущего пользователя)
+    {
+      id: 'req-out-1',
+      fromUserId: 'own-profile-1',
+      toUserId: 'organizer-9',
+      status: 'pending',
+      createdAt: new Date(Date.now() - 3600000) // час назад
+    },
+    {
+      id: 'req-out-2',
+      fromUserId: 'own-profile-1',
+      toUserId: 'organizer-10',
+      status: 'accepted',
+      createdAt: new Date(Date.now() - 7200000) // 2 часа назад
+    },
+    {
+      id: 'req-out-3',
+      fromUserId: 'own-profile-1',
+      toUserId: 'organizer-11',
+      status: 'rejected',
+      createdAt: new Date(Date.now() - 10800000) // 3 часа назад
+    }
+  ]);
+
+  // Состояние папок пользователей
+  const [userFolders, setUserFolders] = useState<UserFolder[]>([
+    { id: '1', name: 'Подъезд', userIds: [] },
+    { id: '2', name: 'Школа', userIds: [] },
+    { id: '3', name: 'Беговой клуб', userIds: [] }
+  ]);
+
+  // Состояние сообщений
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: '1',
+      fromUserId: 'organizer-2',
+      toUserId: 'own-profile-1',
+      text: 'Привет! Как дела?',
+      createdAt: new Date(Date.now() - 3600000) // час назад
+    },
+    {
+      id: '2',
+      fromUserId: 'organizer-3',
+      toUserId: 'own-profile-1',
+      text: 'Спасибо за вчерашнюю встречу!',
+      createdAt: new Date(Date.now() - 7200000) // 2 часа назад
+    },
+    {
+      id: '3',
+      fromUserId: 'own-profile-1',
+      toUserId: 'organizer-2',
+      text: 'Да, было классно! До встречи завтра',
+      createdAt: new Date(Date.now() - 1800000) // 30 минут назад
+    }
+  ]);
+
+  // Состояние заявок на участие в событиях
+  const [eventRequests, setEventRequests] = useState<EventRequest[]>([
+    {
+      id: 'event-req-1',
+      eventId: '8', // Встреча выпускников (организована текущим пользователем)
+      userId: 'organizer-7',
+      status: 'pending',
+      createdAt: new Date(Date.now() - 86400000)
+    },
+    {
+      id: 'event-req-2',
+      eventId: '9', // Благотворительная ярмарка (организована текущим пользователем)
+      userId: 'organizer-8',
+      status: 'pending',
+      createdAt: new Date(Date.now() - 172800000)
+    },
+    {
+      id: 'event-req-3',
+      eventId: '10', // Новогодняя вечеринка (организована текущим пользователем)
+      userId: 'organizer-11',
+      status: 'pending',
+      createdAt: new Date(Date.now() - 3600000)
+    }
+  ]);
+
+  // Состояние профилей событий (пабликов)
+  const [eventProfiles, setEventProfiles] = useState<EventProfile[]>([
+    {
+      id: 'profile-1',
+      eventId: '1',
+      name: 'Утренняя пробежка',
+      description: 'Легкая пробежка по набережной для всех уровней подготовки',
+      date: '2025-01-19',
+      location: 'Набережная Москвы-реки',
+      participants: ['organizer-1', 'organizer-2', 'own-profile-1'],
+      organizerId: 'organizer-1',
+      isCompleted: true,
+      posts: [
+        {
+          id: 'post-1',
+          eventId: '1',
+          authorId: 'own-profile-1',
+          type: 'photo',
+          content: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+          caption: 'Отличная пробежка!',
+          createdAt: new Date(Date.now() - 3600000),
+          showInProfile: true
+        },
+        {
+          id: 'post-2',
+          eventId: '1',
+          authorId: 'organizer-1',
+          type: 'text',
+          content: 'Спасибо всем участникам за отличную тренировку!',
+          createdAt: new Date(Date.now() - 1800000),
+          showInProfile: true
+        },
+        {
+          id: 'post-3',
+          eventId: '1',
+          authorId: 'own-profile-1',
+          type: 'music',
+          content: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+          title: 'Morning Motivation',
+          artist: 'Sound Effects',
+          caption: 'Этот трек помог нам настроиться на пробежку!',
+          createdAt: new Date(Date.now() - 900000),
+          showInProfile: true
+        },
+        {
+          id: 'post-10',
+          eventId: '1',
+          authorId: 'organizer-2',
+          type: 'photo',
+          content: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+          caption: 'Закат после пробежки',
+          createdAt: new Date(Date.now() - 450000),
+          showInProfile: true
+        },
+        {
+          id: 'post-11',
+          eventId: '1',
+          authorId: 'own-profile-1',
+          type: 'video',
+          content: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+          caption: 'Финишная прямая',
+          createdAt: new Date(Date.now() - 225000),
+          showInProfile: true
+        }
+      ],
+      createdAt: new Date(Date.now() - 7200000)
+    },
+    {
+      id: 'profile-2',
+      eventId: '2',
+      name: 'Мастер-класс по живописи',
+      description: 'Учимся рисовать акварелью с профессиональным художником',
+      date: '2025-01-18',
+      location: 'Арт-студия "Кисть"',
+      participants: ['organizer-2', 'organizer-3', 'own-profile-1'],
+      organizerId: 'organizer-2',
+      isCompleted: true,
+      posts: [
+        {
+          id: 'post-4',
+          eventId: '2',
+          authorId: 'organizer-2',
+          type: 'photo',
+          content: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+          caption: 'Наши шедевры! Все молодцы!',
+          createdAt: new Date(Date.now() - 7200000)
+        },
+        {
+          id: 'post-5',
+          eventId: '2',
+          authorId: 'own-profile-1',
+          type: 'photo',
+          content: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+          caption: 'Мой первый акварельный пейзаж',
+          createdAt: new Date(Date.now() - 5400000)
+        },
+        {
+          id: 'post-6',
+          eventId: '2',
+          authorId: 'organizer-3',
+          type: 'video',
+          content: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+          caption: 'Процесс создания картины',
+          createdAt: new Date(Date.now() - 3600000),
+          showInProfile: true
+        },
+        {
+          id: 'post-12',
+          eventId: '2',
+          authorId: 'own-profile-1',
+          type: 'photo',
+          content: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+          caption: 'Мои краски',
+          createdAt: new Date(Date.now() - 1800000),
+          showInProfile: true
+        }
+      ],
+      createdAt: new Date(Date.now() - 14400000)
+    },
+    {
+      id: 'profile-3',
+      eventId: '3',
+      name: 'Танцевальный вечер',
+      description: 'Латиноамериканские танцы для всех уровней',
+      date: '2025-01-17',
+      location: 'Танцевальная студия "Ритм"',
+      participants: ['organizer-3', 'organizer-4', 'own-profile-1'],
+      organizerId: 'organizer-3',
+      isCompleted: true,
+      posts: [
+        {
+          id: 'post-7',
+          eventId: '3',
+          authorId: 'organizer-3',
+          type: 'video',
+          content: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+          caption: 'Зажигательные танцы!',
+          createdAt: new Date(Date.now() - 10800000)
+        },
+        {
+          id: 'post-8',
+          eventId: '3',
+          authorId: 'own-profile-1',
+          type: 'music',
+          content: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+          title: 'Salsa Night',
+          artist: 'Latin Vibes',
+          caption: 'Трек, под который мы танцевали всю ночь',
+          createdAt: new Date(Date.now() - 9000000)
+        },
+        {
+          id: 'post-9',
+          eventId: '3',
+          authorId: 'organizer-4',
+          type: 'text',
+          content: 'Невероятная энергия! Спасибо всем за отличный вечер!',
+          createdAt: new Date(Date.now() - 7200000),
+          showInProfile: true
+        },
+        {
+          id: 'post-13',
+          eventId: '3',
+          authorId: 'own-profile-1',
+          type: 'photo',
+          content: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+          caption: 'Танцевальный зал',
+          createdAt: new Date(Date.now() - 5400000),
+          showInProfile: true
+        },
+        {
+          id: 'post-14',
+          eventId: '3',
+          authorId: 'organizer-3',
+          type: 'music',
+          content: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+          title: 'Dance Floor',
+          artist: 'Party Mix',
+          caption: 'Хит вечера!',
+          createdAt: new Date(Date.now() - 3600000),
+          showInProfile: true
+        },
+        {
+          id: 'post-15',
+          eventId: '3',
+          authorId: 'own-profile-1',
+          type: 'video',
+          content: 'getReliableImageUrl('photo', Math.floor(Math.random() * 10))
+          caption: 'Финальный танец',
+          createdAt: new Date(Date.now() - 1800000),
+          showInProfile: true
+        }
+      ],
+      createdAt: new Date(Date.now() - 21600000)
+    }
+  ]);
+
+  const addEvent = (event: Omit<Event, 'id' | 'createdAt'>) => {
+    const newEvent: Event = {
+      ...event,
+      id: Date.now().toString(),
+      createdAt: new Date()
+    };
+    setEvents(prev => [...prev, newEvent]);
+  };
+
+  const updateEvent = (id: string, updates: Partial<Event>) => {
+    setEvents(prev => prev.map(event => 
+      event.id === id ? { ...event, ...updates } : event
+    ));
+  };
+
+  const deleteEvent = (id: string) => {
+    setEvents(prev => prev.filter(event => event.id !== id));
+  };
+
+  const getUserData = (userId: string) => {
+    const userMap: { [key: string]: { name: string; username: string; avatar: string; age: string; bio: string; geoPosition: string } } = {
+      'organizer-1': {
+        name: "Максим П.",
+        username: "@maxim_p",
+        age: "28 лет", 
+        bio: "Люблю активный отдых и пробежки по утрам",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'organizer-2': {
+        name: "Анна К.",
+        username: "@anna_art",
+        age: "24 года", 
+        bio: "Художница, провожу мастер-классы по живописи",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'organizer-3': {
+        name: "Дмитрий Р.",
+        username: "@dmitry_dance",
+        age: "32 года", 
+        bio: "Преподаватель танцев, латиноамериканские танцы",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Санкт-Петербург, Россия"
+      },
+      'organizer-4': {
+        name: "Елена В.",
+        username: "@elena_mtn",
+        age: "26 лет", 
+        bio: "Альпинистка, организую походы и восхождения",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Екатеринбург, Россия"
+      },
+      'organizer-5': {
+        name: "Алексей М.",
+        username: "@alex_chef",
+        age: "35 лет", 
+        bio: "Шеф-повар, веду кулинарные мастер-классы",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'organizer-6': {
+        name: "Игорь С.",
+        username: "@igor_tech",
+        age: "29 лет", 
+        bio: "Tech-энтузиаст, организую IT-встречи",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Новосибирск, Россия"
+      },
+      'organizer-7': {
+        name: "Мария Л.",
+        username: "@maria_yoga",
+        age: "27 лет", 
+        bio: "Инструктор йоги, веду занятия на природе",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'organizer-8': {
+        name: "Андрей К.",
+        username: "@andrey_books",
+        age: "31 год", 
+        bio: "Библиотекарь, веду книжный клуб",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Санкт-Петербург, Россия"
+      },
+      'organizer-9': {
+        name: "Ольга Н.",
+        username: "@olga_wine",
+        age: "33 года", 
+        bio: "Сомелье, провожу дегустации вин",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Краснодар, Россия"
+      },
+      'organizer-10': {
+        name: "Сергей Д.",
+        username: "@sergey_cinema",
+        age: "30 лет", 
+        bio: "Кинооператор, организую показы фильмов",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'organizer-11': {
+        name: "Татьяна Ф.",
+        username: "@tanya_photo",
+        age: "28 лет", 
+        bio: "Фотограф, профессиональная съемка",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Екатеринбург, Россия"
+      },
+      'organizer-12': {
+        name: "Владимир П.",
+        username: "@vladimir_music",
+        age: "34 года", 
+        bio: "Музыкант, организую концерты",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Новосибирск, Россия"
+      },
+      'organizer-13': {
+        name: "Андрей Г.",
+        username: "@andrey_games",
+        age: "26 лет", 
+        bio: "Любитель настольных игр, коллекционер",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'organizer-14': {
+        name: "Михаил Б.",
+        username: "@mikhail_box",
+        age: "30 лет", 
+        bio: "Тренер по боксу, бывший спортсмен",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'organizer-15': {
+        name: "Екатерина Д.",
+        username: "@kate_design",
+        age: "27 лет", 
+        bio: "UX/UI дизайнер, веду лекции и воркшопы",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'organizer-16': {
+        name: "Роман К.",
+        username: "@roman_cinema",
+        age: "29 лет", 
+        bio: "Киноман, организую походы в кино",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'organizer-17': {
+        name: "Алина С.",
+        username: "@alina_volunteer",
+        age: "25 лет", 
+        bio: "Волонтер, помогаю бездомным животным",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'organizer-18': {
+        name: "Денис М.",
+        username: "@denis_karaoke",
+        age: "28 лет", 
+        bio: "Люблю петь, работаю в музыкальной сфере",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'organizer-19': {
+        name: "Иван Р.",
+        username: "@ivan_fishing",
+        age: "45 лет", 
+        bio: "Рыбак со стажем, знаю все лучшие места",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Московская область, Россия"
+      },
+      'organizer-20': {
+        name: "Марина Т.",
+        username: "@marina_astro",
+        age: "33 года", 
+        bio: "Астроном, работаю в планетарии",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'organizer-21': {
+        name: "Павел Р.",
+        username: "@pavel_running",
+        age: "31 год", 
+        bio: "Мастер спорта по легкой атлетике",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      },
+      'own-profile-1': {
+        name: "Анна К.",
+        username: "@anna_k",
+        age: "24 года", 
+        bio: "Люблю спонтанные встречи и новые знакомства",
+        avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+        geoPosition: "Москва, Россия"
+      }
+    };
+    
+    return userMap[userId] || {
+      name: "Пользователь",
+      username: "@user",
+      age: "Возраст не указан", 
+      bio: "О себе не рассказал",
+      avatar: "getReliableImageUrl('avatar', Math.floor(Math.random() * 10))",
+      geoPosition: "Не указано"
+    };
+  };
+
+  // Функция для детерминированной генерации значений на основе ID
+  const generateDeterministicStats = (organizerId: string) => {
+    // Создаем хэш из строки ID для получения детерминированного значения
+    let hash = 0;
+    for (let i = 0; i < organizerId.length; i++) {
+      const char = organizerId.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    
+    // Используем хэш для генерации стабильных значений
+    const complaints = Math.abs(hash % 3); // 0-2 жалобы
+    const friends = Math.abs(hash % 150) + 20; // 20-169 друзей
+    
+    return { complaints, friends };
+  };
+
+  const getOrganizerStats = (organizerId: string) => {
+    // Получаем все события
+    const organizedEvents = events.filter(event => event.organizerId === organizerId);
+    
+    // Подсчитываем участие в событиях (где пользователь в participantsList)
+    const userAvatar = getUserData(organizerId).avatar;
+    const participatedEvents = events.filter(event => 
+      event.participantsList?.includes(userAvatar) || 
+      event.participantsData?.some(p => p.userId === organizerId)
+    );
+
+    // Получаем реальное количество друзей или детерминированное значение
+    let friendsCount = 0;
+    if (organizerId === 'own-profile-1') {
+      friendsCount = friends.length;
+    } else {
+      const { friends: generatedFriends } = generateDeterministicStats(organizerId);
+      friendsCount = generatedFriends;
+    }
+
+    // Получаем детерминированные значения для жалоб
+    const { complaints } = generateDeterministicStats(organizerId);
+
+    return {
+      totalEvents: organizedEvents.length + participatedEvents.length,
+      organizedEvents: organizedEvents.length,
+      participatedEvents: participatedEvents.length,
+      complaints: complaints,
+      friends: friendsCount,
+    };
+  };
+
+  // Функции для работы с друзьями
+  const sendFriendRequest = (toUserId: string) => {
+    // Проверяем, не отправлена ли уже заявка
+    const existingRequest = friendRequests.find(
+      req => req.fromUserId === 'own-profile-1' && req.toUserId === toUserId && req.status === 'pending'
+    );
+    
+    if (!existingRequest) {
+      const newRequest: FriendRequest = {
+        id: Date.now().toString(),
+        fromUserId: 'own-profile-1',
+        toUserId,
+        status: 'pending',
+        createdAt: new Date()
+      };
+      setFriendRequests(prev => [...prev, newRequest]);
+    }
+  };
+
+  const respondToFriendRequest = (requestId: string, accepted: boolean) => {
+    setFriendRequests(prev => 
+      prev.map(req => 
+        req.id === requestId 
+          ? { ...req, status: accepted ? 'accepted' : 'rejected' }
+          : req
+      )
+    );
+
+    if (accepted) {
+      const request = friendRequests.find(req => req.id === requestId);
+      if (request) {
+        setFriends(prev => [...prev, request.fromUserId]);
+      }
+    }
+  };
+
+  const getFriendsList = (): User[] => {
+    return friends.map(friendId => {
+      const userData = getUserData(friendId);
+      return {
+        id: friendId,
+        ...userData
+      };
+    });
+  };
+
+  const isFriend = (userId: string): boolean => {
+    return friends.includes(userId);
+  };
+
+  const getFriendsForEvents = (): Event[] => {
+    // Возвращаем события только друзей, а не все события
+    return events.filter(event => friends.includes(event.organizerId));
+  };
+
+  // Функции для работы с папками пользователей
+  const addUserToFolder = (userId: string, folderId: string) => {
+    setUserFolders(prev => prev.map(folder => 
+      folder.id === folderId 
+        ? { ...folder, userIds: [...folder.userIds.filter(id => id !== userId), userId] }
+        : folder
+    ));
+  };
+
+  const createUserFolder = (name: string) => {
+    const newFolder: UserFolder = {
+      id: Date.now().toString(),
+      name: name.trim(),
+      userIds: []
+    };
+    setUserFolders(prev => [...prev, newFolder]);
+  };
+
+  const getEventsByUserFolder = (folderId: string): Event[] => {
+    const folder = userFolders.find(f => f.id === folderId);
+    if (!folder) return [];
+    
+    return events.filter(event => 
+      folder.userIds.includes(event.organizerId)
+    );
+  };
+
+  // Функции для работы с сообщениями
+  const addMessage = (message: Omit<Message, 'id' | 'createdAt'>) => {
+    const newMessage: Message = {
+      ...message,
+      id: Date.now().toString(),
+      createdAt: new Date()
+    };
+    setMessages(prev => [...prev, newMessage]);
+  };
+
+  const getMessagesByUserFolder = (folderId: string): Message[] => {
+    const folder = userFolders.find(f => f.id === folderId);
+    if (!folder) return [];
+    
+    return messages.filter(message => 
+      folder.userIds.includes(message.fromUserId) || folder.userIds.includes(message.toUserId)
+    );
+  };
+
+  // Функции для работы с профилями событий
+  const sendEventRequest = (eventId: string, userId: string) => {
+    const existingRequest = eventRequests.find(
+      req => req.eventId === eventId && req.userId === userId && req.status === 'pending'
+    );
+    
+    if (!existingRequest) {
+      const newRequest: EventRequest = {
+        id: Date.now().toString(),
+        eventId,
+        userId,
+        status: 'pending',
+        createdAt: new Date()
+      };
+      setEventRequests(prev => [...prev, newRequest]);
+    }
+  };
+
+  const respondToEventRequest = (requestId: string, accepted: boolean) => {
+    setEventRequests(prev => 
+      prev.map(req => 
+        req.id === requestId 
+          ? { ...req, status: accepted ? 'accepted' : 'rejected' }
+          : req
+      )
+    );
+
+    if (accepted) {
+      const request = eventRequests.find(req => req.id === requestId);
+      if (request) {
+        // Добавляем участника в событие
+        const event = events.find(e => e.id === request.eventId);
+        if (event) {
+          updateEvent(request.eventId, {
+            participants: event.participants + 1
+          });
+          
+          // Создаем автоматический чат
+          const chatName = `${event.displayDate} - ${event.location}`;
+          addMessage({
+            fromUserId: 'system',
+            toUserId: request.userId,
+            text: `Добро пожаловать в чат "${chatName}"!`
+          });
+          
+          // Автоматически создаем профиль события после принятия первой заявки
+          // (в реальном приложении это может происходить по другим условиям)
+          setTimeout(() => {
+            createEventProfile(request.eventId);
+          }, 1000);
+        }
+      }
+    }
+  };
+
+  const getEventProfile = (eventId: string): EventProfile | null => {
+    return eventProfiles.find(profile => profile.eventId === eventId) || null;
+  };
+
+  const createEventProfile = (eventId: string) => {
+    const event = events.find(e => e.id === eventId);
+    if (!event) return;
+
+    const existingProfile = eventProfiles.find(p => p.eventId === eventId);
+    if (existingProfile) return;
+
+    const participants = [event.organizerId];
+    
+    // Добавляем текущего пользователя если он участвовал в событии
+    if (event.organizerId === 'own-profile-1') {
+      // Если текущий пользователь - организатор, он уже добавлен
+    } else {
+      // Проверяем, участвовал ли текущий пользователь в событии
+      // Для архивных событий добавляем его как участника
+      if (!participants.includes('own-profile-1')) {
+        participants.push('own-profile-1');
+      }
+    }
+    
+    // Добавляем принятых участников из заявок
+    const acceptedRequests = eventRequests.filter(req => 
+      req.eventId === eventId && req.status === 'accepted'
+    );
+    acceptedRequests.forEach(req => {
+      if (!participants.includes(req.userId)) {
+        participants.push(req.userId);
+      }
+    });
+
+    const newProfile: EventProfile = {
+      id: `profile-${eventId}`,
+      eventId,
+      name: event.title,
+      description: event.description,
+      date: event.date,
+      location: event.location,
+      participants,
+      organizerId: event.organizerId,
+      isCompleted: true,
+      posts: [],
+      createdAt: new Date()
+    };
+
+    setEventProfiles(prev => [...prev, newProfile]);
+  };
+
+  const addEventProfilePost = (eventId: string, post: Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>) => {
+    const newPost: EventProfilePost = {
+      ...post,
+      id: Date.now().toString(),
+      eventId,
+      createdAt: new Date()
+    };
+
+    setEventProfiles(prev => prev.map(profile => 
+      profile.eventId === eventId 
+        ? { ...profile, posts: [...profile.posts, newPost] }
+        : profile
+    ));
+  };
+
+  const updateEventProfile = (eventId: string, updates: Partial<EventProfile>) => {
+    setEventProfiles(prev => prev.map(profile => 
+      profile.eventId === eventId 
+        ? { ...profile, ...updates }
+        : profile
+    ));
+  };
+
+  const updateEventProfilePost = (eventId: string, postId: string, updates: Partial<EventProfilePost>) => {
+    setEventProfiles(prev => prev.map(profile => 
+      profile.eventId === eventId 
+        ? { 
+            ...profile, 
+            posts: profile.posts.map(post => 
+              post.id === postId 
+                ? { ...post, ...updates }
+                : post
+            )
+          }
+        : profile
+    ));
+  };
+
+  const getEventParticipants = (eventId: string): string[] => {
+    const profile = eventProfiles.find(p => p.eventId === eventId);
+    if (profile) {
+      return profile.participants;
+    }
+    
+    // Fallback к событию
+    const event = events.find(e => e.id === eventId);
+    return event ? [event.organizerId] : [];
+  };
+
+  const canEditEventProfile = (eventId: string, userId: string): boolean => {
+    const profile = eventProfiles.find(p => p.eventId === eventId);
+    if (!profile) return false;
+    
+    return profile.organizerId === userId || profile.participants.includes(userId);
+  };
+
+  return (
+    <EventsContext.Provider value={{ 
+      events, 
+      addEvent, 
+      updateEvent, 
+      deleteEvent, 
+      getUserData, 
+      getOrganizerStats,
+      friends,
+      friendRequests,
+      sendFriendRequest,
+      respondToFriendRequest,
+      getFriendsList,
+      isFriend,
+      getFriendsForEvents,
+      userFolders,
+      addUserToFolder,
+      createUserFolder,
+      getEventsByUserFolder,
+      messages,
+      addMessage,
+      getMessagesByUserFolder,
+      eventRequests,
+      eventProfiles,
+      sendEventRequest,
+      respondToEventRequest,
+      getEventProfile,
+      createEventProfile,
+      addEventProfilePost,
+      updateEventProfile,
+      updateEventProfilePost,
+      getEventParticipants,
+      canEditEventProfile
+    }}>
+      {children}
+    </EventsContext.Provider>
+  );
+};

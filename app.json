@@ -1,42 +1,76 @@
 {
   "expo": {
-    "name": "client",
-    "slug": "client",
+    "name": "event_app_new",
+    "slug": "event_app_new",
     "version": "1.0.0",
+    "sdkVersion": "54.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "client",
-    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "privacy": "public",
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
     },
     "web": {
-      "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "expo-font",
       "expo-router",
+      "expo-web-browser",
       [
-        "expo-splash-screen",
+        "expo-image-picker",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "photosPermission": "Приложение использует доступ к фотографиям для добавления изображений к событиям.",
+          "cameraPermission": "Приложение использует доступ к камере для добавления фотографий к событиям."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Приложение использует ваше местоположение для отображения событий на карте."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Приложение использует доступ к микрофону для записи аудио.",
+          "cameraPermission": "Приложение использует доступ к камере для записи видео."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Приложение использует ваше местоположение для отображения событий на карте."
         }
       ]
     ],
-    "experiments": {
-      "typedRoutes": true
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "YANDEX_MAPS_API_KEY": "e95f18c1-e796-4e6a-b2a9-0aafe5e420c4",
+      "YANDEX_GEOCODER_API_KEY": "d84ff24e-0878-41ab-a83b-517487e2903a",
+      "YANDEX_MAPKIT_API_KEY": "0b6f9cca-f83d-4b26-a837-7f0affdf242f"
     }
   }
 }
