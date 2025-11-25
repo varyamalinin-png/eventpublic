@@ -1,0 +1,429 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EventRole {
+  ORGANIZER
+  PARTICIPANT
+}
+
+enum MembershipStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum ChatType {
+  EVENT
+  PERSONAL
+  GROUP
+}
+
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum NotificationType {
+  FRIEND_REQUEST
+  EVENT_INVITE
+  MESSAGE
+  SYSTEM
+  EVENT_CANCELLED
+  EVENT_UPDATED
+  EVENT_PARTICIPANT_JOINED
+  EVENT_PARTICIPANT_LEFT
+  EVENT_POST_ADDED
+}
+
+enum ComplaintType {
+  EVENT
+  USER
+}
+
+enum ComplaintStatus {
+  PENDING
+  REVIEWED
+  RESOLVED
+  REJECTED
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  username      String    @unique
+  passwordHash  String?
+  emailVerified Boolean   @default(false)
+  googleId      String?   @unique
+  name          String?
+  bio           String?
+  age           String?
+  dateOfBirth   DateTime?
+  gender        String?
+  showAge       Boolean   @default(true)
+  geoPosition   String?
+  avatarUrl     String?
+  accountType   String?   @default("personal") // 'personal' | 'business'
+  settings      Json?
+  role          String    @default("USER") // USER, ADMIN, SUPPORT
+  isBlocked     Boolean   @default(false)
+  blockedAt     DateTime?
+  blockedById   String?
+  blockReason   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  organizedEvents Event[]              @relation("OrganizerEvents")
+  memberships     EventMembership[]
+  personalPhotos  EventPersonalPhoto[]
+
+  chatParticipants ChatParticipant[]
+  messages         Message[]         @relation("UserMessages")
+
+  friendshipsRequested Friendship[] @relation("FriendshipRequester")
+  friendshipsReceived  Friendship[] @relation("FriendshipAddressee")
+
+  folders                  Folder[]
+  userFolders              UserFolder[]              @relation("UserFolderOwner")
+  userFolderUsers          UserFolderUser[]          @relation("UserFolderUser")
+  eventProfilePosts        EventProfilePost[]        @relation("EventProfilePostAuthor")
+  eventProfileParticipants EventProfileParticipant[] @relation("EventProfileParticipant")
+  eventParticipations      UserEventParticipation[]  @relation("UserEventParticipation")
+  notifications            Notification[]
+  refreshTokens            RefreshToken[]
+  emailVerificationTokens  EmailVerificationToken[]
+  passwordResetTokens      PasswordResetToken[]
+  complaintsReported       Complaint[]               @relation("ComplaintReporter")
+  complaintsReceived       Complaint[]               @relation("ComplaintReported")
+}
+
+model Event {
+  id                   String     @id @default(uuid())
+  organizerId          String
+  title                String
+  description          String?
+  startTime            DateTime
+  endTime              DateTime?
+  location             String?
+  latitude             Float?
+  longitude            Float?
+  mediaUrl             String? // Обрезанное фото для карточки события
+  originalMediaUrl     String? // Оригинальное фото для профиля события
+  maxParticipants      Int
+  price                String?
+  // Поля для регулярных событий
+  isRecurring          Boolean    @default(false)
+  recurringType        String? // 'daily', 'weekly', 'monthly', 'custom'
+  recurringDays        Int[] // Для weekly: дни недели (0-6)
+  recurringDayOfMonth  Int? // Для monthly: день месяца (1-31)
+  recurringCustomDates DateTime[] // Для custom: выбранные даты
+  // Метки (теги)
+  autoTags             String[]   @default([]) // Системные метки: 'women_only', 'age_18_plus', 'starting_soon', 'recurring'
+  customTags           String[]   @default([]) // Пользовательские метки
+  // Дополнительные поля для фильтров и видимости
+  ageRestriction       Json? // { min: number, max: number }
+  genderRestriction    String[] // ['male', 'female', 'other']
+  visibility           Json? // { type: string, excludedUsers: string[] }
+  targeting            Json? // Для бизнес-аккаунтов: { enabled: boolean, reach?: number, responses?: number }
+  mediaType            String? // 'image' | 'video'
+  mediaAspectRatio     Float? // Соотношение сторон медиа
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  organizer      User                     @relation("OrganizerEvents", fields: [organizerId], references: [id])
+  memberships    EventMembership[]
+  personalPhotos EventPersonalPhoto[]
+  profile        EventProfile?
+  chat           Chat?                    @relation("EventChat")
+  messages       Message[]
+  complaints     Complaint[]
+  participations UserEventParticipation[]
+
+  @@index([isRecurring])
+  @@index([autoTags])
+  @@index([customTags])
+  @@index([recurringCustomDates])
+}
+
+model EventMembership {
+  id        String           @id @default(uuid())
+  userId    String
+  eventId   String
+  role      EventRole
+  status    MembershipStatus @default(PENDING)
+  invitedBy String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id])
+  event Event @relation(fields: [eventId], references: [id])
+
+  @@unique([userId, eventId])
+}
+
+model EventPersonalPhoto {
+  id        String   @id @default(uuid())
+  eventId   String
+  userId    String
+  photoUrl  String
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([eventId, userId])
+}
+
+model EventProfile {
+  id               String   @id @default(uuid())
+  eventId          String   @unique
+  name             String
+  description      String?
+  date             String
+  time             String
+  location         String?
+  avatar           String?
+  isCompleted      Boolean  @default(false)
+  hiddenParameters Json? // Скрытые параметры карточки события (для меморис)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  event        Event                     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  posts        EventProfilePost[]
+  participants EventProfileParticipant[]
+}
+
+model EventProfilePost {
+  id        String   @id @default(uuid())
+  eventId   String
+  profileId String
+  authorId  String
+  content   String?
+  photoUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile EventProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  author  User         @relation("EventProfilePostAuthor", fields: [authorId], references: [id])
+}
+
+model EventProfileParticipant {
+  id        String   @id @default(uuid())
+  profileId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  profile EventProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  user    User         @relation("EventProfileParticipant", fields: [userId], references: [id])
+
+  @@unique([profileId, userId])
+}
+
+model UserEventParticipation {
+  id                 String     @id @default(uuid())
+  userId             String
+  eventId            String
+  participationDates DateTime[] // Даты, когда пользователь участвовал/будет участвовать
+  status             String     @default("active") // 'active', 'cancelled', 'completed'
+  joinedAt           DateTime   @default(now())
+  cancelledAt        DateTime?
+
+  user  User  @relation("UserEventParticipation", fields: [userId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+  @@index([userId])
+  @@index([eventId])
+  // Убран индекс на participationDates, так как массив может быть слишком большим для ежедневных событий
+  @@index([status])
+}
+
+model UserFolder {
+  id        String   @id @default(uuid())
+  ownerId   String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner   User             @relation("UserFolderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  userIds UserFolderUser[]
+}
+
+model UserFolderUser {
+  folderId String
+  userId   String
+  addedAt  DateTime @default(now())
+
+  folder UserFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  user   User       @relation("UserFolderUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([folderId, userId])
+}
+
+model Chat {
+  id            String   @id @default(uuid())
+  type          ChatType
+  name          String?
+  eventId       String?  @unique
+  lastMessageId String?  @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  event        Event?            @relation("EventChat", fields: [eventId], references: [id])
+  participants ChatParticipant[]
+  messages     Message[]
+  lastMessage  Message?          @relation("ChatLastMessage", fields: [lastMessageId], references: [id])
+  folders      FolderChat[]
+}
+
+model ChatParticipant {
+  id       String   @id @default(uuid())
+  chatId   String
+  userId   String
+  joinedAt DateTime @default(now())
+
+  chat Chat @relation(fields: [chatId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([chatId, userId])
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  chatId    String
+  senderId  String
+  content   String?
+  eventId   String?
+  createdAt DateTime @default(now())
+
+  chat     Chat   @relation(fields: [chatId], references: [id])
+  sender   User   @relation("UserMessages", fields: [senderId], references: [id])
+  event    Event? @relation(fields: [eventId], references: [id])
+  chatLast Chat?  @relation("ChatLastMessage")
+}
+
+model Friendship {
+  id          String           @id @default(uuid())
+  requesterId String
+  addresseeId String
+  status      FriendshipStatus @default(PENDING)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  requester User @relation("FriendshipRequester", fields: [requesterId], references: [id])
+  addressee User @relation("FriendshipAddressee", fields: [addresseeId], references: [id])
+
+  @@unique([requesterId, addresseeId])
+}
+
+model Folder {
+  id        String   @id @default(uuid())
+  ownerId   String
+  name      String
+  createdAt DateTime @default(now())
+
+  owner User         @relation(fields: [ownerId], references: [id])
+  chats FolderChat[]
+}
+
+model FolderChat {
+  folderId String
+  chatId   String
+  addedAt  DateTime @default(now())
+
+  folder Folder @relation(fields: [folderId], references: [id])
+  chat   Chat   @relation(fields: [chatId], references: [id])
+
+  @@id([folderId, chatId])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  payload   Json
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Complaint {
+  id              String          @id @default(uuid())
+  type            ComplaintType
+  reason          String
+  description     String?
+  status          ComplaintStatus @default(PENDING)
+  reporterId      String
+  reportedEventId String?
+  reportedUserId  String?
+  adminResponse   String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  reviewedAt      DateTime?
+  reviewedById    String?
+
+  reporter      User   @relation("ComplaintReporter", fields: [reporterId], references: [id])
+  reportedUser  User?  @relation("ComplaintReported", fields: [reportedUserId], references: [id])
+  reportedEvent Event? @relation(fields: [reportedEventId], references: [id])
+
+  @@index([status])
+  @@index([type])
+  @@index([reporterId])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PersonalChatKey {
+  id        String   @id @default(uuid())
+  userAId   String
+  userBId   String
+  chatId    String   @unique
+  createdAt DateTime @default(now())
+
+  @@unique([userAId, userBId])
+  @@index([userAId, userBId])
+}
