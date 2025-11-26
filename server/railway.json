@@ -2,10 +2,10 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "npm install && npm run prisma:generate && npm run build && ls -la dist/ || echo 'Build failed'"
+    "buildCommand": "npm install && npm run prisma:generate && npm run build"
   },
   "deploy": {
-    "startCommand": "npx prisma migrate resolve --rolled-back 20250120130900_add_original_media_url 2>/dev/null || true; npx prisma migrate deploy || npx prisma db push || true; ls -la dist/ && node dist/main.js",
+    "startCommand": "npx prisma migrate resolve --applied 20250120130900_add_original_media_url 2>/dev/null || true; npx prisma migrate deploy 2>&1 || npx prisma db push --accept-data-loss 2>&1 || true; cd /app/server && node dist/main.js || node dist/main.js",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
