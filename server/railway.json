@@ -5,7 +5,7 @@
     "buildCommand": "npm install && npm run prisma:generate && npm run build"
   },
   "deploy": {
-    "startCommand": "npx prisma migrate resolve --applied 20250120130900_add_original_media_url 2>/dev/null || true; npx prisma migrate deploy 2>&1 || npx prisma db push --accept-data-loss 2>&1 || true; ls -la dist/ && find dist/ -name '*.js' -type f | head -10 && node dist/main.js",
+    "startCommand": "npx prisma migrate resolve --applied 20250120130900_add_original_media_url 2>/dev/null || true; npx prisma migrate deploy 2>&1 || npx prisma db push --accept-data-loss 2>&1 || true; node dist/src/main.js",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
