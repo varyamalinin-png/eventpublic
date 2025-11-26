@@ -5,7 +5,7 @@
     "buildCommand": "npm install && npm run prisma:generate && npm run build && ls -la dist/ || echo 'Build failed'"
   },
   "deploy": {
-    "startCommand": "npx prisma migrate resolve --rolled-back 20250120130900_add_original_media_url 2>/dev/null || npx prisma migrate resolve --applied 20250120130900_add_original_media_url 2>/dev/null || true; npm run prisma:deploy || true; npm run start:prod",
+    "startCommand": "npx prisma migrate resolve --rolled-back 20250120130900_add_original_media_url 2>/dev/null || true; npx prisma migrate deploy || npx prisma db push || true; ls -la dist/ && node dist/main.js",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
