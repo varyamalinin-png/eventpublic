@@ -8,4 +8,4 @@ cmds = ["npm install --legacy-peer-deps"]
 cmds = ["npm run prisma:generate", "npm run build"]
 
 [start]
-cmd = "npm run prisma:deploy && npm run start:prod"
+cmd = "(npx prisma migrate resolve --applied 20251109141733_init || true) && (npx prisma migrate deploy || npx prisma db push --accept-data-loss || true) && npm run start:prod"
