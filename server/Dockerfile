@@ -18,5 +18,5 @@ RUN npm run prisma:generate
 # Собираем проект
 RUN npm run build
 
-# Запускаем
-CMD ["sh", "-c", "(npx prisma migrate resolve --applied 20251109141733_init || true) && (npx prisma migrate deploy || npx prisma db push --accept-data-loss || true) && npm run start:prod"]
+# Запускаем сервер
+CMD ["sh", "-c", "(npx prisma migrate resolve --applied 20251109141733_init || true) && (npx prisma migrate deploy || npx prisma db push --accept-data-loss || true) && node dist/src/main.js"]
