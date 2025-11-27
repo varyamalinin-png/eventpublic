@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as sgMail from '@sendgrid/mail';
 import * as nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 @Injectable()
 export class MailerService {
@@ -11,8 +12,10 @@ export class MailerService {
   private readonly verificationRedirectUrl: string;
   private readonly resetRedirectUrl: string;
   private readonly sendgridEnabled: boolean;
+  private readonly resendEnabled: boolean;
   private readonly smtpEnabled: boolean;
   private readonly transporter?: nodemailer.Transporter;
+  private readonly resend?: Resend;
 
   constructor(private readonly configService: ConfigService) {
     this.fromEmail =
@@ -36,6 +39,16 @@ export class MailerService {
       this.logger.log('SendGrid email service enabled');
     } else {
       this.sendgridEnabled = false;
+    }
+
+    // Проверяем Resend
+    const resendApiKey = this.configService.get<string>('email.resendApiKey');
+    if (resendApiKey) {
+      this.resend = new Resend(resendApiKey);
+      this.resendEnabled = true;
+      this.logger.log('Resend email service enabled');
+    } else {
+      this.resendEnabled = false;
     }
 
     // Проверяем SMTP
@@ -76,14 +89,14 @@ export class MailerService {
       });
     } else {
       this.smtpEnabled = false;
-      if (!this.sendgridEnabled) {
-        this.logger.warn('⚠️ Neither SendGrid nor SMTP is configured. Emails will not be sent.');
+      if (!this.sendgridEnabled && !this.resendEnabled) {
+        this.logger.warn('⚠️ Neither SendGrid, Resend nor SMTP is configured. Emails will not be sent.');
       }
     }
   }
 
   isEnabled() {
-    return this.sendgridEnabled || this.smtpEnabled;
+    return this.sendgridEnabled || this.resendEnabled || this.smtpEnabled;
   }
 
   async sendVerificationEmail(email: string, token: string) {
@@ -119,7 +132,16 @@ export class MailerService {
     try {
       this.logger.log(`📧 Sending verification email to ${email}...`);
       
-      if (this.sendgridEnabled) {
+      if (this.resendEnabled && this.resend) {
+        this.logger.log(`Using Resend to send email to ${email}`);
+        const result = await this.resend.emails.send({
+          from: this.fromEmail,
+          to: email,
+          subject: 'Подтвердите ваш e-mail',
+          html: htmlContent,
+        });
+        this.logger.log(`✅ Verification email sent via Resend to ${email}. ID: ${result.data?.id}`);
+      } else if (this.sendgridEnabled) {
         this.logger.log(`Using SendGrid to send email to ${email}`);
         await sgMail.send({
           to: email,
