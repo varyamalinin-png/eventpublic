@@ -2,7 +2,7 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "cd server && npm run prisma:deploy && npm run start:prod"
+startCommand = "cd server && (npx prisma migrate resolve --applied 20251109141733_init || true) && (npx prisma migrate deploy || npx prisma db push --accept-data-loss || true) && npm run start:prod"
 
 [build.install]
 command = "cd server && npm install --legacy-peer-deps"
