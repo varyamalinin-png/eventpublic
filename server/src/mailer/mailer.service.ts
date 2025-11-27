@@ -208,7 +208,16 @@ export class MailerService {
     try {
       this.logger.log(`📧 Sending password reset email to ${email}...`);
       
-      if (this.sendgridEnabled) {
+      if (this.resendEnabled && this.resend) {
+        this.logger.log(`Using Resend to send password reset email to ${email}`);
+        const result = await this.resend.emails.send({
+          from: this.fromEmail,
+          to: email,
+          subject: 'Сброс пароля',
+          html: htmlContent,
+        });
+        this.logger.log(`✅ Password reset email sent via Resend to ${email}. ID: ${result.data?.id}`);
+      } else if (this.sendgridEnabled) {
         await sgMail.send({
           to: email,
           from: this.fromEmail,
