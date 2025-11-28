@@ -139,13 +139,22 @@ export class AuthService {
           console.error(`[AuthService] Error stack:`, error?.stack);
           console.error(`[AuthService] Full error:`, JSON.stringify(error, null, 2));
           this.logger.error(`❌ Failed to send verification email automatically: ${error?.message || error}`);
-          // НЕ прерываем процесс - пользователь все равно получит сообщение об ошибке
+          
+          // Если не удалось отправить письмо, разрешаем вход (для разработки)
+          console.log(`[AuthService] ⚠️ Allowing login despite email not verified (mailer failed to send email)`);
+          this.logger.warn(`⚠️ Allowing login despite email not verified (mailer failed to send email)`);
+          return user; // Разрешаем вход
         }
       } else {
         console.error(`[AuthService] ❌ Mailer is not enabled, cannot send verification email automatically`);
         this.logger.error(`❌ Mailer is not enabled, cannot send verification email automatically`);
+        // Если Mailer не настроен, разрешаем вход без верификации
+        console.log(`[AuthService] ⚠️ Allowing login despite email not verified (mailer not configured)`);
+        this.logger.warn(`⚠️ Allowing login despite email not verified (mailer not configured)`);
+        return user; // Разрешаем вход
       }
       
+      // Если письмо успешно отправлено, блокируем вход
       throw new UnauthorizedException('Email address is not verified. A verification email has been sent to your inbox. Please check your email and verify your address before logging in.');
     }
 

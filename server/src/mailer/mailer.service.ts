@@ -61,10 +61,13 @@ export class MailerService {
     this.logger.log(`SMTP config: host=${smtpHost}, port=${smtpPort}, user=${smtpUser ? '***' : 'not set'}, password=${smtpPassword ? '***' : 'not set'}, secure=${smtpSecure}`);
     
     if (smtpHost && smtpPort && smtpUser && smtpPassword) {
+      // Для порта 587 используем STARTTLS (secure: false, но требуетUpgrade)
+      const useSecure = smtpPort === 465; // Только для порта 465
+      
       this.transporter = nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
-        secure: smtpSecure, // true для 465, false для других портов
+        secure: useSecure, // true для 465, false для 587 (STARTTLS)
         auth: {
           user: smtpUser,
           pass: smtpPassword,
@@ -72,7 +75,10 @@ export class MailerService {
         // Добавляем TLS опции для Gmail
         tls: {
           rejectUnauthorized: false,
+          ciphers: 'SSLv3',
         },
+        // Для порта 587 требуется requireTLS
+        requireTLS: smtpPort === 587,
       });
       this.smtpEnabled = true;
       this.logger.log(`✅ SMTP email service enabled (${smtpHost}:${smtpPort})`);
