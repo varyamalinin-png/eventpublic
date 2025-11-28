@@ -1,0 +1,6 @@
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "(npx prisma migrate resolve --applied 20251109141733_init || true) && (npx prisma migrate deploy || npx prisma db push --accept-data-loss || true) && npm run start:prod"
+
