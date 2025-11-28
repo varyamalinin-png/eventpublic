@@ -16,7 +16,7 @@ export default () => ({
   email: {
     sendgridApiKey: process.env.SENDGRID_API_KEY,
     resendApiKey: process.env.RESEND_API_KEY,
-    fromEmail: process.env.SENDGRID_FROM_EMAIL || process.env.SMTP_USER,
+    fromEmail: process.env.RESEND_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || process.env.SMTP_USER,
     // SMTP настройки
     smtpHost: process.env.SMTP_HOST,
     smtpPort: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : undefined,
