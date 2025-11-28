@@ -157,6 +157,32 @@ export class MailerService {
         } catch (resendError: any) {
           this.logger.error(`❌ Failed to send email via Resend to ${email}:`, resendError?.message || resendError);
           this.logger.error(`Resend error details:`, JSON.stringify(resendError, null, 2));
+          
+          // Если Resend вернул ошибку 403 (нельзя отправлять на этот email), пробуем SMTP как fallback
+          const errorMessage = resendError?.message || JSON.stringify(resendError);
+          if (errorMessage.includes('403') || errorMessage.includes('testing emails') || errorMessage.includes('verify a domain')) {
+            this.logger.warn(`⚠️ Resend returned 403/domain error, falling back to SMTP...`);
+            
+            if (this.smtpEnabled && this.transporter) {
+              try {
+                this.logger.log(`Trying SMTP fallback for ${email}`);
+                const info = await this.transporter.sendMail({
+                  from: this.configService.get<string>('email.smtpUser') || this.fromEmail,
+                  to: email,
+                  subject: 'Подтвердите ваш e-mail',
+                  html: htmlContent,
+                  text: `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`,
+                });
+                
+                this.logger.log(`✅ Verification email sent via SMTP (fallback) to ${email}. MessageId: ${info.messageId}`);
+                return; // Успешно отправили через SMTP
+              } catch (smtpError: any) {
+                this.logger.error(`❌ SMTP fallback also failed:`, smtpError?.message || smtpError);
+                // Пробрасываем ошибку дальше
+              }
+            }
+          }
+          
           throw resendError;
         }
       } else if (this.sendgridEnabled) {
