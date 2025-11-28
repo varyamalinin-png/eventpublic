@@ -134,13 +134,31 @@ export class MailerService {
       
       if (this.resendEnabled && this.resend) {
         this.logger.log(`Using Resend to send email to ${email}`);
-        const result = await this.resend.emails.send({
-          from: this.fromEmail,
-          to: email,
-          subject: 'Подтвердите ваш e-mail',
-          html: htmlContent,
-        });
-        this.logger.log(`✅ Verification email sent via Resend to ${email}. ID: ${result.data?.id}`);
+        try {
+          const result = await this.resend.emails.send({
+            from: this.fromEmail,
+            to: email,
+            subject: 'Подтвердите ваш e-mail',
+            html: htmlContent,
+            text: `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`,
+          });
+          
+          if (result.error) {
+            this.logger.error(`❌ Resend error: ${JSON.stringify(result.error)}`);
+            throw new Error(`Resend API error: ${JSON.stringify(result.error)}`);
+          }
+          
+          if (!result.data || !result.data.id) {
+            this.logger.error(`❌ Resend returned no data or ID. Full response: ${JSON.stringify(result)}`);
+            throw new Error(`Resend returned no email ID: ${JSON.stringify(result)}`);
+          }
+          
+          this.logger.log(`✅ Verification email sent via Resend to ${email}. ID: ${result.data.id}`);
+        } catch (resendError: any) {
+          this.logger.error(`❌ Failed to send email via Resend to ${email}:`, resendError?.message || resendError);
+          this.logger.error(`Resend error details:`, JSON.stringify(resendError, null, 2));
+          throw resendError;
+        }
       } else if (this.sendgridEnabled) {
         this.logger.log(`Using SendGrid to send email to ${email}`);
         await sgMail.send({
