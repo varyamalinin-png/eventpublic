@@ -122,11 +122,17 @@ export class AuthService {
     console.log(`[AuthService] 🔍 Checking email verification: emailVerified = ${user.emailVerified}`);
     
     // СТРОГАЯ ПРОВЕРКА: emailVerified должен быть точно true
-    const isEmailVerified = user.emailVerified === true || user.emailVerified === 'true';
-    console.log(`[AuthService] 🔍 isEmailVerified (strict check): ${isEmailVerified}`);
+    // Проверяем разные варианты (boolean true, строка 'true', и т.д.)
+    const isEmailVerified = user.emailVerified === true || 
+                            user.emailVerified === 'true' || 
+                            String(user.emailVerified).toLowerCase() === 'true';
     
+    console.log(`[AuthService] 🔍 isEmailVerified (strict check): ${isEmailVerified}`);
+    console.log(`[AuthService] 🔍 user.emailVerified type: ${typeof user.emailVerified}, value: ${JSON.stringify(user.emailVerified)}`);
+    
+    // Если email НЕ верифицирован - отправляем письмо и блокируем вход
     if (!isEmailVerified) {
-      console.log(`[AuthService] ⚠️ Email NOT verified (emailVerified=${user.emailVerified}) - entering verification flow`);
+      console.log(`[AuthService] ⚠️ Email NOT verified (emailVerified=${user.emailVerified}, isEmailVerified=${isEmailVerified}) - entering verification flow`);
       console.log(`[AuthService] Email not verified for user: ${user.id}, email: ${email}, sending verification token automatically`);
       
       // Автоматически отправляем токен верификации
