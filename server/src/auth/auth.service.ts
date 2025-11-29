@@ -117,52 +117,20 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // КРИТИЧЕСКИ ВАЖНО: Проверяем подтверждение email перед входом
-    // Если email не подтвержден, автоматически отправляем токен верификации
-    console.log(`[AuthService] 🔍 Checking email verification: emailVerified = ${user.emailVerified}`);
-    
-    // СТРОГАЯ ПРОВЕРКА: emailVerified должен быть точно true
-    // Проверяем разные варианты (boolean true, строка 'true', и т.д.)
-    const isEmailVerified = user.emailVerified === true || 
-                            user.emailVerified === 'true' || 
-                            String(user.emailVerified).toLowerCase() === 'true';
-    
-    console.log(`[AuthService] 🔍 isEmailVerified (strict check): ${isEmailVerified}`);
-    console.log(`[AuthService] 🔍 user.emailVerified type: ${typeof user.emailVerified}, value: ${JSON.stringify(user.emailVerified)}`);
-    
-    // Если email НЕ верифицирован - отправляем письмо и блокируем вход
-    if (!isEmailVerified) {
-      console.log(`[AuthService] ⚠️ Email NOT verified (emailVerified=${user.emailVerified}, isEmailVerified=${isEmailVerified}) - entering verification flow`);
-      console.log(`[AuthService] Email not verified for user: ${user.id}, email: ${email}, sending verification token automatically`);
+    // КЛАССИЧЕСКАЯ СХЕМА: Проверяем подтверждение email перед входом
+    if (!user.emailVerified) {
+      this.logger.log(`Email not verified for user: ${user.id}, sending verification email`);
       
-      // Автоматически отправляем токен верификации
-      const mailerEnabled = this.mailer.isEnabled();
-      console.log(`[AuthService] Mailer enabled check: ${mailerEnabled}`);
-      
-      // Отправляем письмо асинхронно (не блокируем вход)
-      if (mailerEnabled) {
-        // НЕ ждем отправки письма - отправляем в фоне, чтобы не блокировать вход
-        this.createEmailVerificationToken(user.id)
-          .then(token => {
-            console.log(`[AuthService] ✅ Token created for user ${user.id}, sending email in background...`);
-            // Отправляем письмо асинхронно, не ждем результата
-            this.mailer.sendVerificationEmail(user.email, token)
-              .then(() => {
-                console.log(`[AuthService] ✅ Verification email sent to ${user.email}`);
-                this.logger.log(`✅ Verification email sent to ${user.email}`);
-              })
-              .catch((error: any) => {
-                console.error(`[AuthService] ❌ Failed to send verification email:`, error?.message || error);
-                this.logger.error(`❌ Failed to send verification email: ${error?.message || error}`);
-              });
-          })
-          .catch((error: any) => {
-            console.error(`[AuthService] ❌ Failed to create verification token:`, error?.message || error);
-            this.logger.error(`❌ Failed to create verification token: ${error?.message || error}`);
-          });
+      // Создаем токен и отправляем письмо СИНХРОННО
+      try {
+        const token = await this.createEmailVerificationToken(user.id);
+        await this.mailer.sendVerificationEmail(user.email, token);
+        this.logger.log(`✅ Verification email sent to ${user.email}`);
+      } catch (error: any) {
+        this.logger.error(`Failed to send verification email: ${error?.message || error}`);
+        // Даже если письмо не отправилось, блокируем вход
       }
       
-      // Всегда блокируем вход, если email не верифицирован (но письмо отправляется в фоне)
       throw new UnauthorizedException('Email address is not verified. A verification email has been sent to your inbox. Please check your email and verify your address before logging in.');
     }
 
