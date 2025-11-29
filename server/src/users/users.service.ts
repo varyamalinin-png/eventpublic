@@ -412,7 +412,6 @@ export class UsersService {
     const newPasswordHash = await argon2.hash(dto.newPassword);
     return this.updatePassword(userId, newPasswordHash);
   }
-}
 
   async deleteAllUsers() {
     const count = await this.prisma.user.count();
