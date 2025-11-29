@@ -99,6 +99,10 @@ export class AuthService {
     }
     
     console.log(`[AuthService] User found: id=${user.id}, emailVerified=${user.emailVerified}, hasPasswordHash=${!!user.passwordHash}`);
+    console.log(`[AuthService] 🔍 DEBUG: emailVerified type: ${typeof user.emailVerified}, value: ${JSON.stringify(user.emailVerified)}`);
+    console.log(`[AuthService] 🔍 DEBUG: emailVerified === true: ${user.emailVerified === true}`);
+    console.log(`[AuthService] 🔍 DEBUG: emailVerified === false: ${user.emailVerified === false}`);
+    console.log(`[AuthService] 🔍 DEBUG: !user.emailVerified: ${!user.emailVerified}`);
     
     if (!user.passwordHash) {
       console.log(`[AuthService] User has no password hash for email: ${email}`);
@@ -115,7 +119,9 @@ export class AuthService {
 
     // КРИТИЧЕСКИ ВАЖНО: Проверяем подтверждение email перед входом
     // Если email не подтвержден, автоматически отправляем токен верификации
+    console.log(`[AuthService] 🔍 Checking email verification: emailVerified = ${user.emailVerified}`);
     if (!user.emailVerified) {
+      console.log(`[AuthService] ⚠️ Email NOT verified - entering verification flow`);
       console.log(`[AuthService] Email not verified for user: ${user.id}, email: ${email}, sending verification token automatically`);
       
       // Автоматически отправляем токен верификации
