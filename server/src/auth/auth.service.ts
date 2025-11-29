@@ -122,39 +122,30 @@ export class AuthService {
       const mailerEnabled = this.mailer.isEnabled();
       console.log(`[AuthService] Mailer enabled check: ${mailerEnabled}`);
       
+      // Отправляем письмо асинхронно (не блокируем вход)
       if (mailerEnabled) {
-        try {
-          console.log(`[AuthService] Creating verification token for user ${user.id}...`);
-          const token = await this.createEmailVerificationToken(user.id);
-          console.log(`[AuthService] ✅ Token created successfully, length: ${token.length}, first 20 chars: ${token.substring(0, 20)}...`);
-          console.log(`[AuthService] Calling mailer.sendVerificationEmail(${user.email}, token)...`);
-          
-          await this.mailer.sendVerificationEmail(user.email, token);
-          
-          console.log(`[AuthService] ✅ Verification email sent automatically to ${user.email}`);
-          this.logger.log(`✅ Verification email sent automatically to ${user.email} during login attempt`);
-        } catch (error: any) {
-          console.error(`[AuthService] ❌ Failed to send verification email automatically:`, error?.message || error);
-          console.error(`[AuthService] Error code: ${error?.code}`);
-          console.error(`[AuthService] Error stack:`, error?.stack);
-          console.error(`[AuthService] Full error:`, JSON.stringify(error, null, 2));
-          this.logger.error(`❌ Failed to send verification email automatically: ${error?.message || error}`);
-          
-          // Если не удалось отправить письмо, разрешаем вход (для разработки)
-          console.log(`[AuthService] ⚠️ Allowing login despite email not verified (mailer failed to send email)`);
-          this.logger.warn(`⚠️ Allowing login despite email not verified (mailer failed to send email)`);
-          return user; // Разрешаем вход
-        }
-      } else {
-        console.error(`[AuthService] ❌ Mailer is not enabled, cannot send verification email automatically`);
-        this.logger.error(`❌ Mailer is not enabled, cannot send verification email automatically`);
-        // Если Mailer не настроен, разрешаем вход без верификации
-        console.log(`[AuthService] ⚠️ Allowing login despite email not verified (mailer not configured)`);
-        this.logger.warn(`⚠️ Allowing login despite email not verified (mailer not configured)`);
-        return user; // Разрешаем вход
+        // НЕ ждем отправки письма - отправляем в фоне, чтобы не блокировать вход
+        this.createEmailVerificationToken(user.id)
+          .then(token => {
+            console.log(`[AuthService] ✅ Token created for user ${user.id}, sending email in background...`);
+            // Отправляем письмо асинхронно, не ждем результата
+            this.mailer.sendVerificationEmail(user.email, token)
+              .then(() => {
+                console.log(`[AuthService] ✅ Verification email sent to ${user.email}`);
+                this.logger.log(`✅ Verification email sent to ${user.email}`);
+              })
+              .catch((error: any) => {
+                console.error(`[AuthService] ❌ Failed to send verification email:`, error?.message || error);
+                this.logger.error(`❌ Failed to send verification email: ${error?.message || error}`);
+              });
+          })
+          .catch((error: any) => {
+            console.error(`[AuthService] ❌ Failed to create verification token:`, error?.message || error);
+            this.logger.error(`❌ Failed to create verification token: ${error?.message || error}`);
+          });
       }
       
-      // Если письмо успешно отправлено, блокируем вход
+      // Всегда блокируем вход, если email не верифицирован (но письмо отправляется в фоне)
       throw new UnauthorizedException('Email address is not verified. A verification email has been sent to your inbox. Please check your email and verify your address before logging in.');
     }
 
