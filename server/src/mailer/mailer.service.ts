@@ -72,13 +72,16 @@ export class MailerService {
           user: smtpUser,
           pass: smtpPassword,
         },
-        // Добавляем TLS опции для Gmail
+        // Добавляем TLS опции
         tls: {
           rejectUnauthorized: false,
-          ciphers: 'SSLv3',
         },
         // Для порта 587 требуется requireTLS
         requireTLS: smtpPort === 587,
+        // Увеличиваем таймауты для Railway
+        connectionTimeout: 10000, // 10 секунд на подключение
+        greetingTimeout: 10000, // 10 секунд на приветствие
+        socketTimeout: 30000, // 30 секунд на операцию
       });
       this.smtpEnabled = true;
       this.logger.log(`✅ SMTP email service enabled (${smtpHost}:${smtpPort})`);
