@@ -196,4 +196,26 @@ export class AuthController {
       throw new BadRequestException(`Failed to send test email: ${error?.message || 'Unknown error'}`);
     }
   }
+
+  @Post('temp-verify-user')
+  async tempVerifyUser(@Body() body?: { email?: string; id?: string }) {
+    // ВРЕМЕННЫЙ endpoint для верификации пользователя
+    try {
+      const email = body?.email || 'varya.malinina.2003@mail.ru';
+      const id = body?.id || 'bb2948d1-32b9-4a6f-a033-fc2a92dcbc69';
+
+      this.logger.log(`[TempVerify] Verifying user: email=${email}, id=${id}`);
+
+      const result = await this.usersService.verifyUserByEmailOrId(email, id);
+
+      return {
+        success: true,
+        message: 'User verified successfully',
+        ...result,
+      };
+    } catch (error: any) {
+      this.logger.error(`[TempVerify] Error: ${error.message}`);
+      throw error;
+    }
+  }
 }
