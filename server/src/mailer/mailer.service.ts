@@ -13,7 +13,7 @@ export class MailerService {
   private readonly resetRedirectUrl: string;
   private readonly sendgridEnabled: boolean;
   private readonly resendEnabled: boolean;
-  private readonly smtpEnabled: boolean;
+  private smtpEnabled: boolean = false;
   private readonly transporter?: nodemailer.Transporter;
   private readonly resend?: Resend;
 
@@ -171,7 +171,10 @@ export class MailerService {
             
             if (this.smtpEnabled && this.transporter) {
               try {
-                this.logger.log(`Trying SMTP fallback for ${email}`);
+                this.logger.log(`[SMTP Fallback] Trying SMTP fallback for ${email}`);
+                this.logger.log(`[SMTP Fallback] SMTP enabled: ${this.smtpEnabled}, transporter exists: ${!!this.transporter}`);
+                this.logger.log(`[SMTP Fallback] From: ${this.configService.get<string>('email.smtpUser') || this.fromEmail}, To: ${email}`);
+                
                 const info = await this.transporter.sendMail({
                   from: this.configService.get<string>('email.smtpUser') || this.fromEmail,
                   to: email,
@@ -180,12 +183,16 @@ export class MailerService {
                   text: `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`,
                 });
                 
-                this.logger.log(`✅ Verification email sent via SMTP (fallback) to ${email}. MessageId: ${info.messageId}`);
+                this.logger.log(`✅ Verification email sent via SMTP (fallback) to ${email}. MessageId: ${info.messageId}, Response: ${info.response}`);
                 return; // Успешно отправили через SMTP
               } catch (smtpError: any) {
                 this.logger.error(`❌ SMTP fallback also failed:`, smtpError?.message || smtpError);
+                this.logger.error(`❌ SMTP error details:`, JSON.stringify(smtpError, null, 2));
                 // Пробрасываем ошибку дальше
+                throw smtpError;
               }
+            } else {
+              this.logger.error(`❌ SMTP fallback not available: smtpEnabled=${this.smtpEnabled}, transporter=${!!this.transporter}`);
             }
           }
           
