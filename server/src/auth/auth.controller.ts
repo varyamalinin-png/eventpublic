@@ -218,4 +218,21 @@ export class AuthController {
       throw error;
     }
   }
+
+  @Post('temp-delete-all-users')
+  async tempDeleteAllUsers() {
+    // ВРЕМЕННЫЙ endpoint для удаления всех пользователей
+    try {
+      this.logger.log(`[TempDelete] Deleting all users...`);
+      const result = await this.usersService.deleteAllUsers();
+      return {
+        success: true,
+        message: 'All users deleted successfully',
+        deleted: result.count,
+      };
+    } catch (error: any) {
+      this.logger.error(`[TempDelete] Error: ${error.message}`);
+      throw error;
+    }
+  }
 }
