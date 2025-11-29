@@ -173,6 +173,35 @@ export class UsersService {
     });
   }
 
+  async verifyUserByEmailOrId(email: string, id: string) {
+    const result = await this.prisma.user.updateMany({
+      where: {
+        OR: [{ email }, { id }],
+        emailVerified: false,
+      },
+      data: {
+        emailVerified: true,
+      },
+    });
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        OR: [{ email }, { id }],
+      },
+      select: {
+        id: true,
+        email: true,
+        emailVerified: true,
+        username: true,
+      },
+    });
+
+    return {
+      updated: result.count,
+      users,
+    };
+  }
+
   async updateAvatarFromUpload(userId: string, file: Express.Multer.File) {
     if (!file) {
       throw new BadRequestException('Файл обязателен');
