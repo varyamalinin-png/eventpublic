@@ -413,3 +413,13 @@ export class UsersService {
     return this.updatePassword(userId, newPasswordHash);
   }
 }
+
+  async deleteAllUsers() {
+    const count = await this.prisma.user.count();
+    const result = await this.prisma.user.deleteMany({});
+    return {
+      count: result.count,
+      totalBefore: count,
+    };
+  }
+}
