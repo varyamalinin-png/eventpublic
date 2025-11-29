@@ -54,9 +54,8 @@ async function verifyUserOnStartup() {
   }
 }
 
-// Выполняем только если это запуск на Railway (не локально)
-if (process.env.RAILWAY_ENVIRONMENT || process.env.DATABASE_URL?.includes('railway')) {
-  verifyUserOnStartup().catch(() => {
-    // Игнорируем ошибки - не критично для запуска сервера
-  });
-}
+// Всегда выполняем при запуске (скрипт вызывается из start:railway)
+verifyUserOnStartup().catch((error) => {
+  // Игнорируем ошибки - не критично для запуска сервера
+  console.error('[VerifyUser] Error (ignored):', error.message);
+});
