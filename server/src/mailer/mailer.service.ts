@@ -86,16 +86,9 @@ export class MailerService {
       this.smtpEnabled = true;
       this.logger.log(`✅ SMTP email service enabled (${smtpHost}:${smtpPort})`);
       
-      // Проверяем соединение при старте (неблокирующе, в фоне)
-      // Не ждем результата, чтобы не блокировать запуск приложения
-      // Railway может блокировать исходящие соединения для verify, но отправка писем может работать
-      this.transporter.verify((error, success) => {
-        if (error) {
-          this.logger.warn(`⚠️ SMTP connection verification failed (this is OK, emails may still work): ${error.message}`);
-        } else {
-          this.logger.log(`✅ SMTP connection verified successfully`);
-        }
-      });
+      // НЕ проверяем соединение при старте - Railway блокирует исходящие соединения
+      // Проверка будет происходить только при реальной отправке писем
+      this.logger.log(`SMTP transporter created (verification skipped on startup)`);
     } else {
       this.smtpEnabled = false;
       if (!this.sendgridEnabled && !this.resendEnabled) {

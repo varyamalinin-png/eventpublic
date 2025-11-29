@@ -7,7 +7,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/src/main.js",
-        "start:railway": "sh -c '(npx prisma migrate resolve --applied 20251109141733_init || true) && (npx prisma migrate resolve --applied 20251110_auth_oauth_email || true) && (npx prisma migrate deploy || npx prisma db push --accept-data-loss || true) && (node scripts/delete-users-now.js || echo \"Delete users skipped\") && npm run start:prod'",
+        "start:railway": "sh -c 'npx prisma migrate deploy 2>&1 | grep -v \"already recorded as applied\" || npx prisma db push --accept-data-loss || true; node scripts/delete-users-now.js 2>&1 | grep -v \"already\" || echo \"Delete users skipped\"; npm run start:prod'",
     "build": "nest build",
     "lint": "eslint './src/**/*.ts'",
     "format": "prettier --write './src/**/*.ts'",
