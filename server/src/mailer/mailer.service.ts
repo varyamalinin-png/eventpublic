@@ -102,7 +102,8 @@ export class MailerService {
   }
 
   isEnabled() {
-    return this.sendgridEnabled || this.resendEnabled || this.smtpEnabled;
+    // ОТКЛЮЧАЕМ RESEND - ТОЛЬКО SMTP И SENDGRID
+    return this.sendgridEnabled || this.smtpEnabled; // || this.resendEnabled;
   }
 
   async sendVerificationEmail(email: string, token: string) {
@@ -138,65 +139,47 @@ export class MailerService {
     try {
       this.logger.log(`📧 Sending verification email to ${email}...`);
       
-      if (this.resendEnabled && this.resend) {
-        this.logger.log(`Using Resend to send email to ${email}`);
+      // ИСПОЛЬЗУЕМ ТОЛЬКО SMTP - Resend не работает без верификации домена
+      if (this.smtpEnabled && this.transporter) {
+        const smtpHost = this.configService.get<string>('email.smtpHost');
+        const smtpPort = this.configService.get<number>('email.smtpPort');
+        const smtpFrom = this.configService.get<string>('email.smtpUser') || this.fromEmail;
+        
+        this.logger.log(`[SMTP] Using SMTP (${smtpHost}:${smtpPort}) to send email to ${email}`);
+        this.logger.log(`[SMTP] From: ${smtpFrom}, To: ${email}`);
+        this.logger.log(`[SMTP] Starting email send...`);
+        
         try {
-          const result = await this.resend.emails.send({
-            from: this.fromEmail,
+          // Создаем промис для отправки с таймаутом
+          const sendMailPromise = this.transporter.sendMail({
+            from: smtpFrom,
             to: email,
             subject: 'Подтвердите ваш e-mail',
             html: htmlContent,
             text: `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`,
           });
           
-          if (result.error) {
-            this.logger.error(`❌ Resend error: ${JSON.stringify(result.error)}`);
-            throw new Error(`Resend API error: ${JSON.stringify(result.error)}`);
+          // Таймаут 30 секунд для SMTP отправки
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('SMTP send timeout after 30 seconds')), 30000);
+          });
+          
+          this.logger.log(`[SMTP] Waiting for email send (timeout: 30s)...`);
+          const info = await Promise.race([sendMailPromise, timeoutPromise]);
+          
+          this.logger.log(`✅ Verification email sent via SMTP to ${email}`);
+          this.logger.log(`[SMTP] MessageId: ${info?.messageId || 'N/A'}, Response: ${info?.response || 'N/A'}`);
+          this.logger.log(`[SMTP] Email successfully queued/sent`);
+          return; // Успешно отправили
+        } catch (sendError: any) {
+          this.logger.error(`❌ SMTP sendMail error:`, sendError?.message || sendError);
+          this.logger.error(`❌ SMTP error code: ${sendError?.code || 'N/A'}`);
+          this.logger.error(`❌ SMTP error command: ${sendError?.command || 'N/A'}`);
+          this.logger.error(`❌ SMTP error response: ${sendError?.response || 'N/A'}`);
+          if (sendError?.stack) {
+            this.logger.error(`❌ SMTP error stack: ${sendError.stack}`);
           }
-          
-          if (!result.data || !result.data.id) {
-            this.logger.error(`❌ Resend returned no data or ID. Full response: ${JSON.stringify(result)}`);
-            throw new Error(`Resend returned no email ID: ${JSON.stringify(result)}`);
-          }
-          
-          this.logger.log(`✅ Verification email sent via Resend to ${email}. ID: ${result.data.id}`);
-        } catch (resendError: any) {
-          this.logger.error(`❌ Failed to send email via Resend to ${email}:`, resendError?.message || resendError);
-          this.logger.error(`Resend error details:`, JSON.stringify(resendError, null, 2));
-          
-          // Если Resend вернул ошибку 403 (нельзя отправлять на этот email), пробуем SMTP как fallback
-          const errorMessage = resendError?.message || JSON.stringify(resendError);
-          if (errorMessage.includes('403') || errorMessage.includes('testing emails') || errorMessage.includes('verify a domain')) {
-            this.logger.warn(`⚠️ Resend returned 403/domain error, falling back to SMTP...`);
-            
-            if (this.smtpEnabled && this.transporter) {
-              try {
-                this.logger.log(`[SMTP Fallback] Trying SMTP fallback for ${email}`);
-                this.logger.log(`[SMTP Fallback] SMTP enabled: ${this.smtpEnabled}, transporter exists: ${!!this.transporter}`);
-                this.logger.log(`[SMTP Fallback] From: ${this.configService.get<string>('email.smtpUser') || this.fromEmail}, To: ${email}`);
-                
-                const info = await this.transporter.sendMail({
-                  from: this.configService.get<string>('email.smtpUser') || this.fromEmail,
-                  to: email,
-                  subject: 'Подтвердите ваш e-mail',
-                  html: htmlContent,
-                  text: `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`,
-                });
-                
-                this.logger.log(`✅ Verification email sent via SMTP (fallback) to ${email}. MessageId: ${info.messageId}, Response: ${info.response}`);
-                return; // Успешно отправили через SMTP
-              } catch (smtpError: any) {
-                this.logger.error(`❌ SMTP fallback also failed:`, smtpError?.message || smtpError);
-                this.logger.error(`❌ SMTP error details:`, JSON.stringify(smtpError, null, 2));
-                // Пробрасываем ошибку дальше
-                throw smtpError;
-              }
-            } else {
-              this.logger.error(`❌ SMTP fallback not available: smtpEnabled=${this.smtpEnabled}, transporter=${!!this.transporter}`);
-            }
-          }
-          
-          throw resendError;
+          throw sendError;
         }
       } else if (this.sendgridEnabled) {
         this.logger.log(`Using SendGrid to send email to ${email}`);
@@ -207,36 +190,9 @@ export class MailerService {
           html: htmlContent,
         });
         this.logger.log(`✅ Verification email sent via SendGrid to ${email}`);
-      } else if (this.smtpEnabled && this.transporter) {
-        this.logger.log(`Using SMTP (${this.configService.get<string>('email.smtpHost')}) to send email to ${email}`);
-        console.log(`[MailerService] SMTP transporter exists: ${!!this.transporter}`);
-        console.log(`[MailerService] Sending email from: ${this.fromEmail} to: ${email}`);
-        console.log(`[MailerService] Email subject: Подтвердите ваш e-mail`);
-        console.log(`[MailerService] Token in email: ${token.substring(0, 20)}...`);
-        
-        try {
-          const info = await this.transporter.sendMail({
-            from: this.fromEmail,
-            to: email,
-            subject: 'Подтвердите ваш e-mail',
-            html: htmlContent,
-            text: `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`,
-          });
-          
-          console.log(`[MailerService] ✅ Email sent successfully! MessageId: ${info.messageId}`);
-          console.log(`[MailerService] Response: ${JSON.stringify(info.response)}`);
-          this.logger.log(`✅ Verification email sent via SMTP to ${email}. MessageId: ${info.messageId}, Response: ${info.response}`);
-        } catch (sendError: any) {
-          console.error(`[MailerService] ❌ SMTP sendMail error:`, sendError);
-          console.error(`[MailerService] Error code: ${sendError.code}`);
-          console.error(`[MailerService] Error command: ${sendError.command}`);
-          console.error(`[MailerService] Error response: ${sendError.response}`);
-          console.error(`[MailerService] Full error:`, JSON.stringify(sendError, null, 2));
-          throw sendError;
-        }
       } else {
         this.logger.error(`❌ Cannot send email: mailer is not properly configured`);
-        console.error(`[MailerService] SMTP enabled: ${this.smtpEnabled}, transporter exists: ${!!this.transporter}`);
+        this.logger.error(`❌ SMTP enabled: ${this.smtpEnabled}, transporter exists: ${!!this.transporter}, SendGrid enabled: ${this.sendgridEnabled}`);
         throw new Error('Email service is not configured');
       }
     } catch (error: any) {
