@@ -17,7 +17,12 @@ export default () => ({
     sendgridApiKey: process.env.SENDGRID_API_KEY,
     resendApiKey: process.env.RESEND_API_KEY,
     resendFromEmail: process.env.RESEND_FROM_EMAIL,
-    fromEmail: process.env.RESEND_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || process.env.SMTP_USER,
+    // Mailgun API настройки
+    mailgunApiKey: process.env.MAILGUN_API_KEY,
+    mailgunDomain: process.env.MAILGUN_DOMAIN,
+    mailgunBaseUrl: process.env.MAILGUN_BASE_URL || 'https://api.mailgun.net',
+    mailgunFromEmail: process.env.MAILGUN_FROM_EMAIL,
+    fromEmail: process.env.MAILGUN_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || process.env.SMTP_USER,
     // SMTP настройки
     smtpHost: process.env.SMTP_HOST,
     smtpPort: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : undefined,

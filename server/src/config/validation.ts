@@ -11,6 +11,11 @@ export const validationSchema = Joi.object({
   JWT_REFRESH_TTL: Joi.string().default('7d'),
   SENDGRID_API_KEY: Joi.string().optional(),
   SENDGRID_FROM_EMAIL: Joi.string().email().optional(),
+  // Mailgun API настройки
+  MAILGUN_API_KEY: Joi.string().optional(),
+  MAILGUN_DOMAIN: Joi.string().optional(),
+  MAILGUN_BASE_URL: Joi.string().uri().optional(),
+  MAILGUN_FROM_EMAIL: Joi.string().email().optional(),
   // SMTP настройки
   SMTP_HOST: Joi.string().optional(),
   SMTP_PORT: Joi.number().integer().min(1).max(65535).optional(),

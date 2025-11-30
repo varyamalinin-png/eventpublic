@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import * as sgMail from '@sendgrid/mail';
 import * as nodemailer from 'nodemailer';
 import { Resend } from 'resend';
+import { URLSearchParams } from 'url';
 
 @Injectable()
 export class MailerService {
@@ -13,6 +14,10 @@ export class MailerService {
   private readonly resetRedirectUrl: string;
   private readonly sendgridEnabled: boolean;
   private readonly resendEnabled: boolean;
+  private readonly mailgunEnabled: boolean;
+  private readonly mailgunApiKey?: string;
+  private readonly mailgunDomain?: string;
+  private readonly mailgunBaseUrl: string;
   private smtpEnabled: boolean = false;
   private readonly transporter?: nodemailer.Transporter;
   private readonly resend?: Resend;
@@ -49,6 +54,23 @@ export class MailerService {
       this.logger.log('Resend email service enabled');
     } else {
       this.resendEnabled = false;
+    }
+
+    // Проверяем Mailgun
+    const mailgunApiKey = this.configService.get<string>('email.mailgunApiKey');
+    const mailgunDomain = this.configService.get<string>('email.mailgunDomain');
+    this.mailgunBaseUrl = this.configService.get<string>('email.mailgunBaseUrl') || 'https://api.mailgun.net';
+    
+    this.logger.log(`🔍 Mailgun config check: apiKey=${mailgunApiKey ? '***' + mailgunApiKey.slice(-4) : 'NOT SET'}, domain=${mailgunDomain || 'NOT SET'}, baseUrl=${this.mailgunBaseUrl}`);
+    
+    if (mailgunApiKey && mailgunDomain) {
+      this.mailgunApiKey = mailgunApiKey;
+      this.mailgunDomain = mailgunDomain;
+      this.mailgunEnabled = true;
+      this.logger.log(`✅ Mailgun email service enabled (domain: ${mailgunDomain})`);
+    } else {
+      this.mailgunEnabled = false;
+      this.logger.warn(`⚠️ Mailgun is NOT enabled: apiKey=${!!mailgunApiKey}, domain=${!!mailgunDomain}`);
     }
 
     // Проверяем SMTP
@@ -91,15 +113,51 @@ export class MailerService {
       this.logger.log(`SMTP transporter created (verification skipped on startup)`);
     } else {
       this.smtpEnabled = false;
-      if (!this.sendgridEnabled && !this.resendEnabled) {
-        this.logger.warn('⚠️ Neither SendGrid, Resend nor SMTP is configured. Emails will not be sent.');
+      if (!this.sendgridEnabled && !this.resendEnabled && !this.mailgunEnabled) {
+        this.logger.warn('⚠️ Neither SendGrid, Resend, Mailgun nor SMTP is configured. Emails will not be sent.');
       }
     }
   }
 
   isEnabled() {
-    // ОТКЛЮЧАЕМ RESEND - ТОЛЬКО SMTP И SENDGRID
-    return this.sendgridEnabled || this.smtpEnabled; // || this.resendEnabled;
+    // Mailgun API > SendGrid API > SMTP
+    return this.mailgunEnabled || this.sendgridEnabled || this.smtpEnabled;
+  }
+
+  private async sendViaMailgun(email: string, subject: string, html: string, text: string): Promise<void> {
+    if (!this.mailgunEnabled || !this.mailgunApiKey || !this.mailgunDomain) {
+      throw new Error('Mailgun is not configured');
+    }
+
+    const mailgunUrl = `${this.mailgunBaseUrl}/v3/${this.mailgunDomain}/messages`;
+    const mailgunFrom = this.configService.get<string>('email.mailgunFromEmail') || 
+                        `Mailgun Sandbox <postmaster@${this.mailgunDomain}>`;
+
+    const params = new URLSearchParams();
+    params.append('from', mailgunFrom);
+    params.append('to', email);
+    params.append('subject', subject);
+    params.append('html', html);
+    params.append('text', text);
+
+    const auth = Buffer.from(`api:${this.mailgunApiKey}`).toString('base64');
+
+    const response = await fetch(mailgunUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Mailgun API error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    this.logger.log(`✅ Mailgun email sent. Message ID: ${result.id || 'N/A'}`);
   }
 
   async sendVerificationEmail(email: string, token: string) {
@@ -135,8 +193,26 @@ export class MailerService {
     try {
       this.logger.log(`📧 Sending verification email to ${email}...`);
       
-      // ПРИОРИТЕТ: SendGrid API > SMTP
-      // Railway блокирует SMTP порты, поэтому используем API сервисы
+      // ПРИОРИТЕТ: Mailgun API > SendGrid API > SMTP
+      // Railway блокирует SMTP порты, поэтому используем HTTP API сервисы
+      this.logger.log(`🔍 Mailgun check: enabled=${this.mailgunEnabled}, hasApiKey=${!!this.mailgunApiKey}, hasDomain=${!!this.mailgunDomain}`);
+      if (this.mailgunEnabled && this.mailgunApiKey && this.mailgunDomain) {
+        this.logger.log(`✅ Using Mailgun API to send email to ${email}`);
+        try {
+          await this.sendViaMailgun(
+            email,
+            'Подтвердите ваш e-mail',
+            htmlContent,
+            `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`
+          );
+          this.logger.log(`✅ Verification email sent via Mailgun API to ${email}`);
+          return; // Успешно отправили
+        } catch (mgError: any) {
+          this.logger.error(`❌ Mailgun error:`, mgError?.message || mgError);
+          // Продолжаем к SendGrid fallback
+        }
+      }
+      
       if (this.sendgridEnabled) {
         this.logger.log(`Using SendGrid API to send email to ${email}`);
         try {
