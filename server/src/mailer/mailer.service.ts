@@ -18,6 +18,10 @@ export class MailerService {
   private readonly mailgunApiKey?: string;
   private readonly mailgunDomain?: string;
   private readonly mailgunBaseUrl: string;
+  private readonly yandexCloudEnabled: boolean;
+  private readonly yandexCloudIamToken?: string;
+  private readonly yandexCloudApiEndpoint: string;
+  private readonly yandexCloudFromEmail?: string;
   private smtpEnabled: boolean = false;
   private readonly transporter?: nodemailer.Transporter;
   private readonly resend?: Resend;
@@ -73,6 +77,23 @@ export class MailerService {
       this.logger.warn(`⚠️ Mailgun is NOT enabled: apiKey=${!!mailgunApiKey}, domain=${!!mailgunDomain}`);
     }
 
+    // Проверяем Yandex Cloud Email API
+    const yandexCloudIamToken = this.configService.get<string>('email.yandexCloudIamToken');
+    const yandexCloudFromEmail = this.configService.get<string>('email.yandexCloudFromEmail');
+    this.yandexCloudApiEndpoint = this.configService.get<string>('email.yandexCloudApiEndpoint') || 'https://mail-api.cloud.yandex.net';
+    
+    this.logger.log(`🔍 Yandex Cloud config check: iamToken=${yandexCloudIamToken ? '***' + yandexCloudIamToken.slice(-4) : 'NOT SET'}, fromEmail=${yandexCloudFromEmail || 'NOT SET'}`);
+    
+    if (yandexCloudIamToken && yandexCloudFromEmail) {
+      this.yandexCloudIamToken = yandexCloudIamToken;
+      this.yandexCloudFromEmail = yandexCloudFromEmail;
+      this.yandexCloudEnabled = true;
+      this.logger.log(`✅ Yandex Cloud Email API enabled (from: ${yandexCloudFromEmail})`);
+    } else {
+      this.yandexCloudEnabled = false;
+      this.logger.warn(`⚠️ Yandex Cloud is NOT enabled: iamToken=${!!yandexCloudIamToken}, fromEmail=${!!yandexCloudFromEmail}`);
+    }
+
     // Проверяем SMTP
     const smtpHost = this.configService.get<string>('email.smtpHost');
     const smtpPort = this.configService.get<number>('email.smtpPort');
@@ -113,15 +134,74 @@ export class MailerService {
       this.logger.log(`SMTP transporter created (verification skipped on startup)`);
     } else {
       this.smtpEnabled = false;
-      if (!this.sendgridEnabled && !this.resendEnabled && !this.mailgunEnabled) {
-        this.logger.warn('⚠️ Neither SendGrid, Resend, Mailgun nor SMTP is configured. Emails will not be sent.');
+      if (!this.sendgridEnabled && !this.resendEnabled && !this.mailgunEnabled && !this.yandexCloudEnabled) {
+        this.logger.warn('⚠️ Neither SendGrid, Resend, Mailgun, Yandex Cloud nor SMTP is configured. Emails will not be sent.');
       }
     }
   }
 
   isEnabled() {
-    // Mailgun API > SendGrid API > SMTP
-    return this.mailgunEnabled || this.sendgridEnabled || this.smtpEnabled;
+    // Yandex Cloud > Mailgun API > SendGrid API > SMTP
+    return this.yandexCloudEnabled || this.mailgunEnabled || this.sendgridEnabled || this.smtpEnabled;
+  }
+
+  private async sendViaYandexCloud(email: string, subject: string, html: string, text: string): Promise<void> {
+    if (!this.yandexCloudEnabled || !this.yandexCloudIamToken || !this.yandexCloudFromEmail) {
+      throw new Error('Yandex Cloud Email API is not configured');
+    }
+
+    const yandexCloudUrl = `${this.yandexCloudApiEndpoint}/v2/email/outbound-emails`;
+
+    const requestBody = {
+      FromEmailAddress: this.yandexCloudFromEmail,
+      Destination: {
+        ToAddresses: [email],
+      },
+      Content: {
+        Simple: {
+          Subject: {
+            Data: subject,
+            Charset: 'UTF-8',
+          },
+          Body: {
+            Text: {
+              Data: text,
+              Charset: 'UTF-8',
+            },
+            Html: {
+              Data: html,
+              Charset: 'UTF-8',
+            },
+          },
+        },
+      },
+    };
+
+    const response = await fetch(yandexCloudUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.yandexCloudIamToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = `Yandex Cloud API error: ${response.status} ${response.statusText}`;
+      
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage += ` - ${errorJson.message || errorJson.Code || errorText}`;
+      } catch {
+        errorMessage += ` - ${errorText}`;
+      }
+      
+      throw new Error(errorMessage);
+    }
+
+    const result = await response.json();
+    this.logger.log(`✅ Yandex Cloud email sent. Message ID: ${result.MessageId || 'N/A'}`);
   }
 
   private async sendViaMailgun(email: string, subject: string, html: string, text: string): Promise<void> {
@@ -193,8 +273,27 @@ export class MailerService {
     try {
       this.logger.log(`📧 Sending verification email to ${email}...`);
       
-      // ПРИОРИТЕТ: Mailgun API > SendGrid API > SMTP
+      // ПРИОРИТЕТ: Yandex Cloud > Mailgun API > SendGrid API > SMTP
       // Railway блокирует SMTP порты, поэтому используем HTTP API сервисы
+      
+      // Yandex Cloud Email API (высший приоритет)
+      if (this.yandexCloudEnabled && this.yandexCloudIamToken && this.yandexCloudFromEmail) {
+        this.logger.log(`✅ Using Yandex Cloud Email API to send email to ${email}`);
+        try {
+          await this.sendViaYandexCloud(
+            email,
+            'Подтвердите ваш e-mail',
+            htmlContent,
+            `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`
+          );
+          this.logger.log(`✅ Verification email sent via Yandex Cloud Email API to ${email}`);
+          return; // Успешно отправили
+        } catch (ycError: any) {
+          this.logger.error(`❌ Yandex Cloud error:`, ycError?.message || ycError);
+          // Продолжаем к Mailgun fallback
+        }
+      }
+      
       this.logger.log(`🔍 Mailgun check: enabled=${this.mailgunEnabled}, hasApiKey=${!!this.mailgunApiKey}, hasDomain=${!!this.mailgunDomain}`);
       if (this.mailgunEnabled && this.mailgunApiKey && this.mailgunDomain) {
         this.logger.log(`✅ Using Mailgun API to send email to ${email}`);

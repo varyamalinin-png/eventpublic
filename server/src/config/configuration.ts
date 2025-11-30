@@ -22,7 +22,11 @@ export default () => ({
     mailgunDomain: process.env.MAILGUN_DOMAIN,
     mailgunBaseUrl: process.env.MAILGUN_BASE_URL || 'https://api.mailgun.net',
     mailgunFromEmail: process.env.MAILGUN_FROM_EMAIL,
-    fromEmail: process.env.MAILGUN_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || process.env.SMTP_USER,
+    // Yandex Cloud Email API настройки
+    yandexCloudIamToken: process.env.YANDEX_IAM_TOKEN,
+    yandexCloudApiEndpoint: process.env.YANDEX_CLOUD_API_ENDPOINT || 'https://mail-api.cloud.yandex.net',
+    yandexCloudFromEmail: process.env.YANDEX_CLOUD_FROM_EMAIL,
+    fromEmail: process.env.YANDEX_CLOUD_FROM_EMAIL || process.env.MAILGUN_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || process.env.SMTP_USER,
     // SMTP настройки
     smtpHost: process.env.SMTP_HOST,
     smtpPort: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : undefined,

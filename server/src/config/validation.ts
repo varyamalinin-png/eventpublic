@@ -16,6 +16,10 @@ export const validationSchema = Joi.object({
   MAILGUN_DOMAIN: Joi.string().optional(),
   MAILGUN_BASE_URL: Joi.string().uri().optional(),
   MAILGUN_FROM_EMAIL: Joi.string().email().optional(),
+  // Yandex Cloud Email API настройки
+  YANDEX_IAM_TOKEN: Joi.string().optional(),
+  YANDEX_CLOUD_API_ENDPOINT: Joi.string().uri().optional(),
+  YANDEX_CLOUD_FROM_EMAIL: Joi.string().email().optional(),
   // SMTP настройки
   SMTP_HOST: Joi.string().optional(),
   SMTP_PORT: Joi.number().integer().min(1).max(65535).optional(),
