@@ -58,9 +58,17 @@ export class AuthService {
       emailVerified: false,
     });
 
-    // НЕ отправляем письмо при регистрации - письмо отправляется ТОЛЬКО при попытке входа
-    // Создаем токен верификации, но НЕ отправляем письмо
-    await this.createEmailVerificationToken(user.id);
+    // Создаем токен верификации и отправляем письмо при регистрации
+    const token = await this.createEmailVerificationToken(user.id);
+    try {
+      await this.mailer.sendVerificationEmail(user.email, token);
+      this.logger.log(`✅ Verification email sent to ${user.email} during registration`);
+    } catch (error: any) {
+      // Логируем ошибку, но не прерываем регистрацию
+      // Пользователь может запросить повторную отправку письма позже
+      this.logger.error('[AuthService] Failed to send verification email during registration:', error?.message || error);
+      // НЕ выбрасываем ошибку - регистрация успешна, письмо можно отправить позже
+    }
 
     // НЕ возвращаем токены до подтверждения email
     return {
