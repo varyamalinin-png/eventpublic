@@ -155,7 +155,7 @@ export class MailerService {
         }
       }
       
-      // FALLBACK: SMTP (может не работать на Railway)
+      // SMTP (приоритет после SendGrid API)
       if (this.smtpEnabled && this.transporter) {
         const smtpHost = this.configService.get<string>('email.smtpHost');
         const smtpPort = this.configService.get<number>('email.smtpPort');
