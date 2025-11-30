@@ -147,22 +147,13 @@ export class AuthController {
   @Get('email-status')
   async checkEmailStatus() {
     const isEnabled = this.mailerService.isEnabled();
-    const smtpHost = this.configService.get<string>('email.smtpHost');
-    const smtpPort = this.configService.get<number>('email.smtpPort');
-    const smtpUser = this.configService.get<string>('email.smtpUser');
-    const sendgridApiKey = this.configService.get<string>('email.sendgridApiKey');
-    const fromEmail = this.configService.get<string>('email.fromEmail') || this.configService.get<string>('email.smtpUser');
+    const fromEmail = this.configService.get<string>('email.yandexCloudFromEmail') || 'noreply@iventapp.ru';
+    const yandexCloudEnabled = !!(this.configService.get<string>('email.yandexCloudIamToken') && this.configService.get<string>('email.yandexCloudFromEmail'));
     
     return {
       enabled: isEnabled,
-      method: sendgridApiKey ? 'SendGrid' : (smtpHost ? 'SMTP' : 'none'),
-      configured: !!(sendgridApiKey || smtpHost),
-      smtp: {
-        host: smtpHost,
-        port: smtpPort,
-        user: smtpUser ? `${smtpUser.substring(0, 3)}***` : null,
-        hasPassword: !!this.configService.get<string>('email.smtpPassword'),
-      },
+      method: yandexCloudEnabled ? 'Yandex Cloud Email API' : 'none',
+      configured: yandexCloudEnabled,
       fromEmail: fromEmail,
     };
   }

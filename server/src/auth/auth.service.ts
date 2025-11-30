@@ -348,12 +348,10 @@ export class AuthService {
       
       // Более детальное сообщение об ошибке
       let errorMessage = 'Failed to send verification email. ';
-      if (error?.code === 'EAUTH') {
-        errorMessage += 'SMTP authentication failed. Please check your email credentials.';
-      } else if (error?.code === 'ECONNECTION') {
-        errorMessage += 'Cannot connect to SMTP server. Please check your SMTP settings.';
-      } else if (error?.response) {
-        errorMessage += `SMTP server error: ${error.response}`;
+      if (error?.message?.includes('Yandex Cloud')) {
+        errorMessage += error.message;
+      } else if (error?.message?.includes('Network error')) {
+        errorMessage += error.message;
       } else {
         errorMessage += error?.message || 'Unknown error';
       }

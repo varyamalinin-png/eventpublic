@@ -9,23 +9,10 @@ export const validationSchema = Joi.object({
   JWT_REFRESH_SECRET: Joi.string().min(16).required(),
   JWT_ACCESS_TTL: Joi.string().default('15m'),
   JWT_REFRESH_TTL: Joi.string().default('7d'),
-  SENDGRID_API_KEY: Joi.string().optional(),
-  SENDGRID_FROM_EMAIL: Joi.string().email().optional(),
-  // Mailgun API настройки
-  MAILGUN_API_KEY: Joi.string().optional(),
-  MAILGUN_DOMAIN: Joi.string().optional(),
-  MAILGUN_BASE_URL: Joi.string().uri().optional(),
-  MAILGUN_FROM_EMAIL: Joi.string().email().optional(),
-  // Yandex Cloud Email API настройки
+  // Yandex Cloud Email API настройки (единственный способ отправки email)
   YANDEX_IAM_TOKEN: Joi.string().optional(),
   YANDEX_CLOUD_API_ENDPOINT: Joi.string().uri().optional(),
   YANDEX_CLOUD_FROM_EMAIL: Joi.string().email().optional(),
-  // SMTP настройки
-  SMTP_HOST: Joi.string().optional(),
-  SMTP_PORT: Joi.number().integer().min(1).max(65535).optional(),
-  SMTP_USER: Joi.string().email().optional(),
-  SMTP_PASSWORD: Joi.string().optional(),
-  SMTP_SECURE: Joi.string().valid('true', 'false').optional(),
   EMAIL_VERIFICATION_REDIRECT_URL: Joi.string().uri().optional(),
   PASSWORD_RESET_REDIRECT_URL: Joi.string().uri().optional(),
   GOOGLE_CLIENT_ID: Joi.string().optional(),

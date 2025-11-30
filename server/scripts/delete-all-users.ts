@@ -13,6 +13,7 @@ async function deleteAllUsers() {
   try {
     console.log('🚨 ВНИМАНИЕ: Начинается удаление ВСЕХ пользователей и всех связанных данных...');
     console.log('Это действие необратимо!');
+    console.log('Подключение к базе данных...');
     
     // Подсчитываем количество записей перед удалением
     const usersCount = await prisma.user.count();
@@ -171,11 +172,15 @@ async function deleteAllUsers() {
     console.log(`  - Удалено событий: ${deletedEvents.count}`);
     console.log(`  - Удалено профилей событий: ${deletedProfiles.count}`);
     
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ Ошибка при удалении пользователей:', error);
+    console.error('Детали ошибки:', error?.message);
+    console.error('Stack:', error?.stack);
     throw error;
   } finally {
+    console.log('\nЗакрытие соединения с базой данных...');
     await prisma.$disconnect();
+    console.log('Соединение закрыто.');
   }
 }
 

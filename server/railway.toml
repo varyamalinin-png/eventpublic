@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm install --legacy-peer-deps && npm run prisma:generate && npm run build"
+buildCommand = "rm -rf dist node_modules/.cache && npm install --legacy-peer-deps && npm run prisma:generate && npm run build"
 
 [deploy]
 startCommand = "npm run start:railway"

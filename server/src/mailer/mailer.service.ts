@@ -1,9 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as sgMail from '@sendgrid/mail';
-import * as nodemailer from 'nodemailer';
-import { Resend } from 'resend';
-import { URLSearchParams } from 'url';
+import * as https from 'https';
 
 @Injectable()
 export class MailerService {
@@ -12,25 +9,15 @@ export class MailerService {
   private readonly backendBaseUrl: string;
   private readonly verificationRedirectUrl: string;
   private readonly resetRedirectUrl: string;
-  private readonly sendgridEnabled: boolean;
-  private readonly resendEnabled: boolean;
-  private readonly mailgunEnabled: boolean;
-  private readonly mailgunApiKey?: string;
-  private readonly mailgunDomain?: string;
-  private readonly mailgunBaseUrl: string;
   private readonly yandexCloudEnabled: boolean;
   private readonly yandexCloudIamToken?: string;
   private readonly yandexCloudApiEndpoint: string;
   private readonly yandexCloudFromEmail?: string;
-  private smtpEnabled: boolean = false;
-  private readonly transporter?: nodemailer.Transporter;
-  private readonly resend?: Resend;
 
   constructor(private readonly configService: ConfigService) {
     this.fromEmail =
-      this.configService.get<string>('email.fromEmail') ?? 
-      this.configService.get<string>('email.smtpUser') ??
-      'no-reply@example.com';
+      this.configService.get<string>('email.yandexCloudFromEmail') ??
+      'noreply@iventapp.ru';
     this.backendBaseUrl =
       this.configService.get<string>('app.backendBaseUrl') ?? 'http://localhost:4000';
     this.verificationRedirectUrl =
@@ -40,49 +27,10 @@ export class MailerService {
       this.configService.get<string>('email.passwordResetRedirectUrl') ??
       'https://example.com/reset-password';
 
-    // Проверяем SendGrid
-    const sendgridApiKey = this.configService.get<string>('email.sendgridApiKey');
-    if (sendgridApiKey) {
-      sgMail.setApiKey(sendgridApiKey);
-      this.sendgridEnabled = true;
-      this.logger.log('SendGrid email service enabled');
-    } else {
-      this.sendgridEnabled = false;
-    }
-
-    // Проверяем Resend
-    const resendApiKey = this.configService.get<string>('email.resendApiKey');
-    if (resendApiKey) {
-      this.resend = new Resend(resendApiKey);
-      this.resendEnabled = true;
-      this.logger.log('Resend email service enabled');
-    } else {
-      this.resendEnabled = false;
-    }
-
-    // Проверяем Mailgun
-    const mailgunApiKey = this.configService.get<string>('email.mailgunApiKey');
-    const mailgunDomain = this.configService.get<string>('email.mailgunDomain');
-    this.mailgunBaseUrl = this.configService.get<string>('email.mailgunBaseUrl') || 'https://api.mailgun.net';
-    
-    this.logger.log(`🔍 Mailgun config check: apiKey=${mailgunApiKey ? '***' + mailgunApiKey.slice(-4) : 'NOT SET'}, domain=${mailgunDomain || 'NOT SET'}, baseUrl=${this.mailgunBaseUrl}`);
-    
-    if (mailgunApiKey && mailgunDomain) {
-      this.mailgunApiKey = mailgunApiKey;
-      this.mailgunDomain = mailgunDomain;
-      this.mailgunEnabled = true;
-      this.logger.log(`✅ Mailgun email service enabled (domain: ${mailgunDomain})`);
-    } else {
-      this.mailgunEnabled = false;
-      this.logger.warn(`⚠️ Mailgun is NOT enabled: apiKey=${!!mailgunApiKey}, domain=${!!mailgunDomain}`);
-    }
-
     // Проверяем Yandex Cloud Email API
     const yandexCloudIamToken = this.configService.get<string>('email.yandexCloudIamToken');
     const yandexCloudFromEmail = this.configService.get<string>('email.yandexCloudFromEmail');
     this.yandexCloudApiEndpoint = this.configService.get<string>('email.yandexCloudApiEndpoint') || 'https://mail-api.cloud.yandex.net';
-    
-    this.logger.log(`🔍 Yandex Cloud config check: iamToken=${yandexCloudIamToken ? '***' + yandexCloudIamToken.slice(-4) : 'NOT SET'}, fromEmail=${yandexCloudFromEmail || 'NOT SET'}`);
     
     if (yandexCloudIamToken && yandexCloudFromEmail) {
       this.yandexCloudIamToken = yandexCloudIamToken;
@@ -91,58 +39,12 @@ export class MailerService {
       this.logger.log(`✅ Yandex Cloud Email API enabled (from: ${yandexCloudFromEmail})`);
     } else {
       this.yandexCloudEnabled = false;
-      this.logger.warn(`⚠️ Yandex Cloud is NOT enabled: iamToken=${!!yandexCloudIamToken}, fromEmail=${!!yandexCloudFromEmail}`);
-    }
-
-    // Проверяем SMTP
-    const smtpHost = this.configService.get<string>('email.smtpHost');
-    const smtpPort = this.configService.get<number>('email.smtpPort');
-    const smtpUser = this.configService.get<string>('email.smtpUser');
-    const smtpPassword = this.configService.get<string>('email.smtpPassword');
-    const smtpSecure = this.configService.get<boolean>('email.smtpSecure', true);
-
-    this.logger.log(`SMTP config: host=${smtpHost}, port=${smtpPort}, user=${smtpUser ? '***' : 'not set'}, password=${smtpPassword ? '***' : 'not set'}, secure=${smtpSecure}`);
-    
-    if (smtpHost && smtpPort && smtpUser && smtpPassword) {
-      // Для порта 587 используем STARTTLS (secure: false, но требуетUpgrade)
-      const useSecure = smtpPort === 465; // Только для порта 465
-      
-      this.transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: useSecure, // true для 465, false для 587 (STARTTLS)
-        auth: {
-          user: smtpUser,
-          pass: smtpPassword,
-        },
-        // Добавляем TLS опции
-        tls: {
-          rejectUnauthorized: false,
-        },
-        // Для порта 587 требуется requireTLS
-        requireTLS: smtpPort === 587,
-        // Увеличиваем таймауты для Railway
-        connectionTimeout: 10000, // 10 секунд на подключение
-        greetingTimeout: 10000, // 10 секунд на приветствие
-        socketTimeout: 30000, // 30 секунд на операцию
-      });
-      this.smtpEnabled = true;
-      this.logger.log(`✅ SMTP email service enabled (${smtpHost}:${smtpPort})`);
-      
-      // НЕ проверяем соединение при старте - Railway блокирует исходящие соединения
-      // Проверка будет происходить только при реальной отправке писем
-      this.logger.log(`SMTP transporter created (verification skipped on startup)`);
-    } else {
-      this.smtpEnabled = false;
-      if (!this.sendgridEnabled && !this.resendEnabled && !this.mailgunEnabled && !this.yandexCloudEnabled) {
-        this.logger.warn('⚠️ Neither SendGrid, Resend, Mailgun, Yandex Cloud nor SMTP is configured. Emails will not be sent.');
-      }
+      this.logger.error(`❌ Yandex Cloud Email API is not configured. Emails will not be sent.`);
     }
   }
 
   isEnabled() {
-    // Yandex Cloud > Mailgun API > SendGrid API > SMTP
-    return this.yandexCloudEnabled || this.mailgunEnabled || this.sendgridEnabled || this.smtpEnabled;
+    return this.yandexCloudEnabled;
   }
 
   private async sendViaYandexCloud(email: string, subject: string, html: string, text: string): Promise<void> {
@@ -151,6 +53,7 @@ export class MailerService {
     }
 
     const yandexCloudUrl = `${this.yandexCloudApiEndpoint}/v2/email/outbound-emails`;
+    const url = new URL(yandexCloudUrl);
 
     const requestBody = {
       FromEmailAddress: this.yandexCloudFromEmail,
@@ -177,87 +80,92 @@ export class MailerService {
       },
     };
 
-    const response = await fetch(yandexCloudUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.yandexCloudIamToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
+    this.logger.log(`[MailerService] ✅ Using Yandex Cloud Email API to send email to ${email}`);
+    this.logger.log(`[MailerService] URL: ${yandexCloudUrl}`);
+    this.logger.log(`[MailerService] From: ${this.yandexCloudFromEmail}, To: ${email}`);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorMessage = `Yandex Cloud API error: ${response.status} ${response.statusText}`;
+    return new Promise((resolve, reject) => {
+      const postData = JSON.stringify(requestBody);
       
-      try {
-        const errorJson = JSON.parse(errorText);
-        errorMessage += ` - ${errorJson.message || errorJson.Code || errorText}`;
-      } catch {
-        errorMessage += ` - ${errorText}`;
-      }
-      
-      throw new Error(errorMessage);
-    }
+      const options = {
+        hostname: url.hostname,
+        port: url.port || 443,
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.yandexCloudIamToken}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData),
+        },
+        timeout: 30000,
+      };
 
-    const result = await response.json();
-    this.logger.log(`✅ Yandex Cloud email sent. Message ID: ${result.MessageId || 'N/A'}`);
-  }
+      const req = https.request(options, (res) => {
+        let data = '';
 
-  private async sendViaMailgun(email: string, subject: string, html: string, text: string): Promise<void> {
-    if (!this.mailgunEnabled || !this.mailgunApiKey || !this.mailgunDomain) {
-      throw new Error('Mailgun is not configured');
-    }
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
 
-    const mailgunUrl = `${this.mailgunBaseUrl}/v3/${this.mailgunDomain}/messages`;
-    const mailgunFrom = this.configService.get<string>('email.mailgunFromEmail') || 
-                        `Mailgun Sandbox <postmaster@${this.mailgunDomain}>`;
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              const result = JSON.parse(data);
+              this.logger.log(`✅ Yandex Cloud email sent. Message ID: ${result.MessageId || 'N/A'}`);
+              resolve();
+            } catch (parseError) {
+              this.logger.error(`[MailerService] ❌ Failed to parse response: ${data}`);
+              reject(new Error(`Failed to parse Yandex Cloud API response: ${data}`));
+            }
+          } else {
+            let errorMessage = `Yandex Cloud API error: ${res.statusCode} ${res.statusMessage || 'Unknown'}`;
+            
+            try {
+              const errorJson = JSON.parse(data);
+              errorMessage += ` - ${errorJson.message || errorJson.Code || data}`;
+            } catch {
+              errorMessage += ` - ${data}`;
+            }
+            
+            this.logger.error(`[MailerService] ❌ Yandex Cloud error: ${errorMessage}`);
+            reject(new Error(errorMessage));
+          }
+        });
+      });
 
-    const params = new URLSearchParams();
-    params.append('from', mailgunFrom);
-    params.append('to', email);
-    params.append('subject', subject);
-    params.append('html', html);
-    params.append('text', text);
+      req.on('error', (error: any) => {
+        this.logger.error(`[MailerService] ❌ Yandex Cloud network error: ${error.message}`);
+        this.logger.error(`[MailerService] Error details:`, error);
+        reject(new Error(`Network error: Unable to connect to Yandex Cloud API. ${error.message}`));
+      });
 
-    const auth = Buffer.from(`api:${this.mailgunApiKey}`).toString('base64');
+      req.on('timeout', () => {
+        req.destroy();
+        const timeoutError = new Error('Yandex Cloud API request timeout');
+        this.logger.error(`[MailerService] ❌ Yandex Cloud error: ${timeoutError.message}`);
+        reject(timeoutError);
+      });
 
-    const response = await fetch(mailgunUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${auth}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: params.toString(),
+      req.write(postData);
+      req.end();
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Mailgun API error: ${response.status} ${response.statusText} - ${errorText}`);
-    }
-
-    const result = await response.json();
-    this.logger.log(`✅ Mailgun email sent. Message ID: ${result.id || 'N/A'}`);
   }
 
   async sendVerificationEmail(email: string, token: string) {
-    console.log(`[MailerService] sendVerificationEmail called: email=${email}, token length=${token?.length || 0}`);
-    this.logger.log(`📧 sendVerificationEmail called for: ${email}`);
+    this.logger.log(`📧 sendVerificationEmail called: email=${email}, token length=${token.length}`);
     
     if (!this.isEnabled()) {
-      const errorMsg = `Skipping verification email for ${email} - mailer is not enabled`;
-      console.error(`[MailerService] ${errorMsg}`);
+      const errorMsg = `Email service is not configured. Cannot send verification email to ${email}`;
       this.logger.error(errorMsg);
-      return;
+      throw new Error(errorMsg);
     }
 
-    console.log(`[MailerService] Mailer is enabled, preparing email content`);
     const verifyLink = `${this.backendBaseUrl}/auth/verify-email?token=${encodeURIComponent(token)}`;
     const callToActionLink = `${this.verificationRedirectUrl}?token=${encodeURIComponent(token)}`;
     
-    console.log(`[MailerService] verifyLink: ${verifyLink}`);
-    console.log(`[MailerService] callToActionLink: ${callToActionLink}`);
-    console.log(`[MailerService] fromEmail: ${this.fromEmail}`);
+    this.logger.log(`[MailerService] verifyLink: ${verifyLink}`);
+    this.logger.log(`[MailerService] callToActionLink: ${callToActionLink}`);
+    this.logger.log(`[MailerService] fromEmail: ${this.fromEmail}`);
 
     const htmlContent = `
       <p>Здравствуйте!</p>
@@ -270,125 +178,21 @@ export class MailerService {
       <p>Ссылка действительна 24 часа.</p>
     `;
 
+    const textContent = `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`;
+
     try {
-      this.logger.log(`📧 Sending verification email to ${email}...`);
-      
-      // ПРИОРИТЕТ: Yandex Cloud > Mailgun API > SendGrid API > SMTP
-      // Railway блокирует SMTP порты, поэтому используем HTTP API сервисы
-      
-      // Yandex Cloud Email API (высший приоритет)
-      if (this.yandexCloudEnabled && this.yandexCloudIamToken && this.yandexCloudFromEmail) {
-        this.logger.log(`✅ Using Yandex Cloud Email API to send email to ${email}`);
-        try {
-          await this.sendViaYandexCloud(
-            email,
-            'Подтвердите ваш e-mail',
-            htmlContent,
-            `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`
-          );
-          this.logger.log(`✅ Verification email sent via Yandex Cloud Email API to ${email}`);
-          return; // Успешно отправили
-        } catch (ycError: any) {
-          this.logger.error(`❌ Yandex Cloud error:`, ycError?.message || ycError);
-          // Продолжаем к Mailgun fallback
-        }
-      }
-      
-      this.logger.log(`🔍 Mailgun check: enabled=${this.mailgunEnabled}, hasApiKey=${!!this.mailgunApiKey}, hasDomain=${!!this.mailgunDomain}`);
-      if (this.mailgunEnabled && this.mailgunApiKey && this.mailgunDomain) {
-        this.logger.log(`✅ Using Mailgun API to send email to ${email}`);
-        try {
-          await this.sendViaMailgun(
-            email,
-            'Подтвердите ваш e-mail',
-            htmlContent,
-            `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`
-          );
-          this.logger.log(`✅ Verification email sent via Mailgun API to ${email}`);
-          return; // Успешно отправили
-        } catch (mgError: any) {
-          this.logger.error(`❌ Mailgun error:`, mgError?.message || mgError);
-          // Продолжаем к SendGrid fallback
-        }
-      }
-      
-      if (this.sendgridEnabled) {
-        this.logger.log(`Using SendGrid API to send email to ${email}`);
-        try {
-          await sgMail.send({
-            to: email,
-            from: this.fromEmail,
-            subject: 'Подтвердите ваш e-mail',
-            html: htmlContent,
-            text: `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`,
-          });
-          this.logger.log(`✅ Verification email sent via SendGrid API to ${email}`);
-          return; // Успешно отправили
-        } catch (sgError: any) {
-          this.logger.error(`❌ SendGrid error:`, sgError?.message || sgError);
-          // Продолжаем к SMTP fallback
-        }
-      }
-      
-      // SMTP (приоритет после SendGrid API)
-      if (this.smtpEnabled && this.transporter) {
-        const smtpHost = this.configService.get<string>('email.smtpHost');
-        const smtpPort = this.configService.get<number>('email.smtpPort');
-        const smtpFrom = this.configService.get<string>('email.smtpUser') || this.fromEmail;
-        
-        this.logger.log(`[SMTP] Using SMTP (${smtpHost}:${smtpPort}) to send email to ${email}`);
-        this.logger.log(`[SMTP] From: ${smtpFrom}, To: ${email}`);
-        this.logger.log(`[SMTP] Starting email send...`);
-        
-        try {
-          // Создаем промис для отправки с таймаутом
-          const sendMailPromise = this.transporter.sendMail({
-            from: smtpFrom,
-            to: email,
-            subject: 'Подтвердите ваш e-mail',
-            html: htmlContent,
-            text: `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`,
-          });
-          
-          // Таймаут 30 секунд для SMTP отправки
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error('SMTP send timeout after 30 seconds')), 30000);
-          });
-          
-          this.logger.log(`[SMTP] Waiting for email send (timeout: 30s)...`);
-          const info = await Promise.race([sendMailPromise, timeoutPromise]);
-          
-          this.logger.log(`✅ Verification email sent via SMTP to ${email}`);
-          this.logger.log(`[SMTP] MessageId: ${info?.messageId || 'N/A'}, Response: ${info?.response || 'N/A'}`);
-          this.logger.log(`[SMTP] Email successfully queued/sent`);
-          return; // Успешно отправили
-        } catch (sendError: any) {
-          this.logger.error(`❌ SMTP sendMail error:`, sendError?.message || sendError);
-          this.logger.error(`❌ SMTP error code: ${sendError?.code || 'N/A'}`);
-          this.logger.error(`❌ SMTP error command: ${sendError?.command || 'N/A'}`);
-          this.logger.error(`❌ SMTP error response: ${sendError?.response || 'N/A'}`);
-          if (sendError?.stack) {
-            this.logger.error(`❌ SMTP error stack: ${sendError.stack}`);
-          }
-          throw sendError;
-        }
-      } else {
-        this.logger.error(`❌ Cannot send email: mailer is not properly configured`);
-        this.logger.error(`❌ SMTP enabled: ${this.smtpEnabled}, transporter exists: ${!!this.transporter}, SendGrid enabled: ${this.sendgridEnabled}`);
-        throw new Error('Email service is not configured');
-      }
+      await this.sendViaYandexCloud(email, 'Подтвердите ваш e-mail', htmlContent, textContent);
+      this.logger.log(`✅ Verification email sent via Yandex Cloud Email API to ${email}`);
     } catch (error: any) {
-      this.logger.error(`❌ Failed to send verification email to ${email}:`, error?.message || error);
-      this.logger.error(`Error details:`, error);
-      // Пробрасываем ошибку дальше, чтобы она была видна в auth.service
+      this.logger.error(`❌ Failed to send verification email to ${email}: ${error?.message || error}`);
       throw error;
     }
   }
 
   async sendPasswordResetEmail(email: string, token: string) {
     if (!this.isEnabled()) {
-      this.logger.debug(`Skipping password reset email for ${email}`);
-      return;
+      this.logger.error(`Email service is not configured. Cannot send password reset email to ${email}`);
+      throw new Error('Email service is not configured');
     }
 
     const resetLink = `${this.resetRedirectUrl}?token=${encodeURIComponent(token)}`;
@@ -400,41 +204,13 @@ export class MailerService {
       <p>Если вы не запрашивали изменение пароля, просто проигнорируйте это письмо.</p>
     `;
 
+    const textContent = `Здравствуйте!\n\nМы получили запрос на сброс пароля. Вы можете задать новый пароль, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${resetLink}\n\nЕсли вы не запрашивали изменение пароля, просто проигнорируйте это письмо.`;
+
     try {
-      this.logger.log(`📧 Sending password reset email to ${email}...`);
-      
-      if (this.resendEnabled && this.resend) {
-        this.logger.log(`Using Resend to send password reset email to ${email}`);
-        const result = await this.resend.emails.send({
-          from: this.fromEmail,
-          to: email,
-          subject: 'Сброс пароля',
-          html: htmlContent,
-        });
-        this.logger.log(`✅ Password reset email sent via Resend to ${email}. ID: ${result.data?.id}`);
-      } else if (this.sendgridEnabled) {
-        await sgMail.send({
-          to: email,
-          from: this.fromEmail,
-          subject: 'Сброс пароля',
-          html: htmlContent,
-        });
-        this.logger.log(`✅ Password reset email sent via SendGrid to ${email}`);
-      } else if (this.smtpEnabled && this.transporter) {
-        const info = await this.transporter.sendMail({
-          from: this.fromEmail,
-          to: email,
-          subject: 'Сброс пароля',
-          html: htmlContent,
-        });
-        this.logger.log(`✅ Password reset email sent via SMTP to ${email}. MessageId: ${info.messageId}`);
-      } else {
-        this.logger.error(`❌ Cannot send email: mailer is not properly configured`);
-        throw new Error('Email service is not configured');
-      }
+      await this.sendViaYandexCloud(email, 'Сброс пароля', htmlContent, textContent);
+      this.logger.log(`✅ Password reset email sent via Yandex Cloud Email API to ${email}`);
     } catch (error: any) {
       this.logger.error(`❌ Failed to send password reset email to ${email}:`, error?.message || error);
-      this.logger.error(`Error details:`, error);
       throw error;
     }
   }
