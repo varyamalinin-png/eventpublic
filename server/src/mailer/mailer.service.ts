@@ -135,7 +135,27 @@ export class MailerService {
     try {
       this.logger.log(`📧 Sending verification email to ${email}...`);
       
-      // ИСПОЛЬЗУЕМ ТОЛЬКО SMTP - Resend не работает без верификации домена
+      // ПРИОРИТЕТ: SendGrid API > SMTP
+      // Railway блокирует SMTP порты, поэтому используем API сервисы
+      if (this.sendgridEnabled) {
+        this.logger.log(`Using SendGrid API to send email to ${email}`);
+        try {
+          await sgMail.send({
+            to: email,
+            from: this.fromEmail,
+            subject: 'Подтвердите ваш e-mail',
+            html: htmlContent,
+            text: `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`,
+          });
+          this.logger.log(`✅ Verification email sent via SendGrid API to ${email}`);
+          return; // Успешно отправили
+        } catch (sgError: any) {
+          this.logger.error(`❌ SendGrid error:`, sgError?.message || sgError);
+          // Продолжаем к SMTP fallback
+        }
+      }
+      
+      // FALLBACK: SMTP (может не работать на Railway)
       if (this.smtpEnabled && this.transporter) {
         const smtpHost = this.configService.get<string>('email.smtpHost');
         const smtpPort = this.configService.get<number>('email.smtpPort');
@@ -177,15 +197,6 @@ export class MailerService {
           }
           throw sendError;
         }
-      } else if (this.sendgridEnabled) {
-        this.logger.log(`Using SendGrid to send email to ${email}`);
-        await sgMail.send({
-          to: email,
-          from: this.fromEmail,
-          subject: 'Подтвердите ваш e-mail',
-          html: htmlContent,
-        });
-        this.logger.log(`✅ Verification email sent via SendGrid to ${email}`);
       } else {
         this.logger.error(`❌ Cannot send email: mailer is not properly configured`);
         this.logger.error(`❌ SMTP enabled: ${this.smtpEnabled}, transporter exists: ${!!this.transporter}, SendGrid enabled: ${this.sendgridEnabled}`);

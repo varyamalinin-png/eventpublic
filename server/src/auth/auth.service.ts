@@ -58,22 +58,9 @@ export class AuthService {
       emailVerified: false,
     });
 
-    // КРИТИЧЕСКИ ВАЖНО: Всегда требуем подтверждение email
-    // Если mailer не настроен, выбрасываем ошибку
-    if (!this.mailer.isEnabled()) {
-      throw new BadRequestException('Email service is not configured. Please contact support.');
-    }
-
-    // Создаем токен верификации и отправляем письмо
-    const token = await this.createEmailVerificationToken(user.id);
-    try {
-      await this.mailer.sendVerificationEmail(user.email, token);
-    } catch (error: any) {
-      // Логируем ошибку отправки письма, но не прерываем регистрацию
-      // Пользователь может запросить повторную отправку письма позже
-      console.error('[AuthService] Failed to send verification email:', error?.message || error);
-      throw new BadRequestException('Failed to send verification email. Please try again later or contact support.');
-    }
+    // НЕ отправляем письмо при регистрации - письмо отправляется ТОЛЬКО при попытке входа
+    // Создаем токен верификации, но НЕ отправляем письмо
+    await this.createEmailVerificationToken(user.id);
 
     // НЕ возвращаем токены до подтверждения email
     return {
