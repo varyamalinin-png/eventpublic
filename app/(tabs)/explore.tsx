@@ -1,11 +1,12 @@
 import { useState, useRef, useMemo } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Animated, PanResponder, Dimensions, Image } from 'react-native';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import EventCard from '../../components/EventCard';
 import OrganizerCard from '../../components/OrganizerCard';
 import TopBar from '../../components/TopBar';
-import { useEvents, Event } from '../../context/EventsContext';
+import { useEvents, Event, User } from '../../context/EventsContext';
+import { formatUsername, normalizeUsername } from '../../utils/username';
 
 interface FilterOptions {
   participantsMin?: number;
@@ -42,6 +43,7 @@ export default function ExploreScreen() {
   const [organizersScrollY, setOrganizersScrollY] = useState(0);
   const isSyncingRef = useRef(false);
   
+  const router = useRouter();
   const { events, getUserData, getOrganizerStats, getFriendsForEvents, userFolders, createUserFolder, getGlobalEvents } = useEvents();
   
   // Состояния для фильтрации
@@ -73,6 +75,42 @@ export default function ExploreScreen() {
   const handleExploreSearch = (query: string) => {
     setSearchQuery(query);
   };
+
+  // Поиск пользователей по username
+  const searchUsers = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    
+    const query = normalizeUsername(searchQuery);
+    if (query.length < 2) return []; // Минимум 2 символа для поиска
+    
+    // Список всех известных userId
+    const allUserIds = [
+      'own-profile-1',
+      'organizer-1', 'organizer-2', 'organizer-3', 'organizer-4', 'organizer-5',
+      'organizer-6', 'organizer-7', 'organizer-8', 'organizer-9', 'organizer-10',
+      'organizer-11', 'organizer-12', 'organizer-13', 'organizer-14', 'organizer-15',
+      'organizer-16', 'organizer-17', 'organizer-18', 'organizer-19', 'organizer-20',
+      'organizer-21'
+    ];
+    
+    const results: User[] = [];
+    
+    for (const userId of allUserIds) {
+      const userData = getUserData(userId);
+      const userUsername = normalizeUsername(userData.username);
+      
+      // Поиск по началу username
+      if (userUsername.startsWith(query)) {
+        results.push({
+          id: userId,
+          ...userData
+        });
+      }
+    }
+    
+    // Ограничиваем результаты 20 пользователями
+    return results.slice(0, 20);
+  }, [searchQuery, getUserData]);
 
   // Расширенная фильтрация событий для explore
   const searchEvents = (eventsList: Event[], query: string) => {
@@ -386,13 +424,41 @@ export default function ExploreScreen() {
 
       {/* Статичная верхняя панель - поиск и карта */}
       <TopBar
-        searchPlaceholder="Поиск событий..."
+        searchPlaceholder="Поиск событий и людей..."
         onSearchChange={handleExploreSearch}
         searchQuery={searchQuery}
         showCalendar={true}
         showMap={true}
+        exploreTab={activeTab}
       />
 
+      {/* Результаты поиска пользователей - появляется динамически между TopBar и табами */}
+      {searchUsers.length > 0 && (
+        <View style={styles.usersSearchResults}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.usersSearchScrollContent}
+          >
+            {searchUsers.map((user) => (
+              <TouchableOpacity
+                key={user.id}
+                style={styles.userSearchItem}
+                onPress={() => router.push(`/profile/${user.id}`)}
+                activeOpacity={0.7}
+              >
+                <Image
+                  source={{ uri: user.avatar }}
+                  style={styles.userSearchAvatar}
+                />
+                <Text style={styles.userSearchUsername} numberOfLines={1}>
+                  {formatUsername(user.username)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       {/* Панель фильтров */}
       {showFilters && (
@@ -596,6 +662,7 @@ export default function ExploreScreen() {
                 mediaAspectRatio={event.mediaAspectRatio}
                 participantsList={event.participantsList}
                 participantsData={event.participantsData}
+                context="explore"
                 onLayout={(height) => handleEventLayout(event.id, height)}
               />
             ))
@@ -628,6 +695,7 @@ export default function ExploreScreen() {
                 mediaAspectRatio={event.mediaAspectRatio}
                 participantsList={event.participantsList}
                 participantsData={event.participantsData}
+                context="explore"
                 onLayout={(height) => handleEventLayout(event.id, height)}
               />
             ))
@@ -902,6 +970,34 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   // Стили для папок
+  usersSearchResults: {
+    backgroundColor: '#1a1a1a',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  usersSearchScrollContent: {
+    paddingHorizontal: 20,
+    paddingRight: 20,
+  },
+  userSearchItem: {
+    alignItems: 'center',
+    marginRight: 20,
+    width: 70,
+  },
+  userSearchAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginBottom: 8,
+    backgroundColor: '#333',
+  },
+  userSearchUsername: {
+    fontSize: 12,
+    color: '#FFF',
+    textAlign: 'center',
+    maxWidth: 70,
+  },
   foldersContainer: {
     backgroundColor: '#1a1a1a',
     paddingHorizontal: 20,

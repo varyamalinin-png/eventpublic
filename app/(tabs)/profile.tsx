@@ -1,16 +1,17 @@
-import { View, Text, ScrollView, StyleSheet, Image, TouchableOpacity, TextInput, Modal } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Image, TouchableOpacity, TextInput, Modal, Dimensions } from 'react-native';
 import { Link, useRouter, useLocalSearchParams } from 'expo-router';
 import { useState, useRef, useEffect } from 'react';
 import EventCard from '../../components/EventCard';
 import MemoryMiniCard from '../../components/MemoryMiniCard';
-import MemoryPost from '../../components/MemoryPost';
 import TopBar from '../../components/TopBar';
 import { useEvents, Event } from '../../context/EventsContext';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function ProfileScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ eventId?: string }>();
-  const { events, getOrganizerStats, getFriendsList, getEventProfile, createEventProfile, eventProfiles } = useEvents();
+  const { events, getOrganizerStats, getFriendsList, getEventProfile, createEventProfile, eventProfiles, eventRequests, isUserParticipant, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember } = useEvents();
   const [showEventFeed, setShowEventFeed] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -18,18 +19,17 @@ export default function ProfileScreen() {
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Получаем события для формирования userEvents
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const currentUserId = 'own-profile-1';
   
+  // ОРГАНИЗАТОР: предстоящее && я_организатор
   const organizedEvents = events.filter(event => 
-    event.organizerId === 'own-profile-1' && new Date(event.date) >= today
+    isEventUpcoming(event) && isUserOrganizer(event, currentUserId)
   );
   
-  const participatedEvents = events.filter(event => 
-    event.participantsList?.includes('https://randomuser.me/api/portraits/women/68.jpg') &&
-    new Date(event.date) >= today
-  );
+  // УЧАСТНИК: предстоящее && я_участник (именно участник, не организатор)
+  const participatedEvents = events.filter(event => {
+    return isEventUpcoming(event) && isUserAttendee(event, currentUserId);
+  });
   
   // Все события пользователя для ленты БЕЗ архивных событий
   const userEvents = [...organizedEvents, ...participatedEvents].filter((event, index, self) => 
@@ -46,7 +46,8 @@ export default function ProfileScreen() {
         
         // Прокручиваем к событию после небольшой задержки
         setTimeout(() => {
-          const eventIndex = userEvents.findIndex(e => e.id === params.eventId);
+          const eventsCollection = pastEvents.find(e => e.id === params.eventId) ? pastEvents : userEvents;
+          const eventIndex = eventsCollection.findIndex(e => e.id === params.eventId);
           if (eventIndex !== -1 && scrollViewRef.current) {
             // Более точный расчет высоты карточки + отступы
             const cardHeight = 400; // высота карточки
@@ -63,7 +64,7 @@ export default function ProfileScreen() {
             let scrollToY = cardPosition - centerOffset;
             
             // Ограничиваем прокрутку границами контента
-            const totalContentHeight = userEvents.length * totalItemHeight - marginBottom + 20; // 20 - paddingBottom
+            const totalContentHeight = eventsCollection.length * totalItemHeight - marginBottom + 20; // 20 - paddingBottom
             const maxScrollY = Math.max(0, totalContentHeight - screenHeight);
             
             scrollToY = Math.max(0, Math.min(scrollToY, maxScrollY));
@@ -125,23 +126,16 @@ export default function ProfileScreen() {
     return isArchived;
   }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  // Получаем все меморис посты (посты, которые пользователь добавил в свой профиль)
-  // Memory Posts могут быть только прошедших событий (дата события <= сегодня)
-  const memoryPosts = eventProfiles
-    .flatMap(profile => {
-      const profileDate = new Date(profile.date);
-      const todayDate = new Date();
-      todayDate.setHours(0, 0, 0, 0);
-      
-      // Проверяем, что дата события прошедшая (меньше или равна сегодня)
-      const isPastDate = profileDate <= todayDate;
-      
-      if (isPastDate) {
-        return profile.posts.filter(post => post.showInProfile);
-      }
-      return [];
-    })
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  // Проверяем является ли событие прошедшим
+  // МЕМОРИ: прошедшее && я_член_события (организатор или принятый участник)
+  const pastEvents = events.filter(event => {
+    return isEventPast(event) && isUserEventMember(event, currentUserId);
+  }).sort((a, b) => {
+    // Сортируем по дате+времени события: самое последнее прошедшее первым
+    const dateA = new Date(a.date + 'T' + a.time + ':00').getTime();
+    const dateB = new Date(b.date + 'T' + b.time + ':00').getTime();
+    return dateB - dateA; // Убывание: последнее первым
+  });
 
   // Все события пользователя для ленты в том же порядке что и в профиле
   // Сначала организованные, потом участник, потом архив
@@ -151,28 +145,29 @@ export default function ProfileScreen() {
   // Фильтрация событий по поиску
   const filteredEvents = searchUserEvents(userEvents, searchQuery);
 
-  const handleMemoryPress = (postId: string) => {
-    // Создаем комбинированную ленту: события + memories
-    const combinedFeed = [...userEvents, ...memoryPosts.map(post => ({ ...post, type: 'memory' }))];
-    const memoryIndex = combinedFeed.findIndex(item => item.id === postId && (item as any).type === 'memory');
-    
-    setSelectedEvent({ ...memoryPosts.find(p => p.id === postId)!, type: 'memory' } as any);
-    setShowEventFeed(true);
-    
-    // Прокручиваем к нужному memory посту после рендера
-    setTimeout(() => {
-      if (memoryIndex !== -1 && scrollViewRef.current) {
-        const cardHeight = 400; // высота карточки
-        const marginBottom = 20; // отступ снизу
-        const totalItemHeight = cardHeight + marginBottom;
-        const scrollPosition = memoryIndex * totalItemHeight;
-        
-        scrollViewRef.current.scrollTo({
-          y: scrollPosition,
-          animated: true
-        });
-      }
-    }, 100);
+  const handleMemoryPress = (eventId: string) => {
+    const event = pastEvents.find(e => e.id === eventId);
+    if (event) {
+      router.setParams({ eventId: event.id });
+      setSelectedEvent(event);
+      setShowEventFeed(true);
+      
+      // Прокручиваем к нужному событию после рендера
+      setTimeout(() => {
+        const eventIndex = pastEvents.findIndex(e => e.id === eventId);
+        if (eventIndex !== -1 && scrollViewRef.current) {
+          const cardHeight = 400;
+          const marginBottom = 20;
+          const totalItemHeight = cardHeight + marginBottom;
+          const scrollPosition = eventIndex * totalItemHeight;
+          
+          scrollViewRef.current.scrollTo({
+            y: scrollPosition,
+            animated: true
+          });
+        }
+      }, 100);
+    }
   };
 
   const handleMiniaturePress = (event: Event) => {
@@ -227,11 +222,16 @@ export default function ProfileScreen() {
     console.log('🟡 useEffect showEventFeed:', showEventFeed);
   }, [showEventFeed]);
   
+  // Определяем какую коллекцию событий показывать в ленте
+  const eventsToShow = selectedEvent && pastEvents.find(e => e.id === selectedEvent.id) 
+    ? pastEvents 
+    : userEvents;
+
   // Если показываем ленту события
   console.log('🔴 Render ProfileScreen, showEventFeed:', showEventFeed);
   
   if (showEventFeed) {
-    console.log('🔴 Rendering event feed with', userEvents.length, 'events');
+    console.log('🔴 Rendering event feed with', eventsToShow.length, 'events');
     return (
       <View style={styles.container}>
         <TouchableOpacity 
@@ -258,12 +258,12 @@ export default function ProfileScreen() {
           removeClippedSubviews={false}
         >
           {/* События пользователя */}
-          {userEvents.map((event, index) => (
+          {eventsToShow.map((event, index) => (
             <View 
               key={event.id} 
               style={[
                 styles.eventCardWrapper,
-                index === userEvents.length - 1 && styles.lastEventCard
+                index === eventsToShow.length - 1 && styles.lastEventCard
               ]}
             >
               <EventCard
@@ -290,23 +290,6 @@ export default function ProfileScreen() {
             </View>
           ))}
           
-          {/* Memory посты */}
-          {memoryPosts.map((post, index) => (
-            <View 
-              key={`memory-${post.id}`} 
-              style={[
-                styles.eventCardWrapper,
-                index === memoryPosts.length - 1 && styles.lastEventCard
-              ]}
-            >
-              <MemoryPost post={post} />
-            </View>
-          ))}
-          
-          {/* Индикатор конца ленты */}
-          <View style={styles.endIndicator}>
-            <Text style={styles.endIndicatorText}>Конец ленты</Text>
-          </View>
         </ScrollView>
       </View>
     );
@@ -403,32 +386,48 @@ export default function ProfileScreen() {
           <Text style={styles.searchResultsTitle}>Результаты поиска</Text>
           <View style={styles.eventsContainer}>
             {filteredEvents.length > 0 ? (
-              filteredEvents.map(event => (
-                <EventCard
-                  key={event.id}
-                  id={event.id}
-                  title={event.title}
-                  description={event.description}
-                  date={event.date}
-                  time={event.time}
-                  displayDate={event.displayDate}
-                  location={event.location}
-                  price={event.price}
-                  participants={event.participants}
-                  maxParticipants={event.maxParticipants}
-                  organizerAvatar={event.organizerAvatar}
-                  organizerId={event.organizerId}
-                  variant="miniature_1"
-                  showSwipeAction={false}
-                  showOrganizerAvatar={false}
-                  mediaUrl={event.mediaUrl}
-                  mediaType={event.mediaType}
-                  mediaAspectRatio={event.mediaAspectRatio}
-                  participantsList={event.participantsList}
-                  participantsData={event.participantsData}
-                  onMiniaturePress={() => handleMiniaturePress(event)}
-                />
-              ))
+              filteredEvents.map((event, index) => {
+                // Рассчитываем ширину карточки для трех колонок
+                const containerPadding = 40; // 20px с каждой стороны
+                const gap = 15; // Отступ между карточками
+                const availableWidth = SCREEN_WIDTH - containerPadding;
+                const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
+                const isLastInRow = (index + 1) % 3 === 0;
+                
+                return (
+                  <View
+                    key={event.id}
+                    style={[
+                      { width: cardWidth },
+                      !isLastInRow && { marginRight: gap }
+                    ]}
+                  >
+                    <EventCard
+                      id={event.id}
+                      title={event.title}
+                      description={event.description}
+                      date={event.date}
+                      time={event.time}
+                      displayDate={event.displayDate}
+                      location={event.location}
+                      price={event.price}
+                      participants={event.participants}
+                      maxParticipants={event.maxParticipants}
+                      organizerAvatar={event.organizerAvatar}
+                      organizerId={event.organizerId}
+                      variant="miniature_1"
+                      showSwipeAction={false}
+                      showOrganizerAvatar={false}
+                      mediaUrl={event.mediaUrl}
+                      mediaType={event.mediaType}
+                      mediaAspectRatio={event.mediaAspectRatio}
+                      participantsList={event.participantsList}
+                      participantsData={event.participantsData}
+                      onMiniaturePress={() => handleMiniaturePress(event)}
+                    />
+                  </View>
+                );
+              })
             ) : (
               <Text style={styles.emptyText}>События не найдены</Text>
             )}
@@ -439,31 +438,47 @@ export default function ProfileScreen() {
           <Text style={styles.sectionTitle}>Организатор</Text>
           <View style={styles.eventsContainer}>
             {organizedEvents.length > 0 ? (
-              organizedEvents.map(event => (
-                <EventCard
-                  key={event.id}
-                  id={event.id}
-                  title={event.title}
-                  description={event.description}
-                  date={event.date}
-                  time={event.time}
-                  location={event.location}
-                  price={event.price}
-                  participants={event.participants}
-                  maxParticipants={event.maxParticipants}
-                  organizerAvatar={event.organizerAvatar}
-                  organizerId={event.organizerId}
-                  variant="miniature_1"
-                  showSwipeAction={false}
-                  showOrganizerAvatar={false}
-                  mediaUrl={event.mediaUrl}
-                  mediaType={event.mediaType}
-                  mediaAspectRatio={event.mediaAspectRatio}
-                  participantsList={event.participantsList}
-                  participantsData={event.participantsData}
-                  onMiniaturePress={() => handleMiniaturePress(event)}
-                />
-              ))
+              organizedEvents.map((event, index) => {
+                // Рассчитываем ширину карточки для трех колонок
+                const containerPadding = 40; // 20px с каждой стороны
+                const gap = 15; // Отступ между карточками
+                const availableWidth = SCREEN_WIDTH - containerPadding;
+                const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
+                const isLastInRow = (index + 1) % 3 === 0;
+                
+                return (
+                  <View
+                    key={event.id}
+                    style={[
+                      { width: cardWidth },
+                      !isLastInRow && { marginRight: gap }
+                    ]}
+                  >
+                    <EventCard
+                      id={event.id}
+                      title={event.title}
+                      description={event.description}
+                      date={event.date}
+                      time={event.time}
+                      location={event.location}
+                      price={event.price}
+                      participants={event.participants}
+                      maxParticipants={event.maxParticipants}
+                      organizerAvatar={event.organizerAvatar}
+                      organizerId={event.organizerId}
+                      variant="miniature_1"
+                      showSwipeAction={false}
+                      showOrganizerAvatar={false}
+                      mediaUrl={event.mediaUrl}
+                      mediaType={event.mediaType}
+                      mediaAspectRatio={event.mediaAspectRatio}
+                      participantsList={event.participantsList}
+                      participantsData={event.participantsData}
+                      onMiniaturePress={() => handleMiniaturePress(event)}
+                    />
+                  </View>
+                );
+              })
             ) : (
               <Text style={styles.emptyText}>Вы пока не организовали ни одного события</Text>
             )}
@@ -472,31 +487,47 @@ export default function ProfileScreen() {
           <Text style={styles.sectionTitle}>Участник</Text>
           <View style={styles.eventsContainer}>
             {participatedEvents.length > 0 ? (
-              participatedEvents.map(event => (
-                <EventCard
-                  key={event.id}
-                  id={event.id}
-                  title={event.title}
-                  description={event.description}
-                  date={event.date}
-                  time={event.time}
-                  displayDate={event.displayDate}
-                  location={event.location}
-                  price={event.price}
-                  participants={event.participants}
-                  maxParticipants={event.maxParticipants}
-                  organizerAvatar={event.organizerAvatar}
-                  organizerId={event.organizerId}
-                  variant="miniature_1"
-                  showSwipeAction={false}
-                  mediaUrl={event.mediaUrl}
-                  mediaType={event.mediaType}
-                  mediaAspectRatio={event.mediaAspectRatio}
-                  participantsList={event.participantsList}
-                  participantsData={event.participantsData}
-                  onMiniaturePress={() => handleMiniaturePress(event)}
-                />
-              ))
+              participatedEvents.map((event, index) => {
+                // Рассчитываем ширину карточки для трех колонок
+                const containerPadding = 40; // 20px с каждой стороны
+                const gap = 15; // Отступ между карточками
+                const availableWidth = SCREEN_WIDTH - containerPadding;
+                const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
+                const isLastInRow = (index + 1) % 3 === 0;
+                
+                return (
+                  <View
+                    key={event.id}
+                    style={[
+                      { width: cardWidth },
+                      !isLastInRow && { marginRight: gap }
+                    ]}
+                  >
+                    <EventCard
+                      id={event.id}
+                      title={event.title}
+                      description={event.description}
+                      date={event.date}
+                      time={event.time}
+                      displayDate={event.displayDate}
+                      location={event.location}
+                      price={event.price}
+                      participants={event.participants}
+                      maxParticipants={event.maxParticipants}
+                      organizerAvatar={event.organizerAvatar}
+                      organizerId={event.organizerId}
+                      variant="miniature_1"
+                      showSwipeAction={false}
+                      mediaUrl={event.mediaUrl}
+                      mediaType={event.mediaType}
+                      mediaAspectRatio={event.mediaAspectRatio}
+                      participantsList={event.participantsList}
+                      participantsData={event.participantsData}
+                      onMiniaturePress={() => handleMiniaturePress(event)}
+                    />
+                  </View>
+                );
+              })
             ) : (
               <Text style={styles.emptyText}>Вы пока не участвуете ни в одном событии</Text>
             )}
@@ -504,14 +535,49 @@ export default function ProfileScreen() {
 
           <Text style={styles.memoriesTitle}>Memories</Text>
           <View style={styles.memoriesContainer}>
-              {memoryPosts.length > 0 ? (
-                memoryPosts.map(post => (
-                  <MemoryMiniCard 
-                    key={post.id} 
-                    post={post} 
-                    onPress={() => handleMemoryPress(post.id)}
-                  />
-                ))
+              {pastEvents.length > 0 ? (
+                pastEvents.map((event, index) => {
+                  // Рассчитываем ширину карточки для трех колонок
+                  const containerPadding = 40; // 20px с каждой стороны
+                  const gap = 15; // Отступ между карточками
+                  const availableWidth = SCREEN_WIDTH - containerPadding;
+                  const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
+                  const isLastInRow = (index + 1) % 3 === 0;
+                  
+                  return (
+                    <View
+                      key={event.id}
+                      style={[
+                        { width: cardWidth },
+                        !isLastInRow && { marginRight: gap }
+                      ]}
+                    >
+                      <EventCard
+                        id={event.id}
+                        title={event.title}
+                        description={event.description}
+                        date={event.date}
+                        time={event.time}
+                        displayDate={event.displayDate}
+                        location={event.location}
+                        price={event.price}
+                        participants={event.participants}
+                        maxParticipants={event.maxParticipants}
+                        organizerAvatar={event.organizerAvatar}
+                        organizerId={event.organizerId}
+                        variant="miniature_1"
+                        showSwipeAction={false}
+                        showOrganizerAvatar={false}
+                        mediaUrl={event.mediaUrl}
+                        mediaType={event.mediaType}
+                        mediaAspectRatio={event.mediaAspectRatio}
+                        participantsList={event.participantsList}
+                        participantsData={event.participantsData}
+                        onMiniaturePress={() => handleMemoryPress(event.id)}
+                      />
+                    </View>
+                  );
+                })
               ) : (
               <Text style={styles.emptyText}>Memories пуст</Text>
             )}
@@ -696,7 +762,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
   },
   eventCard: {
     width: 110, // Фиксированная ширина для трех колонок
@@ -720,7 +786,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212',
     width: '100%',
     margin: 0,
-    padding: 0,
+    paddingHorizontal: 20,
   },
   emptyText: {
     fontSize: 16,
@@ -770,19 +836,6 @@ const styles = StyleSheet.create({
   },
   lastEventCard: {
     marginBottom: 200, // Значительно увеличиваем отступ после последнего элемента для лучшей видимости
-  },
-  endIndicator: {
-    paddingVertical: 50,
-    alignItems: 'center',
-    backgroundColor: '#F0F0F0',
-    marginHorizontal: 20,
-    borderRadius: 12,
-    marginTop: 20,
-  },
-  endIndicatorText: {
-    fontSize: 16,
-    color: '#666666',
-    fontWeight: '500',
   },
   // Модальное окно аватарки
   avatarModalOverlay: {
