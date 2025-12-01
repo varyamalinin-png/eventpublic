@@ -74,8 +74,12 @@
               "NSExceptionAllowsInsecureHTTPLoads": false,
               "NSIncludesSubdomains": true
             },
-            "89.169.173.152": {
-              "NSExceptionAllowsInsecureHTTPLoads": true,
+            "iventapp.ru": {
+              "NSExceptionAllowsInsecureHTTPLoads": false,
+              "NSIncludesSubdomains": true
+            },
+            "www.iventapp.ru": {
+              "NSExceptionAllowsInsecureHTTPLoads": false,
               "NSIncludesSubdomains": true
             }
           }
@@ -139,7 +143,7 @@
       "router": {
         "origin": false
       },
-      "apiUrl": "http://89.169.173.152:4000",
+      "apiUrl": "https://iventapp.ru",
       "YANDEX_MAPS_API_KEY": "e95f18c1-e796-4e6a-b2a9-0aafe5e420c4",
       "YANDEX_GEOCODER_API_KEY": "d84ff24e-0878-41ab-a83b-517487e2903a",
       "YANDEX_MAPKIT_API_KEY": "0b6f9cca-f83d-4b26-a837-7f0affdf242f"
