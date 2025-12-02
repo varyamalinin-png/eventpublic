@@ -201,6 +201,13 @@ export class StorageService {
       this.logger.debug(`Built public URL: ${url}`);
       return url;
     }
+    // Для Yandex Object Storage используем правильный формат URL
+    const endpoint = this.configService.get<string>('storage.endpoint');
+    if (endpoint && endpoint.includes('yandexcloud.net')) {
+      // Yandex Cloud Object Storage публичный URL
+      return `https://${this.bucket}.storage.yandexcloud.net/${key}`;
+    }
+    // Fallback для AWS S3
     return `https://${this.bucket}.s3.amazonaws.com/${key}`;
   }
 
