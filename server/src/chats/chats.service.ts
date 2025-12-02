@@ -230,6 +230,9 @@ export class ChatsService {
       },
     });
 
+    // Отправляем уведомление обоим участникам о создании нового чата
+    this.websocketService.emitToUsers([userId, otherUserId], 'chats:update', {});
+
     return chat;
   }
 }
