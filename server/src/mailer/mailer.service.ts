@@ -52,9 +52,14 @@ export class MailerService {
       throw new Error('Yandex Cloud Email API is not configured');
     }
 
-    // Используем оригинальный endpoint mail-api.cloud.yandex.net
-    // Временно отключаем проверку SSL сертификата, так как сертификат выдан для *.api.cloud.yandex.net
-    const yandexCloudUrl = `${this.yandexCloudApiEndpoint}/v2/email/outbound-emails`;
+    // Используем правильный endpoint postbox.cloud.yandex.net согласно документации
+    // Если в конфиге указан mail-api, заменяем на postbox
+    let endpoint = this.yandexCloudApiEndpoint;
+    if (endpoint.includes('mail-api.cloud.yandex.net')) {
+      endpoint = endpoint.replace('mail-api.cloud.yandex.net', 'postbox.cloud.yandex.net');
+      this.logger.log(`[MailerService] ⚠️ Replacing mail-api.cloud.yandex.net with postbox.cloud.yandex.net`);
+    }
+    const yandexCloudUrl = `${endpoint}/v2/email/outbound-emails`;
     const url = new URL(yandexCloudUrl);
 
     const requestBody = {
