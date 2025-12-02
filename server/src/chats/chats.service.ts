@@ -69,9 +69,23 @@ export class ChatsService {
       },
     });
 
-    // Отправляем WebSocket событие о новом сообщении
+    // Отправляем WebSocket событие о новом сообщении всем участникам чата
     this.websocketService.emitToChat(chatId, 'message:new', message);
-    this.websocketService.emitToUser(userId, 'chats:update', {});
+    
+    // Отправляем обновление списка чатов всем участникам чата
+    const chat = await this.prisma.chat.findUnique({
+      where: { id: chatId },
+      include: {
+        participants: {
+          select: { userId: true },
+        },
+      },
+    });
+    
+    if (chat) {
+      const participantIds = chat.participants.map(p => p.userId);
+      this.websocketService.emitToUsers(participantIds, 'chats:update', {});
+    }
 
     return message;
   }
