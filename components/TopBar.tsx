@@ -9,6 +9,9 @@ interface TopBarProps {
   showCalendar?: boolean;
   showMap?: boolean;
   userId?: string; // ID пользователя для календаря (если не указан - текущий пользователь)
+  exploreTab?: 'GLOB' | 'FRIENDS'; // Тип ленты explore для передачи в карту
+  onFilterPress?: () => void; // Функция для открытия/закрытия фильтров
+  activeFiltersCount?: number; // Количество активных фильтров
 }
 
 export default function TopBar({ 
@@ -17,7 +20,10 @@ export default function TopBar({
   searchQuery,
   showCalendar = true,
   showMap = true,
-  userId 
+  userId,
+  exploreTab,
+  onFilterPress,
+  activeFiltersCount = 0
 }: TopBarProps) {
   const router = useRouter();
   const { width } = Dimensions.get('window');
@@ -44,6 +50,19 @@ export default function TopBar({
             value={searchQuery}
             onChangeText={onSearchChange}
           />
+          {onFilterPress && (
+            <TouchableOpacity 
+              style={styles.filterButton}
+              onPress={onFilterPress}
+            >
+              <Text style={styles.filterIcon}>🔽</Text>
+              {activeFiltersCount > 0 && (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{activeFiltersCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
         
         <View style={styles.topButtonsContainer}>
@@ -60,11 +79,18 @@ export default function TopBar({
             <TouchableOpacity 
               style={styles.mapButton}
               onPress={() => {
+                let url = '/map';
+                const params: string[] = [];
                 if (userId) {
-                  router.push(`/map?userId=${userId}`);
-                } else {
-                  router.push('/map');
+                  params.push(`userId=${userId}`);
                 }
+                if (exploreTab) {
+                  params.push(`exploreTab=${exploreTab}`);
+                }
+                if (params.length > 0) {
+                  url += `?${params.join('&')}`;
+                }
+                router.push(url);
               }}
             >
               <Text style={styles.mapIcon}>🗺️</Text>
@@ -121,5 +147,31 @@ const styles = StyleSheet.create({
   },
   mapIcon: {
     fontSize: 24,
+  },
+  filterButton: {
+    padding: 4,
+    marginLeft: 8,
+    position: 'relative',
+  },
+  filterIcon: {
+    fontSize: 18,
+    color: '#999',
+  },
+  filterBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#8B5CF6',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '700',
   },
 });

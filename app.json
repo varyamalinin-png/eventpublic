@@ -76,11 +76,13 @@
             },
             "iventapp.ru": {
               "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true
+              "NSIncludesSubdomains": true,
+              "NSExceptionRequiresForwardSecrecy": false
             },
             "www.iventapp.ru": {
               "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true
+              "NSIncludesSubdomains": true,
+              "NSExceptionRequiresForwardSecrecy": false
             }
           }
         }

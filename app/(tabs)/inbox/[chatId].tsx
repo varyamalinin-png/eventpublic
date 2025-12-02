@@ -1,50 +1,238 @@
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, KeyboardAvoidingView, Platform, Modal, FlatList } from 'react-native';
-import { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, KeyboardAvoidingView, Platform, Dimensions, ActivityIndicator } from 'react-native';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEvents } from '../../../context/EventsContext';
+import { useLanguage } from '../../../context/LanguageContext';
+import ParticipantsModal from '../../../components/ParticipantsModal';
+import EventCard from '../../../components/EventCard';
+import MemoryMiniCard from '../../../components/MemoryMiniCard';
+import { useAuth } from '../../../context/AuthContext';
+import { createLogger } from '../../../utils/logger';
+
+const logger = createLogger('ChatScreen');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function ChatScreen() {
   const { chatId } = useLocalSearchParams();
   const router = useRouter();
-  const { getChat, getChatMessages, sendChatMessage, getUserData, chatMessages, events } = useEvents();
-  const [messages, setMessages] = useState<any[]>([]);
+  const { user } = useAuth();
+  const { t } = useLanguage();
+  const {
+    getChat,
+    sendChatMessage,
+    getUserData,
+    chatMessages,
+    events,
+    getEventProfile,
+  } = useEvents();
   const [inputText, setInputText] = useState('');
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
   const chat = chatId ? getChat(chatId as string) : null;
+  const currentUserId = useMemo(() => user?.id ?? null, [user]);
 
-  // Загружаем сообщения при изменении chatId или chatMessages
+  const messages = useMemo(() => {
+    if (!chatId) return [];
+    return chatMessages
+      .filter(message => message.chatId === chatId)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }, [chatMessages, chatId]);
+
   useEffect(() => {
-    if (chatId) {
-      const chatMessagesData = getChatMessages(chatId as string);
-      setMessages(chatMessagesData);
-      
-      // Прокручиваем к последнему сообщению
-      setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: false });
-      }, 100);
-    }
-  }, [chatId, chatMessages, getChatMessages]);
-
-  const handleSend = () => {
-    if (!inputText.trim() || !chatId) return;
-
-    // Отправляем сообщение через sendChatMessage (принимает chatId и text)
-    // Сообщение будет добавлено в контекст, и useEffect обновит локальное состояние
-    sendChatMessage(chatId as string, inputText.trim());
-    setInputText('');
+    if (!chatId) return;
     
-    // Прокручиваем к последнему сообщению после обновления
-    setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 200);
+    // Подключаемся к комнате чата через WebSocket для получения сообщений в реальном времени
+    const socket = require('../../../services/websocket').getSocket();
+    if (socket && socket.connected) {
+      // Используем событие chat:join из namespace /ws/chats
+      // Или просто отправляем в общий namespace
+      socket.emit('chat:join', { chatId });
+      logger.info('Подключились к комнате чата', { chatId });
+    }
+
+    const timer = setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: false });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [chatId, messages.length]);
+
+  const handleSend = async () => {
+    if (!inputText.trim() || !chatId) return;
+    if (!currentUserId) {
+      router.push('/(auth)');
+      return;
+    }
+    if (isSending) return;
+
+    try {
+      setIsSending(true);
+      await sendChatMessage(chatId as string, inputText.trim());
+      setInputText('');
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 200);
+    } catch (error) {
+      logger.error('Failed to send chat message', error);
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const renderMessage = (message: any, index: number) => {
-    const isOwn = message.fromUserId === 'own-profile-1';
+    const isOwn = currentUserId ? message.fromUserId === currentUserId : false;
     const sender = getUserData(message.fromUserId);
     
+    // Если сообщение содержит меморис пост, показываем мини-карточку поста
+    if (message.postId && message.eventId) {
+      const eventProfile = getEventProfile(message.eventId);
+      const post = eventProfile?.posts.find(p => p.id === message.postId);
+      
+      if (post) {
+        return (
+          <View
+            key={index}
+            style={[
+              styles.messageWrapper,
+              isOwn ? styles.ownMessageWrapper : styles.otherMessageWrapper
+            ]}
+          >
+            {!isOwn && (
+              <Image
+                source={{ uri: sender?.avatar || 'https://randomuser.me/api/portraits/women/22.jpg' }}
+                style={styles.avatar}
+                onError={() => {}}
+              />
+            )}
+            <View
+              style={[
+                styles.eventMessageContainer,
+                isOwn ? styles.ownEventMessage : styles.otherEventMessage
+              ]}
+            >
+              <TouchableOpacity 
+                onPress={() => router.push(`/memory-post/${post.eventId}/${post.id}`)}
+                style={{ width: (SCREEN_WIDTH - 2) / 3 }}
+              >
+                <MemoryMiniCard post={post} />
+              </TouchableOpacity>
+              <Text style={styles.messageTime}>
+                {message.createdAt.toLocaleTimeString('ru-RU', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </Text>
+            </View>
+          </View>
+        );
+      }
+    }
+    
+    // Если сообщение содержит событие, показываем мини-карточку
+    if (message.eventId) {
+      const event = events.find(e => e.id === message.eventId);
+      
+      if (!event) {
+        logger.warn('Event not found for eventId', { eventId: message.eventId, availableEvents: events.map(e => e.id) });
+        // Если событие не найдено, показываем заглушку
+        return (
+          <View
+            key={index}
+            style={[
+              styles.messageWrapper,
+              isOwn ? styles.ownMessageWrapper : styles.otherMessageWrapper
+            ]}
+          >
+            {!isOwn && (
+              <Image
+                source={{ uri: sender?.avatar || 'https://randomuser.me/api/portraits/women/22.jpg' }}
+                style={styles.avatar}
+                onError={() => {}}
+              />
+            )}
+            <View
+              style={[
+                styles.eventMessageContainer,
+                isOwn ? styles.ownEventMessage : styles.otherEventMessage
+              ]}
+            >
+              <View style={styles.eventPlaceholder}>
+                <Text style={styles.eventPlaceholderText}>Событие не найдено</Text>
+                <Text style={styles.eventPlaceholderSubtext}>ID: {message.eventId}</Text>
+              </View>
+              <Text style={styles.messageTime}>
+                {message.createdAt.toLocaleTimeString('ru-RU', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </Text>
+            </View>
+          </View>
+        );
+      }
+      
+      if (event) {
+        logger.debug('Rendering event card for chat', { eventId: event.id, eventTitle: event.title, variant: 'chat_preview' });
+        return (
+          <View
+            key={index}
+            style={[
+              styles.messageWrapper,
+              isOwn ? styles.ownMessageWrapper : styles.otherMessageWrapper
+            ]}
+          >
+            {!isOwn && (
+              <Image
+                source={{ uri: sender?.avatar || 'https://randomuser.me/api/portraits/women/22.jpg' }}
+                style={styles.avatar}
+                onError={() => {}}
+              />
+            )}
+            <View
+              style={[
+                styles.eventMessageContainer,
+                isOwn ? styles.ownEventMessage : styles.otherEventMessage
+              ]}
+            >
+              <View style={{ width: (SCREEN_WIDTH - 40 - 30) / 3 }}>
+                <EventCard
+                  id={event.id}
+                  title={event.title}
+                  description={event.description}
+                  date={event.date}
+                  time={event.time}
+                  displayDate={event.displayDate}
+                  location={event.location}
+                  price={event.price}
+                  participants={event.participants}
+                  maxParticipants={event.maxParticipants}
+                  organizerAvatar={event.organizerAvatar}
+                  organizerId={event.organizerId}
+                  variant="miniature_1"
+                  mediaUrl={event.mediaUrl}
+                  mediaType={event.mediaType}
+                  mediaAspectRatio={event.mediaAspectRatio}
+                  participantsList={event.participantsList}
+                  participantsData={event.participantsData}
+                  showSwipeAction={false}
+                  showOrganizerAvatar={true}
+                  onMiniaturePress={() => router.push(`/event-profile/${message.eventId}`)}
+                />
+              </View>
+              <Text style={styles.messageTime}>
+                {message.createdAt.toLocaleTimeString('ru-RU', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </Text>
+            </View>
+          </View>
+        );
+      }
+    }
+    
+    // Обычное текстовое сообщение
     return (
       <View
         key={index}
@@ -86,6 +274,13 @@ export default function ChatScreen() {
   const renderChatHeader = () => {
     if (!chat) return null;
 
+    // Обработчик клика на название чата (только для событийных чатов)
+    const handleChatNamePress = () => {
+      if (chat.type === 'event' && chat.eventId) {
+        router.push(`/event-profile/${chat.eventId}`);
+      }
+    };
+
     return (
       <View style={styles.chatHeader}>
         {/* Кнопка "Назад" и название чата */}
@@ -96,35 +291,47 @@ export default function ChatScreen() {
           >
             <Text style={styles.backButtonText}>←</Text>
           </TouchableOpacity>
-          <Text style={styles.chatName}>{chat.name}</Text>
+          {chat.type === 'event' && chat.eventId ? (
+            <TouchableOpacity 
+              style={styles.chatNameContainer}
+              onPress={handleChatNamePress}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.chatName}>{chat.name}</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.chatName}>{chat.name}</Text>
+          )}
         </View>
         
-        {/* Кликабельный список участников */}
-        <TouchableOpacity 
-          style={styles.participantsSection}
-          onPress={() => setShowParticipantsModal(true)}
-        >
-          <Text style={styles.participantsLabel}>
-            Участники: {chat.participants.length}
-          </Text>
-          <View style={styles.participantsAvatars}>
-            {chat.participants.slice(0, 3).map(participantId => {
-              const participant = getUserData(participantId);
-              return (
-                <Image
-                  key={participantId}
-                  source={{ uri: participant?.avatar || 'https://randomuser.me/api/portraits/men/1.jpg' }}
-                  style={styles.smallAvatar}
-                />
-              );
-            })}
-            {chat.participants.length > 3 && (
-              <View style={[styles.smallAvatar, styles.moreParticipantsBadge]}>
-                <Text style={styles.moreParticipantsText}>+{chat.participants.length - 3}</Text>
-              </View>
-            )}
-          </View>
-        </TouchableOpacity>
+        {/* Кликабельный список участников (только для событийных чатов) */}
+        {chat.type === 'event' && chat.eventId && (
+          <TouchableOpacity 
+            style={styles.participantsSection}
+            onPress={() => setShowParticipantsModal(true)}
+          >
+            <Text style={styles.participantsLabel}>
+              {t.chat.participants} {chat.participants.length}
+            </Text>
+            <View style={styles.participantsAvatars}>
+              {chat.participants.slice(0, 3).map(participantId => {
+                const participant = getUserData(participantId);
+                return (
+                  <Image
+                    key={participantId}
+                    source={{ uri: participant?.avatar || 'https://randomuser.me/api/portraits/men/1.jpg' }}
+                    style={styles.smallAvatar}
+                  />
+                );
+              })}
+              {chat.participants.length > 3 && (
+                <View style={[styles.smallAvatar, styles.moreParticipantsBadge]}>
+                  <Text style={styles.moreParticipantsText}>+{chat.participants.length - 3}</Text>
+                </View>
+              )}
+            </View>
+          </TouchableOpacity>
+        )}
       </View>
     );
   };
@@ -166,71 +373,29 @@ export default function ChatScreen() {
           multiline
         />
         <TouchableOpacity
-          style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
+          style={[
+            styles.sendButton,
+            (!inputText.trim() || isSending) && styles.sendButtonDisabled,
+          ]}
           onPress={handleSend}
-          disabled={!inputText.trim()}
+          disabled={!inputText.trim() || isSending}
         >
-          <Text style={styles.sendButtonText}>➤</Text>
+          {isSending ? (
+            <ActivityIndicator color="#FFF" />
+          ) : (
+            <Text style={styles.sendButtonText}>➤</Text>
+          )}
         </TouchableOpacity>
       </View>
 
-      {/* Модальное окно участников */}
-      <Modal
-        visible={showParticipantsModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowParticipantsModal(false)}
-      >
-        <View style={styles.participantsModal}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Участники чата</Text>
-            <TouchableOpacity onPress={() => setShowParticipantsModal(false)}>
-              <Text style={styles.closeButton}>✕</Text>
-            </TouchableOpacity>
-          </View>
-          
-          {chat && (
-            <FlatList
-              data={chat.participants}
-              keyExtractor={(item) => item}
-              renderItem={({item: participantId}) => {
-                const participant = getUserData(participantId);
-                return (
-                  <TouchableOpacity 
-                    style={styles.participantItem}
-                    onPress={() => {
-                      setShowParticipantsModal(false);
-                      router.push(`/profile/${participantId}`);
-                    }}
-                  >
-                    <Image
-                      source={{ uri: participant?.avatar || 'https://randomuser.me/api/portraits/men/1.jpg' }}
-                      style={styles.participantAvatar}
-                    />
-                    <View style={styles.participantInfo}>
-                      <Text style={styles.participantName}>
-                        {participant?.name || 'Пользователь'}
-                      </Text>
-                      <Text style={styles.participantUsername}>
-                        @{participant?.username || 'username'}
-                      </Text>
-                    </View>
-                    {/* Показать роль для событийных чатов */}
-                    {chat.type === 'event' && chat.eventId && (() => {
-                      // Проверяем, является ли участник организатором события
-                      const event = events.find((e: any) => e.id === chat.eventId);
-                      if (event && event.organizerId === participantId) {
-                        return <Text style={styles.organizerBadge}>Организатор</Text>;
-                      }
-                      return null;
-                    })()}
-                  </TouchableOpacity>
-                );
-              }}
-            />
-          )}
-        </View>
-      </Modal>
+      {/* Унифицированный модал участников события (только для событийных чатов) */}
+      {chat?.type === 'event' && chat.eventId && (
+        <ParticipantsModal
+          visible={showParticipantsModal}
+          onClose={() => setShowParticipantsModal(false)}
+          eventId={chat.eventId}
+        />
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -272,6 +437,9 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 18,
     fontWeight: '600',
+    flex: 1,
+  },
+  chatNameContainer: {
     flex: 1,
   },
   participantsSection: {
@@ -350,6 +518,37 @@ const styles = StyleSheet.create({
   messageTime: {
     color: 'rgba(255,255,255,0.6)',
     fontSize: 11,
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
+  eventMessageContainer: {
+    borderRadius: 16,
+    overflow: 'visible',
+    marginBottom: 8,
+  },
+  ownEventMessage: {
+    alignItems: 'flex-end',
+  },
+  otherEventMessage: {
+    alignItems: 'flex-start',
+  },
+  eventPlaceholder: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 16,
+    minHeight: 100,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  eventPlaceholderText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  eventPlaceholderSubtext: {
+    color: '#999999',
+    fontSize: 12,
   },
   emptyState: {
     flex: 1,

@@ -8,6 +8,9 @@ interface Request {
   eventId?: string;
   userId?: string;
   status?: 'pending' | 'accepted' | 'rejected';
+  isInvite?: boolean; // Флаг для приглашений
+  isBusinessAccount?: boolean; // Флаг для бизнес-аккаунта
+  createdAt?: Date | string; // Дата создания запроса
 }
 
 interface RequestsListProps {
@@ -39,18 +42,21 @@ export default function RequestsList({ requests, isOutgoing = false, onAccept, o
     <ScrollView style={styles.container}>
       <View style={styles.listContainer}>
         {requests.map((request) => (
-          <RequestItem
-            key={request.id}
-            id={request.id}
-            type={request.type}
-            eventId={request.eventId}
-            userId={request.userId}
-            isOutgoing={isOutgoing}
-            status={request.status}
-            onAccept={onAccept}
-            onDecline={onDecline}
-            onPress={() => onRequestPress?.(request)}
-          />
+            <RequestItem
+              key={request.id}
+              id={request.id}
+              type={request.type}
+              eventId={request.eventId}
+              userId={request.userId}
+              isOutgoing={isOutgoing}
+              status={request.status}
+              isInvite={request.isInvite}
+              isBusinessAccount={request.isBusinessAccount}
+              createdAt={request.createdAt}
+              onAccept={onAccept}
+              onDecline={onDecline}
+              onPress={() => onRequestPress?.(request)}
+            />
         ))}
       </View>
     </ScrollView>

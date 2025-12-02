@@ -2,39 +2,28 @@ import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList } from 'react
 import { useLocalSearchParams } from 'expo-router';
 import { useEvents } from '../../context/EventsContext';
 import { Link } from 'expo-router';
+import { useLanguage } from '../../context/LanguageContext';
+import { useState, useEffect } from 'react';
 
 export default function UserFriendsListScreen() {
   const { id } = useLocalSearchParams();
-  const { getUserData, getOrganizerStats } = useEvents();
+  const { getUserData, getOrganizerStats, getUserFriendsList } = useEvents();
   
   const userId = Array.isArray(id) ? id[0] : id || '';
   const userData = getUserData(userId);
-  const userStats = getOrganizerStats(userId);
+  const [userStats, setUserStats] = useState<{ friends: number }>({ friends: 0 });
+  const { t } = useLanguage();
+
+  useEffect(() => {
+    if (userId) {
+      const stats = getOrganizerStats(userId);
+      setUserStats({ friends: stats.friends });
+    }
+  }, [userId, getOrganizerStats]);
   
-  // Для демонстрации создадим список друзей пользователя
-  // В реальном приложении это был бы отдельный API метод
-  const generateUserFriends = (targetUserId: string) => {
-    const allUserIds = [
-      'organizer-1', 'organizer-2', 'organizer-3', 'organizer-4', 'organizer-5',
-      'organizer-6', 'organizer-7', 'organizer-8', 'organizer-9', 'organizer-10',
-      'organizer-11', 'organizer-12', 'own-profile-1'
-    ];
-    
-    // Исключаем текущего пользователя из списка друзей
-    const possibleFriends = allUserIds.filter(userId => userId !== targetUserId);
-    
-    // Возвращаем случайную выборку друзей
-    const friendsCount = Math.min(userStats.friends, possibleFriends.length);
-    return possibleFriends.slice(0, friendsCount).map(friendId => {
-      const friendData = getUserData(friendId);
-      return {
-        id: friendId,
-        ...friendData
-      };
-    });
-  };
-  
-  const userFriends = generateUserFriends(userId);
+  // Используем единую функцию для получения списка друзей
+  // Для текущего пользователя - реальный список, для других - детерминированная генерация
+  const userFriends = getUserFriendsList(userId);
 
   const renderFriend = ({ item: friend }: { item: any }) => (
     <Link href={`/profile/${friend.id}`} asChild>
@@ -64,7 +53,7 @@ export default function UserFriendsListScreen() {
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>У этого пользователя пока нет друзей</Text>
+            <Text style={styles.emptyText}>{t.empty.userNoFriends}</Text>
           </View>
         }
       />

@@ -19,7 +19,8 @@ export default function MemoryMiniCard({ post, onPress }: MemoryMiniCardProps) {
     if (onPress) {
       onPress();
     } else {
-      router.push(`/event-profile/${post.eventId}`);
+      // Переход на страницу одного меморис поста
+      router.push(`/memory-post/${post.eventId}/${post.id}`);
     }
   };
 

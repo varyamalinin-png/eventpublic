@@ -4,7 +4,6 @@ export default function InboxLayout() {
   return (
     <Stack>
       <Stack.Screen name="index" options={{ headerShown: false }} />
-      <Stack.Screen name="requests" options={{ title: 'Requests' }} />
       <Stack.Screen name="[chatId]" options={{ headerShown: false }} />
     </Stack>
   );

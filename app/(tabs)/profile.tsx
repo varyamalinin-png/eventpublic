@@ -1,39 +1,204 @@
-import { View, Text, ScrollView, StyleSheet, Image, TouchableOpacity, TextInput, Modal, Dimensions } from 'react-native';
-import { Link, useRouter, useLocalSearchParams } from 'expo-router';
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { View, Text, ScrollView, StyleSheet, Image, TouchableOpacity, Modal, Dimensions } from 'react-native';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import EventCard from '../../components/EventCard';
-import MemoryMiniCard from '../../components/MemoryMiniCard';
 import TopBar from '../../components/TopBar';
 import { useEvents, Event } from '../../context/EventsContext';
+import { formatUsername } from '../../utils/username';
+import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger('Profile');
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function ProfileScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ eventId?: string }>();
-  const { events, getOrganizerStats, getFriendsList, getEventProfile, createEventProfile, eventProfiles, eventRequests, isUserParticipant, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember } = useEvents();
+  const { events, eventProfiles, getOrganizerStats, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember, getUserData, getUserRequestStatus, fetchEventProfile } = useEvents();
+  const { user: authUser } = useAuth();
+  const { t } = useLanguage();
   const [showEventFeed, setShowEventFeed] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showSecondRow, setShowSecondRow] = useState(false);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const [organizerStats, setOrganizerStats] = useState<{ complaints: number; friends: number } | null>(null);
 
-  const currentUserId = 'own-profile-1';
+  const currentUserId = authUser?.id;
+  const userData = currentUserId ? getUserData(currentUserId) : null;
+
+  // Загружаем статистику при монтировании и обновлении
+  useEffect(() => {
+    if (currentUserId) {
+      const stats = getOrganizerStats(currentUserId);
+      setOrganizerStats({ complaints: stats.complaints, friends: stats.friends });
+    }
+  }, [currentUserId, getOrganizerStats]);
   
-  // ОРГАНИЗАТОР: предстоящее && я_организатор
-  const organizedEvents = events.filter(event => 
-    isEventUpcoming(event) && isUserOrganizer(event, currentUserId)
-  );
+  // Мемоизируем все вычисления событий, чтобы избежать бесконечных перерендеров
+  const organizedEvents = useMemo(() => {
+    if (!currentUserId) return [];
+    return events.filter(event => {
+      // Исключаем отклоненные события
+      const userStatus = getUserRequestStatus(event, currentUserId);
+      if (userStatus === 'rejected') return false;
+      return isEventUpcoming(event) && isUserOrganizer(event, currentUserId);
+    });
+  }, [events, currentUserId, isEventUpcoming, isUserOrganizer, getUserRequestStatus]);
   
-  // УЧАСТНИК: предстоящее && я_участник (именно участник, не организатор)
-  const participatedEvents = events.filter(event => {
-    return isEventUpcoming(event) && isUserAttendee(event, currentUserId);
-  });
+  const participatedEvents = useMemo(() => {
+    if (!currentUserId) return [];
+    return events.filter(event => {
+      // Исключаем отклоненные события
+      const userStatus = getUserRequestStatus(event, currentUserId);
+      if (userStatus === 'rejected') return false;
+      return isEventUpcoming(event) && isUserAttendee(event, currentUserId);
+    });
+  }, [events, currentUserId, isEventUpcoming, isUserAttendee, getUserRequestStatus]);
+
+  // Для подсчета параметров: все события (текущие и прошлые)
+  // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий проверяем через eventProfiles, чтобы учесть удаление
+  const allOrganizedEvents = useMemo(() => {
+    if (!currentUserId) return [];
+    const filtered = events.filter(event => {
+      // Для текущих событий - проверяем обычным способом
+      if (isEventUpcoming(event)) {
+        return isUserOrganizer(event, currentUserId);
+      }
+      
+      // Для прошедших событий - проверяем через профиль
+      if (isEventPast(event)) {
+        const profile = eventProfiles.find(p => p.eventId === event.id);
+        if (profile) {
+          // Проверяем, есть ли пользователь в participants И является ли он организатором
+          const isParticipant = profile.participants.includes(currentUserId);
+          const isOrganizer = event.organizerId === currentUserId;
+          return isParticipant && isOrganizer;
+        }
+        // Если профиля нет - не считаем (пользователь был удален)
+        return false;
+      }
+      
+      return isUserOrganizer(event, currentUserId);
+    });
+    
+    logger.debug('allOrganizedEvents: отфильтровано', { filtered: filtered.length, total: events.length });
+    
+    return filtered;
+  }, [events, eventProfiles, currentUserId, isUserOrganizer, isEventUpcoming, isEventPast]);
+  
+  const allParticipatedEvents = useMemo(() => {
+    if (!currentUserId) return [];
+    const filtered = events.filter(event => {
+      // Для текущих событий - проверяем обычным способом
+      if (isEventUpcoming(event)) {
+        return isUserAttendee(event, currentUserId);
+      }
+      
+      // Для прошедших событий - проверяем через профиль
+      if (isEventPast(event)) {
+        const profile = eventProfiles.find(p => p.eventId === event.id);
+        if (profile) {
+          // Проверяем, есть ли пользователь в participants И НЕ является ли он организатором
+          const isParticipant = profile.participants.includes(currentUserId);
+          const isNotOrganizer = event.organizerId !== currentUserId;
+          return isParticipant && isNotOrganizer;
+        }
+        // Если профиля нет - не считаем (пользователь был удален)
+        return false;
+      }
+      
+      return isUserAttendee(event, currentUserId);
+    });
+    
+    logger.debug('allParticipatedEvents: отфильтровано', { filtered: filtered.length, total: events.length });
+    
+    return filtered;
+  }, [events, eventProfiles, currentUserId, isUserAttendee, isEventUpcoming, isEventPast]);
+  
+  // Общее количество всех событий пользователя (организовал + участвовал, без дублей)
+  const allUserEvents = useMemo(() => {
+    if (!currentUserId) return [];
+    const allEvents = [...allOrganizedEvents, ...allParticipatedEvents];
+    // Убираем дубликаты
+    const uniqueEvents = allEvents.filter((event, index, self) => 
+      index === self.findIndex(e => e.id === event.id)
+    );
+    
+    logger.debug('allUserEvents', { organized: allOrganizedEvents.length, participated: allParticipatedEvents.length, total: uniqueEvents.length });
+    
+    return uniqueEvents;
+  }, [allOrganizedEvents, allParticipatedEvents]);
   
   // Все события пользователя для ленты БЕЗ архивных событий
-  const userEvents = [...organizedEvents, ...participatedEvents].filter((event, index, self) => 
-    index === self.findIndex(e => e.id === event.id)
+  const userEvents = useMemo(() => 
+    [...organizedEvents, ...participatedEvents].filter((event, index, self) => 
+      index === self.findIndex(e => e.id === event.id)
+    ),
+    [organizedEvents, participatedEvents]
+  );
+
+  // Проверяем является ли событие прошедшим
+  // МЕМОРИ: прошедшее && я_член_события (организатор или принятый участник)
+  // КРИТИЧЕСКИ ВАЖНО: Проверяем через eventProfiles, чтобы удаление работало правильно
+  const pastEvents = useMemo(() => {
+    if (!currentUserId) return [];
+    const filtered = events.filter(event => {
+      if (!isEventPast(event)) return false;
+      
+      // Проверяем через профиль события - если пользователь удален из профиля, событие не показывается
+      const profile = eventProfiles.find(p => p.eventId === event.id);
+      if (profile) {
+        // Если есть профиль - проверяем, есть ли пользователь в participants
+        // Если пользователь удален (participants не включает currentUserId) - не показываем событие
+        const isParticipant = profile.participants.includes(currentUserId);
+        logger.debug(`pastEvents: событие ${event.id}, профиль найден`, { isParticipant });
+        return isParticipant;
+      }
+      
+      // КРИТИЧЕСКИ ВАЖНО: Если профиля нет - НЕ показываем событие
+      // Это предотвращает показ событий, где пользователь был удален, но профиль еще не загружен
+      // Профиль должен быть загружен через useFocusEffect или fetchEventProfile
+      // Если профиль не найден, значит либо он еще не создан, либо пользователь был удален
+      logger.debug(`pastEvents: событие ${event.id}, профиль НЕ найден - НЕ показываем событие (безопасный fallback)`);
+      return false;
+    });
+    
+    logger.debug('pastEvents: отфильтровано', { filtered: filtered.length, totalPast: events.filter(e => isEventPast(e)).length });
+    
+    return filtered.sort((a, b) => {
+      // Сортируем по дате+времени события: самое последнее прошедшее первым
+      const dateA = new Date(a.date + 'T' + a.time + ':00').getTime();
+      const dateB = new Date(b.date + 'T' + b.time + ':00').getTime();
+      return dateB - dateA; // Убывание: последнее первым
+    });
+  }, [events, eventProfiles, currentUserId, isEventPast, isUserEventMember]);
+  
+  // Загружаем профили для прошедших событий при открытии профиля
+  useFocusEffect(
+    useCallback(() => {
+      if (!currentUserId || !fetchEventProfile) return;
+      
+      const loadProfilesForPastEvents = async () => {
+        const pastEvents = events.filter(event => isEventPast(event));
+        logger.debug('Загружаем профили для прошедших событий', { count: pastEvents.length });
+        
+        for (const event of pastEvents) {
+          const existingProfile = eventProfiles.find(p => p.eventId === event.id);
+          if (!existingProfile) {
+            try {
+              await fetchEventProfile(event.id);
+            } catch (error) {
+              logger.warn(`Не удалось загрузить профиль для события ${event.id}:`, error);
+            }
+          }
+        }
+      };
+      
+      loadProfilesForPastEvents();
+    }, [currentUserId, events, eventProfiles, isEventPast, fetchEventProfile])
   );
 
   // Обработка открытия по параметру eventId
@@ -69,7 +234,7 @@ export default function ProfileScreen() {
             
             scrollToY = Math.max(0, Math.min(scrollToY, maxScrollY));
             
-            console.log('Scrolling to center event from URL, scrollToY:', scrollToY);
+            logger.debug('Scrolling to center event from URL', { scrollToY });
             scrollViewRef.current.scrollTo({ y: scrollToY, animated: true });
           }
         }, 200);
@@ -78,7 +243,7 @@ export default function ProfileScreen() {
       // Если параметр eventId удален из URL, закрываем ленту
       setShowEventFeed(false);
     }
-  }, [params.eventId, events, userEvents]);
+  }, [params.eventId, events, userEvents, pastEvents]);
   
   // Функция поиска для профиля
   const handleProfileSearch = (query: string) => {
@@ -118,29 +283,6 @@ export default function ProfileScreen() {
     });
   };
 
-  const archivedEvents = events.filter(event => {
-    // Простая логика: если в названии есть "архив" или дата в прошлом
-    const isArchived = event.title.toLowerCase().includes('архив') || 
-                      event.date.includes('прошло') ||
-                      event.date.includes('завершено');
-    return isArchived;
-  }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-  // Проверяем является ли событие прошедшим
-  // МЕМОРИ: прошедшее && я_член_события (организатор или принятый участник)
-  const pastEvents = events.filter(event => {
-    return isEventPast(event) && isUserEventMember(event, currentUserId);
-  }).sort((a, b) => {
-    // Сортируем по дате+времени события: самое последнее прошедшее первым
-    const dateA = new Date(a.date + 'T' + a.time + ':00').getTime();
-    const dateB = new Date(b.date + 'T' + b.time + ':00').getTime();
-    return dateB - dateA; // Убывание: последнее первым
-  });
-
-  // Все события пользователя для ленты в том же порядке что и в профиле
-  // Сначала организованные, потом участник, потом архив
-  // При дубликатах приоритет у последнего раздела
-  const allEvents = [...organizedEvents, ...participatedEvents, ...archivedEvents];
 
   // Фильтрация событий по поиску
   const filteredEvents = searchUserEvents(userEvents, searchQuery);
@@ -171,8 +313,7 @@ export default function ProfileScreen() {
   };
 
   const handleMiniaturePress = (event: Event) => {
-    console.log('🔵 handleMiniaturePress вызван для события:', event.id, event.title);
-    console.log('🔵 showEventFeed до:', showEventFeed);
+    logger.debug('handleMiniaturePress вызван для события', { eventId: event.id, eventTitle: event.title, showEventFeedBefore: showEventFeed });
     
     // Устанавливаем eventId в URL чтобы useEffect не закрывал ленту
     router.setParams({ eventId: event.id });
@@ -180,12 +321,10 @@ export default function ProfileScreen() {
     setSelectedEvent(event);
     setShowEventFeed(true);
     
-    console.log('🔵 showEventFeed установлено в true');
+    logger.debug('showEventFeed установлено в true');
     
     // Отладочная информация
-    console.log('Clicked event:', event.id, event.title);
-    console.log('Total events in feed:', userEvents.length);
-    console.log('Event index:', userEvents.findIndex(e => e.id === event.id));
+    logger.debug('Clicked event', { eventId: event.id, eventTitle: event.title, totalEvents: userEvents.length, eventIndex: userEvents.findIndex(e => e.id === event.id) });
     
     // Прокручиваем к нужному событию после рендера
     setTimeout(() => {
@@ -211,7 +350,7 @@ export default function ProfileScreen() {
         
         scrollToY = Math.max(0, Math.min(scrollToY, maxScrollY));
         
-        console.log('Scrolling to center event, scrollToY:', scrollToY);
+        logger.debug('Scrolling to center event', { scrollToY });
         scrollViewRef.current.scrollTo({ y: scrollToY, animated: true });
       }
     }, 200);
@@ -219,19 +358,46 @@ export default function ProfileScreen() {
 
   // Отладочная информация при каждом рендере
   useEffect(() => {
-    console.log('🟡 useEffect showEventFeed:', showEventFeed);
+    logger.debug('useEffect showEventFeed', { showEventFeed });
   }, [showEventFeed]);
   
   // Определяем какую коллекцию событий показывать в ленте
-  const eventsToShow = selectedEvent && pastEvents.find(e => e.id === selectedEvent.id) 
-    ? pastEvents 
-    : userEvents;
+  // УПРОЩЕННАЯ ЛОГИКА: Если selectedEvent прошедшее - показываем pastEvents, иначе userEvents
+  const eventsToShow = useMemo(() => {
+    if (selectedEvent && isEventPast(selectedEvent)) {
+      // Если открыто прошедшее событие - показываем прошедшие события (Memories)
+      return pastEvents;
+    }
+    // Иначе показываем обычные события пользователя
+    return userEvents;
+  }, [selectedEvent, pastEvents, userEvents, isEventPast]);
+
+  // КРИТИЧЕСКИ ВАЖНО: Все ранние возвраты должны быть ПОСЛЕ всех хуков
+  // Исправление: проверяем только authUser, getUserData всегда возвращает объект с дефолтными значениями
+  if (!authUser || !currentUserId) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.centered}>
+          <Text style={styles.emptyText}>Загрузка профиля...</Text>
+        </View>
+      </View>
+    );
+  }
+  
+  // Если userData все еще null (не должно происходить, но на всякий случай)
+  if (!userData) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.centered}>
+          <Text style={styles.emptyText}>Ошибка загрузки данных профиля</Text>
+        </View>
+      </View>
+    );
+  }
 
   // Если показываем ленту события
-  console.log('🔴 Render ProfileScreen, showEventFeed:', showEventFeed);
-  
   if (showEventFeed) {
-    console.log('🔴 Rendering event feed with', eventsToShow.length, 'events');
+    logger.debug('Rendering event feed', { eventsCount: eventsToShow.length, eventIds: eventsToShow.map(e => e.id).join(', ') });
     return (
       <View style={styles.container}>
         <TouchableOpacity 
@@ -243,9 +409,11 @@ export default function ProfileScreen() {
             if (params.eventId) {
               router.setParams({ eventId: undefined });
             }
+            // Переходим на общую страницу профиля (таб)
+            router.push('/(tabs)/profile');
           }}
         >
-          <Text style={styles.backText}>← Назад к профилю</Text>
+          <Text style={styles.backText}>← {t.profile.backToProfile}</Text>
         </TouchableOpacity>
         <ScrollView 
           ref={scrollViewRef} 
@@ -281,6 +449,7 @@ export default function ProfileScreen() {
                 organizerId={event.organizerId}
                 variant="default"
                 showSwipeAction={true}
+                context="own_profile"
                 mediaUrl={event.mediaUrl}
                 mediaType={event.mediaType}
                 mediaAspectRatio={event.mediaAspectRatio}
@@ -298,7 +467,7 @@ export default function ProfileScreen() {
   return (
     <View style={styles.container}>
       <TopBar
-        searchPlaceholder="Поиск моих событий..."
+        searchPlaceholder={t.profile.searchPlaceholderMy}
         onSearchChange={handleProfileSearch}
         searchQuery={searchQuery}
         showCalendar={true}
@@ -316,74 +485,77 @@ export default function ProfileScreen() {
       >
         {/* Информация о пользователе */}
         <View style={styles.userProfileContainer}>
-        {/* Аватарка */}
-        <TouchableOpacity onPress={() => setShowAvatarModal(true)}>
-          <Image 
-            source={{ uri: 'https://randomuser.me/api/portraits/women/68.jpg' }} 
-            style={styles.profileAvatar}
-          />
-        </TouchableOpacity>
+        {/* Аватарка и кнопка настроек */}
+        <View style={styles.avatarContainer}>
+          <TouchableOpacity onPress={() => setShowAvatarModal(true)}>
+            <Image 
+              source={{ uri: userData.avatar }} 
+              style={styles.profileAvatar}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.settingsButton}
+            onPress={() => router.push('/settings')}
+          >
+            <Text style={styles.settingsIcon}>⚙️</Text>
+          </TouchableOpacity>
+        </View>
         
         {/* Юзернейм */}
-        <Text style={styles.username}>@anna_k</Text>
+        <Text style={styles.username}>{formatUsername(userData.username)}</Text>
         
         {/* Имя и возраст */}
-        <Text style={styles.nameAndAge}>Анна К., 24 года</Text>
+        <Text style={styles.nameAndAge}>{userData.name}, {userData.age}</Text>
         
-        {/* Статистика */}
+        {/* О себе */}
+        {userData.bio && (
+          <Text style={styles.bio}>{userData.bio}</Text>
+        )}
+        
+        {/* Статистика - все сразу без раскрытия */}
         <View style={styles.statsContainer}>
           {/* Первый ряд */}
           <View style={styles.statsRow}>
-            <TouchableOpacity style={styles.statItem} onPress={() => router.push('/my-events')}>
-              <Text style={styles.statNumber}>{getOrganizerStats('own-profile-1').totalEvents}</Text>
-              <Text style={styles.statLabel}>Событий</Text>
+            <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/all-events/${currentUserId}`)}>
+              <Text style={styles.statNumber}>{allUserEvents.length}</Text>
+              <Text style={styles.statLabel}>{t.profile.statsEvents}</Text>
             </TouchableOpacity>
             
             <TouchableOpacity style={styles.statItem} onPress={() => router.push('/friends-list')}>
-              <Text style={styles.statNumber}>{getOrganizerStats('own-profile-1').friends}</Text>
-              <Text style={styles.statLabel}>Друзей</Text>
+              <Text style={styles.statNumber}>{organizerStats?.friends ?? 0}</Text>
+              <Text style={styles.statLabel}>{t.profile.statsFriends}</Text>
             </TouchableOpacity>
             
             <TouchableOpacity style={styles.statItem} onPress={() => router.push('/my-complaints')}>
-              <Text style={styles.statNumber}>{getOrganizerStats('own-profile-1').complaints}</Text>
-              <Text style={styles.statLabel}>Жалоб</Text>
+              <Text style={styles.statNumber}>{organizerStats?.complaints ?? 0}</Text>
+              <Text style={styles.statLabel}>{t.profile.statsComplaints}</Text>
             </TouchableOpacity>
           </View>
           
-          {/* Микрострелочка */}
-          <TouchableOpacity 
-            style={styles.expandButton} 
-            onPress={() => setShowSecondRow(!showSecondRow)}
-          >
-            <Text style={[styles.expandIcon, showSecondRow && styles.expandIconRotated]}>▼</Text>
-          </TouchableOpacity>
-          
-          {/* Второй ряд (раскрывается динамически) */}
-          {showSecondRow && (
-            <View style={styles.statsRow}>
-              <TouchableOpacity style={styles.statItem} onPress={() => router.push('/my-organized-events')}>
-                <Text style={styles.statNumber}>{organizedEvents.length}</Text>
-                <Text style={styles.statLabel}>Организовал</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.statItem} onPress={() => router.push('/my-participated-events')}>
-                <Text style={styles.statNumber}>{participatedEvents.length}</Text>
-                <Text style={styles.statLabel}>Участвовал</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.statItem} onPress={() => router.push('/passport-verification')}>
-                <Text style={styles.statNumber}>✓</Text>
-                <Text style={styles.statLabel}>Подтвержден</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+          {/* Второй ряд - всегда видимый */}
+          <View style={styles.statsRow}>
+            <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/organized-events/${currentUserId}`)}>
+              <Text style={styles.statNumber}>{allOrganizedEvents.length}</Text>
+              <Text style={styles.statLabel}>{t.profile.statsOrganized}</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/participated-events/${currentUserId}`)}>
+              <Text style={styles.statNumber}>{allParticipatedEvents.length}</Text>
+              <Text style={styles.statLabel}>{t.profile.statsParticipated}</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.statItem} onPress={() => router.push('/passport-verification')}>
+              <Text style={styles.statNumber}>✓</Text>
+              <Text style={styles.statLabel}>{t.profile.statsVerified}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
       {/* Результаты поиска или обычные разделы */}
       {searchQuery ? (
         <View style={styles.searchResults}>
-          <Text style={styles.searchResultsTitle}>Результаты поиска</Text>
+          <Text style={styles.searchResultsTitle}>{t.profile.searchResults}</Text>
           <View style={styles.eventsContainer}>
             {filteredEvents.length > 0 ? (
               filteredEvents.map((event, index) => {
@@ -429,13 +601,13 @@ export default function ProfileScreen() {
                 );
               })
             ) : (
-              <Text style={styles.emptyText}>События не найдены</Text>
+              <Text style={styles.emptyText}>{t.profile.eventsNotFound}</Text>
             )}
           </View>
         </View>
       ) : (
-        <View>
-          <Text style={styles.sectionTitle}>Организатор</Text>
+        <>
+          <Text style={styles.sectionTitle}>{t.profile.organizer}</Text>
           <View style={styles.eventsContainer}>
             {organizedEvents.length > 0 ? (
               organizedEvents.map((event, index) => {
@@ -480,11 +652,11 @@ export default function ProfileScreen() {
                 );
               })
             ) : (
-              <Text style={styles.emptyText}>Вы пока не организовали ни одного события</Text>
+              <Text style={styles.emptyText}>{t.profile.noOrganizedEvents}</Text>
             )}
           </View>
 
-          <Text style={styles.sectionTitle}>Участник</Text>
+          <Text style={styles.sectionTitle}>{t.profile.participant}</Text>
           <View style={styles.eventsContainer}>
             {participatedEvents.length > 0 ? (
               participatedEvents.map((event, index) => {
@@ -529,60 +701,61 @@ export default function ProfileScreen() {
                 );
               })
             ) : (
-              <Text style={styles.emptyText}>Вы пока не участвуете ни в одном событии</Text>
+              <Text style={styles.emptyText}>{t.profile.noParticipatedEvents}</Text>
             )}
           </View>
 
-          <Text style={styles.memoriesTitle}>Memories</Text>
+          <Text style={styles.memoriesTitle}>{t.profile.memories}</Text>
           <View style={styles.memoriesContainer}>
-              {pastEvents.length > 0 ? (
-                pastEvents.map((event, index) => {
-                  // Рассчитываем ширину карточки для трех колонок
-                  const containerPadding = 40; // 20px с каждой стороны
-                  const gap = 15; // Отступ между карточками
-                  const availableWidth = SCREEN_WIDTH - containerPadding;
-                  const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
-                  const isLastInRow = (index + 1) % 3 === 0;
-                  
-                  return (
-                    <View
-                      key={event.id}
-                      style={[
-                        { width: cardWidth },
-                        !isLastInRow && { marginRight: gap }
-                      ]}
-                    >
-                      <EventCard
-                        id={event.id}
-                        title={event.title}
-                        description={event.description}
-                        date={event.date}
-                        time={event.time}
-                        displayDate={event.displayDate}
-                        location={event.location}
-                        price={event.price}
-                        participants={event.participants}
-                        maxParticipants={event.maxParticipants}
-                        organizerAvatar={event.organizerAvatar}
-                        organizerId={event.organizerId}
-                        variant="miniature_1"
-                        showSwipeAction={false}
-                        showOrganizerAvatar={false}
-                        mediaUrl={event.mediaUrl}
-                        mediaType={event.mediaType}
-                        mediaAspectRatio={event.mediaAspectRatio}
-                        participantsList={event.participantsList}
-                        participantsData={event.participantsData}
-                        onMiniaturePress={() => handleMemoryPress(event.id)}
-                      />
-                    </View>
-                  );
-                })
-              ) : (
-              <Text style={styles.emptyText}>Memories пуст</Text>
+            {pastEvents.length > 0 ? (
+              pastEvents.map((event, index) => {
+                // Рассчитываем ширину карточки для трех колонок
+                const containerPadding = 40; // 20px с каждой стороны
+                const gap = 15; // Отступ между карточками
+                const availableWidth = SCREEN_WIDTH - containerPadding;
+                const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
+                const isLastInRow = (index + 1) % 3 === 0;
+                
+                return (
+                  <View
+                    key={event.id}
+                    style={[
+                      { width: cardWidth },
+                      !isLastInRow && { marginRight: gap }
+                    ]}
+                  >
+                    <EventCard
+                      id={event.id}
+                      title={event.title}
+                      description={event.description}
+                      date={event.date}
+                      time={event.time}
+                      displayDate={event.displayDate}
+                      location={event.location}
+                      price={event.price}
+                      participants={event.participants}
+                      maxParticipants={event.maxParticipants}
+                      organizerAvatar={event.organizerAvatar}
+                      organizerId={event.organizerId}
+                      variant="miniature_1"
+                      showSwipeAction={false}
+                      showOrganizerAvatar={false}
+                      mediaUrl={event.mediaUrl}
+                      mediaType={event.mediaType}
+                      mediaAspectRatio={event.mediaAspectRatio}
+                      participantsList={event.participantsList}
+                      participantsData={event.participantsData}
+                      context="memories"
+                      onMiniaturePress={() => handleMemoryPress(event.id)}
+                    />
+                  </View>
+                );
+              })
+            ) : (
+              <Text style={styles.emptyText}>{t.profile.memoriesEmpty}</Text>
             )}
           </View>
-        </View>
+        </>
       )}
       </ScrollView>
 
@@ -600,7 +773,7 @@ export default function ProfileScreen() {
         >
           <View style={styles.avatarModalContent}>
             <Image 
-              source={{ uri: 'https://randomuser.me/api/portraits/women/68.jpg' }} 
+              source={{ uri: userData.avatar }} 
               style={styles.avatarModalImage}
               resizeMode="contain"
             />
@@ -681,11 +854,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 20,
   },
+  avatarContainer: {
+    position: 'relative',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
   profileAvatar: {
     width: 100,
     height: 100,
     borderRadius: 50,
-    marginBottom: 10,
+  },
+  settingsButton: {
+    position: 'absolute',
+    top: 0,
+    right: -10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#121212',
+  },
+  settingsIcon: {
+    fontSize: 18,
   },
   username: {
     fontSize: 18,
@@ -696,7 +889,14 @@ const styles = StyleSheet.create({
   nameAndAge: {
     fontSize: 16,
     color: '#999',
+    marginBottom: 8,
+  },
+  bio: {
+    fontSize: 14,
+    color: '#CCC',
+    textAlign: 'center',
     marginBottom: 20,
+    paddingHorizontal: 20,
   },
   statsContainer: {
     alignItems: 'center',
@@ -707,24 +907,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     width: '100%',
     marginBottom: 10,
+    paddingHorizontal: 20,
   },
   statItem: {
     alignItems: 'center',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    minWidth: 50,
-  },
-  expandButton: {
-    alignItems: 'center',
-    paddingVertical: 5,
-  },
-  expandIcon: {
-    fontSize: 12,
-    color: '#999',
-    transform: [{ rotate: '0deg' }],
-  },
-  expandIconRotated: {
-    transform: [{ rotate: '180deg' }],
+    flex: 1,
   },
   statNumber: {
     fontSize: 16,
@@ -758,11 +947,21 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: 10,
   },
+  // Устаревшие стили, больше не используются
   eventsContainer: {
     paddingHorizontal: 20,
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'flex-start',
+  },
+  memoriesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    backgroundColor: '#121212',
+    width: '100%',
+    margin: 0,
+    paddingHorizontal: 20,
   },
   eventCard: {
     width: 110, // Фиксированная ширина для трех колонок
@@ -779,21 +978,17 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: 10,
   },
-  memoriesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-    backgroundColor: '#121212',
-    width: '100%',
-    margin: 0,
-    paddingHorizontal: 20,
-  },
   emptyText: {
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
     marginTop: 20,
     marginHorizontal: 20,
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   archivedEventWrapper: {
     position: 'relative',

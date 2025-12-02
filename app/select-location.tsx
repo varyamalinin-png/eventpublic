@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useRouter } from 'expo-router';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('SelectLocation');
 
 // Глобальное хранилище для выбранного места
 let globalSelectedLocation: { latitude: number; longitude: number; address: string } | null = null;
@@ -32,13 +35,14 @@ export default function SelectLocationScreen() {
   }, []);
 
   const generateMapHtml = () => {
+    const mapsApiKey = process.env.EXPO_PUBLIC_YANDEX_MAPS_API_KEY || 'e95f18c1-e796-4e6a-b2a9-0aafe5e420c4';
     const html = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <script src="https://api-maps.yandex.ru/2.1/?apikey=e95f18c1-e796-4e6a-b2a9-0aafe5e420c4&lang=ru_RU" type="text/javascript"></script>
+        <script src="https://api-maps.yandex.ru/2.1/?apikey=${mapsApiKey}&lang=ru_RU" type="text/javascript"></script>
         <style>
           body, html { margin: 0; padding: 0; height: 100%; background: #121212; }
           #map { width: 100%; height: 100%; }
@@ -149,7 +153,7 @@ export default function SelectLocationScreen() {
         });
       }
     } catch (error) {
-      console.error('Error parsing WebView message:', error);
+      logger.error('Error parsing WebView message:', error);
     }
   };
 

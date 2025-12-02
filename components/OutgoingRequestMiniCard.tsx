@@ -1,12 +1,18 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
+import { useAuth } from '../context/AuthContext';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('OutgoingRequestMiniCard');
 
 interface OutgoingRequestMiniCardProps {
   id: string;
   type: 'event' | 'friend';
   eventId?: string;
   userId?: string;
+  status?: 'pending' | 'accepted' | 'rejected';
   onPress?: () => void;
 }
 
@@ -15,35 +21,68 @@ export default function OutgoingRequestMiniCard({
   type, 
   eventId, 
   userId, 
+  status = 'pending',
   onPress 
 }: OutgoingRequestMiniCardProps) {
-  const { events, getUserData } = useEvents();
+  const router = useRouter();
+  const { events, getUserData, getEventPhotoForUser } = useEvents();
+  const { user: authUser } = useAuth();
+  const currentUserId = authUser?.id ?? null;
   
   const event = eventId ? events.find(e => e.id === eventId) : null;
   const user = userId ? getUserData(userId) : null;
 
   const handlePress = () => {
+    // Если есть кастомный обработчик, используем его
     if (onPress) {
       onPress();
+      return;
+    }
+    
+    // КРИТИЧЕСКИ ВАЖНО: Если событие не найдено (удалено) - не делаем ничего
+    // Иконка становится некликабельной автоматически, так как event === null
+    if (type === 'event' && eventId) {
+      // Проверяем, существует ли событие перед переходом
+      if (!event) {
+        logger.warn('Событие не найдено, переход невозможен');
+        return;
+      }
+      router.push(`/event-profile/${eventId}`);
+    } 
+    // Для друзей переходим в профиль пользователя
+    else if (type === 'friend' && userId) {
+      if (!user) {
+        logger.warn('Пользователь не найден, переход невозможен');
+        return;
+      }
+      router.push(`/profile/${userId}`);
     }
   };
 
+  // КРИТИЧЕСКИ ВАЖНО: Если событие удалено - делаем иконку некликабельной
+  const isDisabled = (type === 'event' && eventId && !event) || (type === 'friend' && userId && !user);
+  
   return (
     <TouchableOpacity 
-      style={styles.miniatureCard}
+      style={[styles.miniatureCard, isDisabled && styles.disabledCard]}
       onPress={handlePress}
-      activeOpacity={0.8}
+      activeOpacity={isDisabled ? 1 : 0.8}
+      disabled={isDisabled}
     >
       {/* Фоновое изображение */}
-      {(type === 'event' && event?.mediaUrl) || (type === 'friend' && user?.avatar) ? (
-        <View style={styles.miniatureBackgroundContainer}>
-          <Image 
-            source={{ uri: type === 'event' ? event?.mediaUrl : user?.avatar }} 
-            style={styles.miniatureBackgroundImage} 
-          />
-          <View style={styles.miniatureOverlay} />
-        </View>
-      ) : null}
+      {(() => {
+        const eventPhoto = type === 'event' && event ? getEventPhotoForUser(event.id, currentUserId ?? '') : null;
+        const displayPhoto = eventPhoto || (type === 'friend' && user?.avatar);
+        return displayPhoto ? (
+          <View style={styles.miniatureBackgroundContainer}>
+            <Image 
+              source={{ uri: displayPhoto }} 
+              style={styles.miniatureBackgroundImage} 
+            />
+            <View style={styles.miniatureOverlay} />
+          </View>
+        ) : null;
+      })()}
 
       {/* Аватарка организатора/пользователя в правом верхнем углу */}
       {type === 'event' && event ? (
@@ -87,10 +126,16 @@ export default function OutgoingRequestMiniCard({
         ) : null}
       </View>
 
-      {/* Статус запроса */}
-      <View style={styles.statusContainer}>
-        <Text style={styles.statusText}>Ожидает ответа</Text>
-      </View>
+      {/* Статус запроса - показываем только для pending и accepted */}
+      {status === 'pending' ? (
+        <View style={[styles.statusContainer, { backgroundColor: '#FF9500' }]}>
+          <Text style={styles.statusIcon}>⏱</Text>
+        </View>
+      ) : status === 'accepted' ? (
+        <View style={[styles.statusContainer, { backgroundColor: '#34C759' }]}>
+          <Text style={styles.statusIcon}>✓</Text>
+        </View>
+      ) : null}
     </TouchableOpacity>
   );
 }
@@ -105,6 +150,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F0F0',
     marginBottom: 10,
     marginTop: 5,
+  },
+  disabledCard: {
+    opacity: 0.5,
+  },
+  disabledCard: {
+    opacity: 0.5,
   },
   miniatureBackgroundContainer: {
     position: 'absolute',
@@ -165,25 +216,16 @@ const styles = StyleSheet.create({
     bottom: 8,
     left: 8,
     right: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     borderRadius: 8,
-    paddingVertical: 4,
+    paddingVertical: 6,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 28,
   },
-  statusText: {
+  statusIcon: {
     color: '#FFF',
-    fontSize: 10,
-    fontWeight: '500',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
-import { useEvents } from '../context/EventsContext';
-
-interface OutgoingRequestMiniCardProps {
-  id: string;
-  type: 'event' | 'friend';
-  eventId?: string;
-  userId?: string;
-  onPress?: () => void;
-}
 

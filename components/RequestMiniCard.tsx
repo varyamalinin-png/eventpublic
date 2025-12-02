@@ -2,6 +2,10 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
+import { useAuth } from '../context/AuthContext';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('RequestMiniCard');
 
 interface RequestMiniCardProps {
   id: string;
@@ -23,7 +27,9 @@ export default function RequestMiniCard({
   onPress 
 }: RequestMiniCardProps) {
   const router = useRouter();
-  const { events, getUserData } = useEvents();
+  const { events, getUserData, getEventPhotoForUser } = useEvents();
+  const { user: authUser } = useAuth();
+  const currentUserId = authUser?.id ?? null;
   
   const event = eventId ? events.find(e => e.id === eventId) : null;
   const user = userId ? getUserData(userId) : null;
@@ -35,32 +41,50 @@ export default function RequestMiniCard({
       return;
     }
     
-    // Для событий переходим в профиль с открытым событием
+    // КРИТИЧЕСКИ ВАЖНО: Если событие удалено - не делаем ничего
+    // Иконка становится некликабельной автоматически, так как event === null
     if (type === 'event' && eventId) {
-      router.push(`/(tabs)/profile?eventId=${eventId}`);
+      // Проверяем, существует ли событие перед переходом
+      if (!event) {
+        logger.warn('Событие не найдено, переход невозможен');
+        return;
+      }
+      router.push(`/event-profile/${eventId}`);
     } 
     // Для друзей переходим в профиль пользователя
     else if (type === 'friend' && userId) {
+      if (!user) {
+        logger.warn('Пользователь не найден, переход невозможен');
+        return;
+      }
       router.push(`/profile/${userId}`);
     }
   };
+  
+  // КРИТИЧЕСКИ ВАЖНО: Если событие удалено - делаем иконку некликабельной
+  const isDisabled = (type === 'event' && eventId && !event) || (type === 'friend' && userId && !user);
 
   return (
     <TouchableOpacity 
-      style={styles.miniatureCard}
-      onPress={handlePress}
-      activeOpacity={0.8}
+      style={[styles.miniatureCard, isDisabled && styles.disabledCard]}
+      onPress={onPress || handlePress}
+      activeOpacity={isDisabled ? 1 : 0.8}
+      disabled={isDisabled}
     >
       {/* Фоновое изображение */}
-      {(type === 'event' && event?.mediaUrl) || (type === 'friend' && user?.avatar) ? (
-        <View style={styles.miniatureBackgroundContainer}>
-          <Image 
-            source={{ uri: type === 'event' ? event?.mediaUrl : user?.avatar }} 
-            style={styles.miniatureBackgroundImage} 
-          />
-          <View style={styles.miniatureOverlay} />
-        </View>
-      ) : null}
+      {(() => {
+        const eventPhoto = type === 'event' && event ? getEventPhotoForUser(event.id, currentUserId ?? '') : null;
+        const displayPhoto = eventPhoto || (type === 'friend' && user?.avatar);
+        return displayPhoto ? (
+          <View style={styles.miniatureBackgroundContainer}>
+            <Image 
+              source={{ uri: displayPhoto }} 
+              style={styles.miniatureBackgroundImage} 
+            />
+            <View style={styles.miniatureOverlay} />
+          </View>
+        ) : null;
+      })()}
 
       {/* Аватарка организатора/пользователя в правом верхнем углу */}
       {type === 'event' && event ? (
