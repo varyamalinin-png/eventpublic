@@ -43,7 +43,7 @@ export default function OtherProfileScreen() {
       const stats = getOrganizerStats(userId);
       setOrganizerStats({ complaints: stats.complaints, friends: stats.friends });
     }
-  }, [userId, getOrganizerStats]);
+  }, [userId, getOrganizerStats, userFriendsMap]); // Добавлено userFriendsMap в зависимости
   
   // Проверяем, есть ли входящий запрос в друзья от этого пользователя
   const incomingFriendRequest = friendRequests.find(
