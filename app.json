@@ -34,55 +34,13 @@
             "localhost": {
               "NSExceptionAllowsInsecureHTTPLoads": true
             },
-            "unsqueamish-nondemonstratively-mammie.ngrok-free.dev": {
-              "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true
-            },
-            "trycloudflare.com": {
-              "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true
-            },
-            "mrna-monitor-bears-proposed.trycloudflare.com": {
-              "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true
-            },
-            "transmit-layout-census-context.trycloudflare.com": {
-              "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true
-            },
-            "formats-indication-regulations-shelf.trycloudflare.com": {
-              "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true
-            },
-            "connecticut-eden-patrick-maple.trycloudflare.com": {
-              "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true
-            },
-            "angels-lambda-silly-contracts.trycloudflare.com": {
-              "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true
-            },
-            "impossible-industrial-photos-discusses.trycloudflare.com": {
-              "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true
-            },
-            "eventpublic-production.up.railway.app": {
-              "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true
-            },
-            "railway.app": {
-              "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true
-            },
             "iventapp.ru": {
               "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true,
-              "NSExceptionRequiresForwardSecrecy": false
+              "NSIncludesSubdomains": true
             },
-            "www.iventapp.ru": {
-              "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSIncludesSubdomains": true,
-              "NSExceptionRequiresForwardSecrecy": false
+            "89.169.173.152": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
             }
           }
         }
@@ -96,10 +54,6 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
