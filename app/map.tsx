@@ -366,10 +366,14 @@ export default function MapScreen() {
             style={styles.map}
             provider={PROVIDER_GOOGLE}
             initialRegion={mapRegion}
+            region={mapRegion}
             showsUserLocation={true}
             showsMyLocationButton={false}
             mapType="standard"
             customMapStyle={darkMapStyle}
+            onMapReady={() => {
+              logger.debug('Map is ready');
+            }}
           >
             {eventsToShow.map((event) => {
               const lat = event.coordinates?.latitude;
