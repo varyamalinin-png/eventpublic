@@ -83,7 +83,7 @@ export class MailerService {
     };
 
     this.logger.log(`[MailerService] ✅ Using Yandex Cloud Email API to send email to ${email}`);
-    this.logger.log(`[MailerService] URL: ${fullUrl}`);
+    this.logger.log(`[MailerService] URL: ${yandexCloudUrl}`);
     this.logger.log(`[MailerService] From: ${this.yandexCloudFromEmail}, To: ${email}`);
 
     return new Promise((resolve, reject) => {
