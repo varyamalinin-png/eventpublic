@@ -2420,6 +2420,32 @@ const isHttpUrl = (value?: string | null): boolean => {
     // Подписка на обновление статуса запроса в друзья
     socket.on('friend:request:status', (requestData: any) => {
       logger.debug('🔄 Получено обновление статуса запроса в друзья через WebSocket:', requestData);
+      
+      // Применяем данные пользователей из события
+      if (requestData?.requester) {
+        applyServerUserDataToState(requestData.requester);
+      }
+      if (requestData?.addressee) {
+        applyServerUserDataToState(requestData.addressee);
+      }
+      
+      // Если запрос принят, обновляем userFriendsMap для обоих пользователей локально
+      if (requestData?.status === 'ACCEPTED' && requestData?.requesterId && requestData?.addresseeId) {
+        setUserFriendsMap(prev => {
+          const updated = { ...prev };
+          // Обновляем для обоих пользователей
+          if (!updated[requestData.requesterId]) updated[requestData.requesterId] = [];
+          if (!updated[requestData.requesterId].includes(requestData.addresseeId)) {
+            updated[requestData.requesterId] = [...updated[requestData.requesterId], requestData.addresseeId];
+          }
+          if (!updated[requestData.addresseeId]) updated[requestData.addresseeId] = [];
+          if (!updated[requestData.addresseeId].includes(requestData.requesterId)) {
+            updated[requestData.addresseeId] = [...updated[requestData.addresseeId], requestData.requesterId];
+          }
+          return updated;
+        });
+      }
+      
       // Синхронизируем запросы в друзья и друзей
       Promise.all([
         syncFriendRequestsFromServer(),

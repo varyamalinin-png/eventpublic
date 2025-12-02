@@ -155,9 +155,14 @@ export function useFriends({
 
         const friendsArray = Array.from(friendIds);
         setFriends(friendsArray);
-        setUserFriendsMap(() => {
-          const updated = { ...aggregatedMap };
+        setUserFriendsMap(prev => {
+          // Объединяем существующие данные с новыми, а не перезаписываем
+          const updated = { ...prev, ...aggregatedMap };
+          // Убеждаемся, что для текущего пользователя список друзей актуален
           if (!updated[actualUserId]) {
+            updated[actualUserId] = friendsArray;
+          } else {
+            // Обновляем список друзей текущего пользователя, сохраняя данные о друзьях других пользователей
             updated[actualUserId] = friendsArray;
           }
           return updated;
