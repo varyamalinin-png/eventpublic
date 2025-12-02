@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { useLanguage } from '../context/LanguageContext';
 
 interface MessageFolder {
   id: string;
@@ -20,6 +21,7 @@ export default function MessageFolders({
   onFolderSelect, 
   onCreateFolder 
 }: MessageFoldersProps) {
+  const { t } = useLanguage();
   return (
     <View style={styles.foldersContainer}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.foldersScroll}>
@@ -28,7 +30,7 @@ export default function MessageFolders({
           onPress={() => onFolderSelect(null)}
         >
           <Text style={[styles.folderText, selectedFolder === null && styles.selectedFolderText]}>
-            Все
+            {t.chat.all || 'All'}
           </Text>
         </TouchableOpacity>
         
@@ -43,6 +45,7 @@ export default function MessageFolders({
           >
             <Text style={[styles.folderText, selectedFolder === folder.id && styles.selectedFolderText]}>
               {folder.name}
+              {typeof folder.messageCount === 'number' ? ` (${folder.messageCount})` : ''}
             </Text>
           </TouchableOpacity>
         ))}
@@ -61,11 +64,10 @@ export default function MessageFolders({
 
 const styles = StyleSheet.create({
   foldersContainer: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: 'transparent', // Убираем фон
     paddingHorizontal: 20,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomWidth: 0, // Убираем нижнюю границу
   },
   foldersScroll: {
     flexDirection: 'row',

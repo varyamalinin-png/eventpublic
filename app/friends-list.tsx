@@ -1,9 +1,11 @@
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, FlatList } from 'react-native';
 import { useEvents } from '../context/EventsContext';
 import { Link } from 'expo-router';
+import { useLanguage } from '../context/LanguageContext';
 
 export default function FriendsListScreen() {
   const { getFriendsList } = useEvents();
+  const { t } = useLanguage();
   const friends = getFriendsList();
 
   const renderFriend = ({ item: friend }: { item: any }) => (
@@ -33,7 +35,7 @@ export default function FriendsListScreen() {
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>У вас пока нет друзей</Text>
+            <Text style={styles.emptyText}>{t.empty.noFriends}</Text>
           </View>
         }
       />

@@ -2,6 +2,9 @@ import React, { useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, PanResponder } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
+import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
+import { formatTimeAgo } from '../utils/timeAgo';
 
 interface RequestItemProps {
   id: string;
@@ -10,6 +13,9 @@ interface RequestItemProps {
   userId?: string;
   isOutgoing?: boolean;
   status?: 'pending' | 'accepted' | 'rejected';
+  isInvite?: boolean; // Флаг для приглашений
+  isBusinessAccount?: boolean; // Флаг для бизнес-аккаунта
+  createdAt?: Date | string; // Дата создания запроса
   onAccept?: (id: string) => void;
   onDecline?: (id: string) => void;
   onPress?: () => void;
@@ -22,17 +28,23 @@ export default function RequestItem({
   userId, 
   isOutgoing = false,
   status = 'pending',
+  isInvite = false,
+  isBusinessAccount = false,
+  createdAt,
   onAccept, 
   onDecline,
   onPress
 }: RequestItemProps) {
   const router = useRouter();
-  const { events, getUserData } = useEvents();
+  const { t } = useLanguage();
+  const { events, getUserData, getEventPhotoForUser } = useEvents();
+  const { user: authUser } = useAuth();
   const translateX = useRef(new Animated.Value(0)).current;
   
   const event = eventId ? events.find(e => e.id === eventId) : null;
   const user = userId ? getUserData(userId) : null;
-  const currentUser = getUserData('own-profile-1');
+  const currentUserId = authUser?.id ?? null;
+  const currentUser = currentUserId ? getUserData(currentUserId) : null;
 
   const panResponder = PanResponder.create({
     onMoveShouldSetPanResponder: (_, gestureState) => {
@@ -68,20 +80,18 @@ export default function RequestItem({
     if (onPress) {
       onPress();
     } else if (eventId) {
-      // Переходим на страницу с полной карточкой события
-      router.push(`/event/${eventId}`);
+      // Переходим в аккаунт события
+      router.push(`/event-profile/${eventId}`);
     }
   };
 
-  const getStatusText = () => {
+  const getStatusIcon = () => {
     switch (status) {
       case 'accepted':
-        return 'Принято';
-      case 'rejected':
-        return 'Отклонено';
+        return '✓';
       case 'pending':
       default:
-        return 'В ожидании';
+        return '⏱';
     }
   };
 
@@ -89,8 +99,6 @@ export default function RequestItem({
     switch (status) {
       case 'accepted':
         return '#34C759';
-      case 'rejected':
-        return '#FF3B30';
       case 'pending':
       default:
         return '#FF9500';
@@ -99,8 +107,8 @@ export default function RequestItem({
 
   return (
     <View style={styles.container}>
-      {/* Кнопки действий (скрыты за свайпом) */}
-      {!isOutgoing && (
+      {/* Кнопки действий (скрыты за свайпом) - не показываем для бизнес-аккаунтов */}
+      {!isOutgoing && !isBusinessAccount && (
         <View style={styles.swipeActions}>
           <TouchableOpacity 
             style={styles.declineButton}
@@ -120,16 +128,30 @@ export default function RequestItem({
       {/* Основной контент */}
       <Animated.View 
         style={[styles.requestItem, { transform: [{ translateX }] }]}
-        {...panResponder.panHandlers}
+        {...(!isBusinessAccount ? panResponder.panHandlers : {})}
       >
         {/* Аватарка пользователя */}
         <TouchableOpacity 
           style={styles.userAvatarContainer}
-          onPress={isOutgoing ? () => router.push('/(tabs)/profile') : handleUserPress}
+          onPress={
+            isOutgoing
+              ? () => {
+                  if (currentUserId) {
+                    router.push(`/profile/${currentUserId}`);
+                  } else {
+                    router.push('/(auth)');
+                  }
+                }
+              : handleUserPress
+          }
           activeOpacity={0.7}
         >
           <Image 
-            source={{ uri: isOutgoing ? currentUser.avatar : (user?.avatar || 'https://randomuser.me/api/portraits/men/1.jpg') }} 
+            source={{
+              uri: isOutgoing
+                ? currentUser?.avatar || 'https://randomuser.me/api/portraits/men/1.jpg'
+                : user?.avatar || 'https://randomuser.me/api/portraits/men/1.jpg',
+            }} 
             style={styles.userAvatar} 
           />
         </TouchableOpacity>
@@ -138,94 +160,157 @@ export default function RequestItem({
         <View style={styles.contentContainer}>
           {/* Текст запроса */}
           <View style={styles.textContainer}>
-            <Text style={[styles.requestText, { fontSize: isOutgoing ? 12 : 14 }]}>
-              {isOutgoing ? (
-                // Исходящие запросы - новая логика
-                <>
-                  {type === 'friend' 
-                    ? `Вы отправили заявку в друзья к ` 
-                    : `Вы хотите присоединиться к `
-                  }
-                  {type === 'friend' ? (
-                    <Text style={styles.userName}>{user?.name}</Text>
-                  ) : null}
-                </>
-              ) : (
-                // Входящие запросы
-                <>
-                  {type === 'friend' ? (
-                    // Запрос в друзья: "Имя Ф. хочет добавить в друзья"
-                    <>
-                      <Text style={styles.userName}>
-                        {user?.name ? `${user.name.split(' ')[0]} ${user.name.split(' ')[1]?.[0] || ''}.` : 'Пользователь'}
-                      </Text>
-                      {' хочет добавить в друзья'}
-                    </>
-                  ) : (
-                    // Запрос на событие: "Имя Ф. хочет присоединиться к"
-                    <>
-                      <Text style={styles.userName}>
-                        {user?.name ? `${user.name.split(' ')[0]} ${user.name.split(' ')[1]?.[0] || ''}.` : 'Пользователь'}
-                      </Text>
-                      {' хочет присоединиться к'}
-                    </>
-                  )}
-                </>
-              )}
-            </Text>
-            
-            {/* Микро-карточка события или аватарка пользователя */}
             {isOutgoing ? (
-              // Исходящие запросы - новая логика
-              <>
-                {type === 'event' && event ? (
+              // Исходящие запросы - новая структура
+              <View style={styles.outgoingRequestContent}>
+                <Text style={styles.requestText}>
+                  {type === 'friend' 
+                    ? t.requestItem.sentFriendRequest
+                    : isInvite
+                    ? t.requestItem.sentInvite
+                    : t.requestItem.sentJoinRequest
+                  }
+                </Text>
+                
+                {/* Аватар пользователя, которому отправлен запрос */}
+                {type === 'friend' && user ? (
                   <TouchableOpacity 
-                    style={styles.miniEventCard}
-                    onPress={handleEventPress}
-                    activeOpacity={0.7}
-                  >
-                    <Image 
-                      source={{ uri: event.mediaUrl || event.organizerAvatar }} 
-                      style={styles.miniEventImage} 
-                    />
-                  </TouchableOpacity>
-                ) : type === 'friend' && user ? (
-                  <TouchableOpacity 
-                    style={styles.targetUserAvatar}
+                    style={styles.inlineAvatar}
                     onPress={handleUserPress}
                     activeOpacity={0.7}
                   >
                     <Image 
                       source={{ uri: user.avatar }} 
-                      style={styles.targetUserAvatarImage} 
+                      style={styles.inlineAvatarImage} 
                     />
                   </TouchableOpacity>
-                ) : null}
-              </>
-            ) : (
-              // Входящие запросы - старая логика
-              <>
-                {type === 'event' && event && (
+                ) : isInvite && user ? (
+                  <>
+                    <TouchableOpacity 
+                      style={styles.inlineAvatar}
+                      onPress={handleUserPress}
+                      activeOpacity={0.7}
+                    >
+                      <Image 
+                        source={{ uri: user.avatar }} 
+                        style={styles.inlineAvatarImage} 
+                      />
+                    </TouchableOpacity>
+                    <Text style={styles.requestText}> {t.requestItem.toEvent} </Text>
+                    {event && (
+                      <TouchableOpacity 
+                        style={styles.inlineEventIcon}
+                        onPress={handleEventPress}
+                        activeOpacity={0.7}
+                      >
+                        <Image 
+                          source={{ uri: (() => {
+                            const viewerId = currentUserId ?? '';
+                            return getEventPhotoForUser(event.id, viewerId) || event.organizerAvatar;
+                          })()}} 
+                          style={styles.inlineEventIconImage} 
+                        />
+                      </TouchableOpacity>
+                    )}
+                  </>
+                ) : type === 'event' && event ? (
+                  // Для исходящих запросов на участие в событии показываем иконку события
                   <TouchableOpacity 
-                    style={styles.miniEventCard}
+                    style={styles.inlineEventIcon}
                     onPress={handleEventPress}
                     activeOpacity={0.7}
                   >
                     <Image 
-                      source={{ uri: event.mediaUrl || event.organizerAvatar }} 
-                      style={styles.miniEventImage} 
+                      source={{ uri: (() => {
+                        const viewerId = currentUserId ?? '';
+                        return getEventPhotoForUser(event.id, viewerId) || event.organizerAvatar;
+                      })()}} 
+                      style={styles.inlineEventIconImage} 
                     />
                   </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : (
+              // Входящие запросы
+              <Text style={styles.requestText}>
+                {type === 'friend' ? (
+                  // Запрос в друзья: "Имя Ф. хочет добавить в друзья"
+                  <>
+                    <Text style={styles.userName}>
+                      {user?.name ? `${user.name.split(' ')[0]} ${user.name.split(' ')[1]?.[0] || ''}.` : t.requestItem.user}
+                    </Text>
+                    {' '}{t.requestItem.wantsToBeFriend}
+                  </>
+                ) : isInvite ? (
+                  // Входящее приглашение: "Имя Ф. хочет пригласить вас на"
+                  <>
+                    <Text style={styles.userName}>
+                      {user?.name ? `${user.name.split(' ')[0]} ${user.name.split(' ')[1]?.[0] || ''}.` : t.requestItem.user}
+                    </Text>
+                    {' '}{t.requestItem.wantsToInviteYou}{' '}
+                  </>
+                ) : isBusinessAccount ? (
+                  // Для бизнес-аккаунтов: "(аватар) присоединился к (иконка события)"
+                  <Text style={styles.requestText}>присоединился к</Text>
+                ) : (
+                  // Запрос на событие: "Имя Ф. хочет присоединиться к"
+                  <>
+                    <Text style={styles.userName}>
+                      {user?.name ? `${user.name.split(' ')[0]} ${user.name.split(' ')[1]?.[0] || ''}.` : t.requestItem.user}
+                    </Text>
+                    {' '}{t.requestItem.wantsToJoin}
+                  </>
                 )}
-              </>
+              </Text>
             )}
           </View>
+
+          {/* Микро-карточка события для входящих запросов (не показываем для бизнес-аккаунтов) */}
+          {!isOutgoing && type === 'event' && event && !isBusinessAccount && (
+            <TouchableOpacity 
+              style={styles.miniEventCard}
+              onPress={handleEventPress}
+              activeOpacity={0.7}
+            >
+              <Image 
+                source={{ uri: (() => {
+                  const viewerId = currentUserId ?? '';
+                  return getEventPhotoForUser(event.id, viewerId) || event.organizerAvatar;
+                })()}} 
+                style={styles.miniEventImage} 
+              />
+            </TouchableOpacity>
+          )}
+          
+          {/* Для бизнес-аккаунтов показываем иконку события после текста "присоединился к" */}
+          {!isOutgoing && type === 'event' && isBusinessAccount && event && (
+            <TouchableOpacity 
+              style={styles.inlineEventIcon}
+              onPress={handleEventPress}
+              activeOpacity={0.7}
+            >
+              <Image 
+                source={{ uri: (() => {
+                  const viewerId = currentUserId ?? '';
+                  return getEventPhotoForUser(event.id, viewerId) || event.organizerAvatar;
+                })()}} 
+                style={styles.inlineEventIconImage} 
+              />
+            </TouchableOpacity>
+          )}
 
           {/* Статус для исходящих запросов */}
           {isOutgoing && (
             <View style={[styles.statusBadge, { backgroundColor: getStatusColor() }]}>
-              <Text style={styles.statusText}>{getStatusText()}</Text>
+              <Text style={styles.statusIcon}>{getStatusIcon()}</Text>
             </View>
+          )}
+
+          {/* Время создания запроса - самый правый элемент */}
+          {createdAt && (
+            <Text style={styles.timeAgo}>
+              {formatTimeAgo(createdAt)}
+            </Text>
           )}
         </View>
       </Animated.View>
@@ -258,7 +343,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#333',
   },
   userAvatarContainer: {
-    marginRight: 12,
+    marginRight: 10,
   },
   userAvatar: {
     width: 40,
@@ -275,12 +360,11 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 6,
   },
   requestText: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#FFF',
-    flex: 1,
   },
   userName: {
     fontWeight: '600',
@@ -295,6 +379,7 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 8,
     marginLeft: 8,
+    marginRight: 8,
     overflow: 'hidden',
   },
   miniEventImage: {
@@ -330,14 +415,23 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    width: 24,
+    height: 24,
     borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
-  statusText: {
+  statusIcon: {
     color: '#FFF',
-    fontSize: 10,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  timeAgo: {
+    fontSize: 12,
+    color: '#999',
+    minWidth: 50,
+    textAlign: 'right',
   },
   targetUserAvatar: {
     width: 32,
@@ -347,6 +441,37 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   targetUserAvatarImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  outgoingRequestContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'nowrap',
+    flex: 1,
+  },
+  inlineAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginHorizontal: 2,
+    overflow: 'hidden',
+  },
+  inlineAvatarImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  inlineEventIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    marginLeft: 2,
+    marginRight: 8,
+    overflow: 'hidden',
+  },
+  inlineEventIconImage: {
     width: '100%',
     height: '100%',
     resizeMode: 'cover',

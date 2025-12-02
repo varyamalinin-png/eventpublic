@@ -1,11 +1,14 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Animated, PanResponder, Dimensions, Image } from 'react-native';
-import { Link } from 'expo-router';
+import { Link, useRouter, useFocusEffect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import EventCard from '../../components/EventCard';
 import OrganizerCard from '../../components/OrganizerCard';
 import TopBar from '../../components/TopBar';
-import { useEvents, Event } from '../../context/EventsContext';
+import { useEvents, Event, User } from '../../context/EventsContext';
+import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
+import { formatUsername, normalizeUsername } from '../../utils/username';
 
 interface FilterOptions {
   participantsMin?: number;
@@ -14,6 +17,7 @@ interface FilterOptions {
   priceMax?: number;
   organizerAgeMin?: number;
   organizerAgeMax?: number;
+  selectedTags?: string[]; // Выбранные метки для фильтрации
 }
 
 interface EventFolder {
@@ -23,6 +27,7 @@ interface EventFolder {
 }
 
 export default function ExploreScreen() {
+  const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'GLOB' | 'FRIENDS'>('GLOB');
   const [searchQuery, setSearchQuery] = useState('');
   const [eventHeights, setEventHeights] = useState<{[key: string]: number}>({});
@@ -42,11 +47,45 @@ export default function ExploreScreen() {
   const [organizersScrollY, setOrganizersScrollY] = useState(0);
   const isSyncingRef = useRef(false);
   
-  const { events, getUserData, getOrganizerStats, getFriendsForEvents, userFolders, createUserFolder, getGlobalEvents } = useEvents();
+  const router = useRouter();
+  const { events, getUserData, getOrganizerStats, getFriendsForEvents, userFolders, createUserFolder, getGlobalEvents, isUserEventMember } = useEvents();
+  const { user: authUser } = useAuth();
+  const currentUserId = authUser?.id ?? null;
+
+  // ОТЛАДКА: Показываем информацию о загрузке данных
+  useEffect(() => {
+    if (events.length === 0 && currentUserId) {
+      // Показываем Alert только один раз через 3 секунды после загрузки
+      const timer = setTimeout(() => {
+        Alert.alert(
+          'Отладка',
+          `Событий: ${events.length}\nПользователь: ${currentUserId ? 'да' : 'нет'}\nПроверьте логи в консоли`,
+          [{ text: 'OK' }]
+        );
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [events.length, currentUserId]);
+  
+  // Отслеживаем количество событий для прокрутки к началу при появлении новых
+  const prevEventsCountRef = useRef<number>(0);
   
   // Состояния для фильтрации
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<FilterOptions>({});
+  
+  // Функция для подсчета активных фильтров
+  const getActiveFiltersCount = () => {
+    let count = 0;
+    if (filters.participantsMin !== undefined && filters.participantsMin > 0) count++;
+    if (filters.participantsMax !== undefined && filters.participantsMax > 0) count++;
+    if (filters.timeHoursMax !== undefined && filters.timeHoursMax > 0) count++;
+    if (filters.priceMax !== undefined && filters.priceMax > 0) count++;
+    if (filters.organizerAgeMin !== undefined && filters.organizerAgeMin > 0) count++;
+    if (filters.organizerAgeMax !== undefined && filters.organizerAgeMax > 0) count++;
+    if (filters.selectedTags && filters.selectedTags.length > 0) count++;
+    return count;
+  };
   
   // Состояния для папок событий (FRIENDS) - синхронизируем с userFolders из контекста
   const folders: EventFolder[] = userFolders.map(folder => {
@@ -73,6 +112,49 @@ export default function ExploreScreen() {
   const handleExploreSearch = (query: string) => {
     setSearchQuery(query);
   };
+
+  // Поиск пользователей по username
+  const knownUserIds = useMemo(() => {
+    const ids = new Set<string>();
+    events.forEach(event => {
+      ids.add(event.organizerId);
+      event.participantsData?.forEach(participant => {
+        if (participant.userId) {
+          ids.add(participant.userId);
+        }
+      });
+    });
+    userFolders.forEach(folder => {
+      folder.userIds.forEach(id => ids.add(id));
+    });
+    if (currentUserId) {
+      ids.add(currentUserId);
+    }
+    return Array.from(ids);
+  }, [events, userFolders, currentUserId]);
+
+  const searchUsers = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+
+    const query = normalizeUsername(searchQuery);
+    if (query.length < 2) return [];
+
+    const results: User[] = [];
+
+    for (const userId of knownUserIds) {
+      const userData = getUserData(userId);
+      const userUsername = normalizeUsername(userData.username);
+
+      if (userUsername.startsWith(query)) {
+        results.push({
+          id: userId,
+          ...userData,
+        });
+      }
+    }
+
+    return results.slice(0, 20);
+  }, [searchQuery, knownUserIds, getUserData]);
 
   // Расширенная фильтрация событий для explore
   const searchEvents = (eventsList: Event[], query: string) => {
@@ -125,11 +207,18 @@ export default function ExploreScreen() {
       .map(event => {
         const userData = getUserData(event.organizerId);
         const stats = getOrganizerStats(event.organizerId);
+        // Вычисляем sharedEvents если это не текущий пользователь
+        const sharedEvents = currentUserId && currentUserId !== event.organizerId
+          ? events.filter(e => isUserEventMember(e, currentUserId) && isUserEventMember(e, event.organizerId)).length
+          : undefined;
         return {
           eventId: event.id, // Добавляем ID события для связи
           organizerId: event.organizerId,
           ...userData,
-          stats
+          stats: {
+            ...stats,
+            sharedEvents
+          }
         };
       });
   };
@@ -207,6 +296,21 @@ export default function ExploreScreen() {
     }
   };
 
+  // Получаем все уникальные метки из событий
+  const allAvailableTags = useMemo(() => {
+    const tagsSet = new Set<string>();
+    events.forEach(event => {
+      if (event.tags && Array.isArray(event.tags)) {
+        event.tags.forEach(tag => {
+          if (tag && typeof tag === 'string') {
+            tagsSet.add(tag);
+          }
+        });
+      }
+    });
+    return Array.from(tagsSet).sort();
+  }, [events]);
+
   // Функция фильтрации событий
   const filterEvents = (eventsList: any[]) => {
     return eventsList.filter(event => {
@@ -239,6 +343,18 @@ export default function ExploreScreen() {
         if (filters.organizerAgeMax && orgAge > filters.organizerAgeMax) return false;
       }
       
+      // Фильтр по меткам (тегам)
+      if (filters.selectedTags && filters.selectedTags.length > 0) {
+        const eventTags = event.tags || [];
+        // Проверяем, что событие содержит хотя бы одну из выбранных меток
+        const hasSelectedTag = filters.selectedTags.some(selectedTag => 
+          eventTags.some((eventTag: string) => 
+            eventTag.toLowerCase() === selectedTag.toLowerCase()
+          )
+        );
+        if (!hasSelectedTag) return false;
+      }
+      
       return true;
     });
   };
@@ -263,6 +379,27 @@ export default function ExploreScreen() {
     const filtered = filterEvents(globalEvents);
     return searchEvents(filtered, searchQuery);
   }, [getGlobalEvents, filters, searchQuery]);
+  
+  // Прокручиваем к началу при появлении нового события организатора
+  useEffect(() => {
+    if (globEvents.length > prevEventsCountRef.current && eventsScrollViewRef.current && activeTab === 'GLOB') {
+      // Небольшая задержка для рендеринга
+      setTimeout(() => {
+        eventsScrollViewRef.current?.scrollTo({ y: 0, animated: true });
+      }, 300);
+    }
+    prevEventsCountRef.current = globEvents.length;
+  }, [globEvents.length, activeTab]);
+  
+  // Прокручиваем к началу при переходе на вкладку explore после создания события
+  useFocusEffect(
+    useMemo(() => {
+      return () => {
+        // При потере фокуса сохраняем количество событий
+        prevEventsCountRef.current = globEvents.length;
+      };
+    }, [globEvents.length])
+  );
   
   const friendsEvents = useMemo(() => {
     const filtered = filterEvents(baseFriendsEvents);
@@ -290,7 +427,7 @@ export default function ExploreScreen() {
   const currentEvents = useMemo(() => getCurrentTabEvents(), [activeTab, globEvents, folderEvents]);
   const organizersForCurrentEvents = useMemo(() => 
     getOrganizersForEvents(currentEvents), 
-    [currentEvents, getUserData, getOrganizerStats]
+    [currentEvents, getUserData, getOrganizerStats, currentUserId, events, isUserEventMember]
   );
 
   // Функции для работы с папками
@@ -304,6 +441,60 @@ export default function ExploreScreen() {
 
   const clearFilters = () => {
     setFilters({});
+  };
+
+  // Функции для удаления отдельных фильтров
+  const removeFilter = (filterType: keyof FilterOptions | 'participantsRange' | 'organizerAgeRange', value?: string) => {
+    if (filterType === 'selectedTags' && value) {
+      const currentTags = filters.selectedTags || [];
+      const newTags = currentTags.filter(t => t !== value);
+      setFilters({ ...filters, selectedTags: newTags.length > 0 ? newTags : undefined });
+    } else if (filterType === 'participantsRange') {
+      // Удаляем оба фильтра участников
+      setFilters({ ...filters, participantsMin: undefined, participantsMax: undefined });
+    } else if (filterType === 'organizerAgeRange') {
+      // Удаляем оба фильтра возраста организатора
+      setFilters({ ...filters, organizerAgeMin: undefined, organizerAgeMax: undefined });
+    } else {
+      setFilters({ ...filters, [filterType as keyof FilterOptions]: undefined });
+    }
+  };
+
+  // Получаем примененные фильтры для отображения
+  const getAppliedFilters = () => {
+    const applied: Array<{ type: keyof FilterOptions | 'participantsRange'; label: string; value: string | number }> = [];
+    
+    // Участники - показываем как диапазон
+    if ((filters.participantsMin !== undefined && filters.participantsMin > 0) || 
+        (filters.participantsMax !== undefined && filters.participantsMax > 0)) {
+      const min = filters.participantsMin || 0;
+      const max = filters.participantsMax || '∞';
+      const rangeText = max === '∞' ? `≥${min}` : min === 0 ? `≤${max}` : `${min}-${max}`;
+      applied.push({ type: 'participantsRange' as any, label: t.explore.filterLabelParticipants || 'Participants', value: rangeText });
+    }
+    
+    // Возраст организатора - показываем как диапазон
+    if ((filters.organizerAgeMin !== undefined && filters.organizerAgeMin > 0) || 
+        (filters.organizerAgeMax !== undefined && filters.organizerAgeMax > 0)) {
+      const min = filters.organizerAgeMin || 0;
+      const max = filters.organizerAgeMax || '∞';
+      const rangeText = max === '∞' ? `≥${min}` : min === 0 ? `≤${max}` : `${min}-${max}`;
+      applied.push({ type: 'organizerAgeRange' as any, label: t.explore.filterLabelOrganizerAge || 'Organizer age', value: rangeText });
+    }
+    
+    if (filters.timeHoursMax !== undefined && filters.timeHoursMax > 0) {
+      applied.push({ type: 'timeHoursMax', label: t.explore.filterLabelTime || 'Time', value: `${filters.timeHoursMax}h` });
+    }
+    if (filters.priceMax !== undefined && filters.priceMax > 0) {
+      applied.push({ type: 'priceMax', label: t.explore.filterLabelPrice || 'Price', value: `≤${filters.priceMax}₽` });
+    }
+    if (filters.selectedTags && filters.selectedTags.length > 0) {
+      filters.selectedTags.forEach(tag => {
+        applied.push({ type: 'selectedTags', label: tag, value: tag });
+      });
+    }
+    
+    return applied;
   };
 
   // Функции для папок
@@ -349,7 +540,7 @@ export default function ExploreScreen() {
             <Text style={[
               styles.tabText,
               showOrganizers && styles.activeTabText
-            ]}>Организаторы</Text>
+            ]}>{t.explore.organizers}</Text>
           </View>
         </View>
         
@@ -378,6 +569,7 @@ export default function ExploreScreen() {
                 stats={organizer.stats}
                 correspondingEventId={organizer.eventId}
                 eventHeight={eventHeight}
+                currentUserId={currentUserId}
               />
             );
           }) : null}
@@ -386,32 +578,87 @@ export default function ExploreScreen() {
 
       {/* Статичная верхняя панель - поиск и карта */}
       <TopBar
-        searchPlaceholder="Поиск событий..."
+        searchPlaceholder={t.explore.searchEventsAndPeople || 'Search events and people...'}
         onSearchChange={handleExploreSearch}
         searchQuery={searchQuery}
         showCalendar={true}
         showMap={true}
+        exploreTab={activeTab}
+        onFilterPress={() => setShowFilters(!showFilters)}
+        activeFiltersCount={getActiveFiltersCount()}
       />
 
+      {/* Результаты поиска пользователей - появляется динамически между TopBar и табами */}
+      {searchUsers.length > 0 && (
+        <View style={styles.usersSearchResults}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.usersSearchScrollContent}
+          >
+            {searchUsers.map((user) => (
+              <TouchableOpacity
+                key={user.id}
+                style={styles.userSearchItem}
+                onPress={() => router.push(`/profile/${user.id}`)}
+                activeOpacity={0.7}
+              >
+                <Image
+                  source={{ uri: user.avatar }}
+                  style={styles.userSearchAvatar}
+                />
+                <Text style={styles.userSearchUsername} numberOfLines={1}>
+                  {formatUsername(user.username)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Примененные фильтры - между поиском и табами */}
+      {getAppliedFilters().length > 0 && (
+        <View style={styles.appliedFiltersContainer}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.appliedFiltersScrollContent}
+          >
+            {getAppliedFilters().map((filter, index) => (
+              <View key={`${filter.type}-${index}`} style={styles.appliedFilterTag}>
+                <Text style={styles.appliedFilterText}>
+                  {filter.type === 'selectedTags' ? filter.value : `${filter.label}: ${filter.value}`}
+                </Text>
+                <TouchableOpacity
+                  style={styles.removeFilterButton}
+                  onPress={() => removeFilter(filter.type, typeof filter.value === 'string' ? filter.value : undefined)}
+                >
+                  <Text style={styles.removeFilterIcon}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       {/* Панель фильтров */}
       {showFilters && (
         <View style={styles.filtersPanel}>
-          <Text style={styles.filtersTitle}>Фильтры</Text>
+          <Text style={styles.filtersTitle}>{t.explore.filters}</Text>
           
           <View style={styles.filterRow}>
-            <Text style={styles.filterLabel}>Участники:</Text>
+            <Text style={styles.filterLabel}>{t.explore.filterLabelParticipants}</Text>
             <View style={styles.filterInputs}>
               <TextInput
                 style={styles.filterInput}
-                placeholder="От"
+                placeholder={t.explore.from}
                 keyboardType="numeric"
                 value={filters.participantsMin?.toString() || ''}
                 onChangeText={(text) => setFilters({...filters, participantsMin: parseInt(text) || undefined})}
               />
               <TextInput
                 style={styles.filterInput}
-                placeholder="До"
+                placeholder={t.createEvent.to || 'To'}
                 keyboardType="numeric"
                 value={filters.participantsMax?.toString() || ''}
                 onChangeText={(text) => setFilters({...filters, participantsMax: parseInt(text) || undefined})}
@@ -420,10 +667,10 @@ export default function ExploreScreen() {
           </View>
 
           <View style={styles.filterRow}>
-            <Text style={styles.filterLabel}>Время (часов до события):</Text>
+            <Text style={styles.filterLabel}>{t.explore.filterLabelTime || 'Time (hours until event):'}</Text>
             <TextInput
               style={styles.filterInputWide}
-              placeholder="Максимум"
+              placeholder={t.explore.maximum || 'Maximum'}
               keyboardType="numeric"
               value={filters.timeHoursMax?.toString() || ''}
               onChangeText={(text) => setFilters({...filters, timeHoursMax: parseInt(text) || undefined})}
@@ -431,10 +678,10 @@ export default function ExploreScreen() {
           </View>
 
           <View style={styles.filterRow}>
-            <Text style={styles.filterLabel}>Цена (максимум руб.):</Text>
+            <Text style={styles.filterLabel}>{t.explore.filterLabelPrice || 'Price (max rub.):'}</Text>
             <TextInput
               style={styles.filterInputWide}
-              placeholder="Максимум"
+              placeholder={t.explore.maximum || 'Maximum'}
               keyboardType="numeric"
               value={filters.priceMax?.toString() || ''}
               onChangeText={(text) => setFilters({...filters, priceMax: parseInt(text) || undefined})}
@@ -442,18 +689,18 @@ export default function ExploreScreen() {
           </View>
 
           <View style={styles.filterRow}>
-            <Text style={styles.filterLabel}>Возраст организатора:</Text>
+            <Text style={styles.filterLabel}>{t.explore.filterLabelOrganizerAge || 'Organizer age:'}</Text>
             <View style={styles.filterInputs}>
               <TextInput
                 style={styles.filterInput}
-                placeholder="От"
+                placeholder={t.explore.from || 'From'}
                 keyboardType="numeric"
                 value={filters.organizerAgeMin?.toString() || ''}
                 onChangeText={(text) => setFilters({...filters, organizerAgeMin: parseInt(text) || undefined})}
               />
               <TextInput
                 style={styles.filterInput}
-                placeholder="До"
+                placeholder={t.createEvent.to || 'To'}
                 keyboardType="numeric"
                 value={filters.organizerAgeMax?.toString() || ''}
                 onChangeText={(text) => setFilters({...filters, organizerAgeMax: parseInt(text) || undefined})}
@@ -461,12 +708,52 @@ export default function ExploreScreen() {
             </View>
           </View>
 
+          {/* Фильтр по меткам (тегам) */}
+          {allAvailableTags.length > 0 && (
+            <View style={styles.filterRowTags}>
+              <Text style={styles.filterLabel}>{t.explore.tags || 'Tags'}</Text>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false}
+                style={styles.tagsContainer}
+                contentContainerStyle={styles.tagsContent}
+              >
+                {allAvailableTags.map(tag => {
+                  const isSelected = filters.selectedTags?.includes(tag) || false;
+                  return (
+                    <TouchableOpacity
+                      key={tag}
+                      style={[
+                        styles.tagButton,
+                        isSelected && styles.tagButtonSelected
+                      ]}
+                      onPress={() => {
+                        const currentTags = filters.selectedTags || [];
+                        const newTags = isSelected
+                          ? currentTags.filter(t => t !== tag)
+                          : [...currentTags, tag];
+                        setFilters({ ...filters, selectedTags: newTags.length > 0 ? newTags : undefined });
+                      }}
+                    >
+                      <Text style={[
+                        styles.tagButtonText,
+                        isSelected && styles.tagButtonTextSelected
+                      ]}>
+                        {tag}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
+
           <View style={styles.filterActions}>
             <TouchableOpacity style={styles.clearFiltersButton} onPress={clearFilters}>
-              <Text style={styles.clearFiltersText}>Очистить</Text>
+              <Text style={styles.clearFiltersText}>{t.explore.clearFilters || 'Clear'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.applyFiltersButton} onPress={() => setShowFilters(false)}>
-              <Text style={styles.applyFiltersText}>Применить</Text>
+              <Text style={styles.applyFiltersText}>{t.explore.applyFilters || 'Apply'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -481,89 +768,6 @@ export default function ExploreScreen() {
         ]}
         {...panResponder.panHandlers}
       >
-      {/* Панель с табами GLOB/FRIENDS - теперь часть свайпаемого контента */}
-      <View style={styles.tabsBar}>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'GLOB' && styles.activeTab]}
-          onPress={() => {
-            setActiveTab('GLOB');
-            setShowOrganizers(false);
-            translateX.setValue(0);
-          }}
-        >
-          {activeTab === 'GLOB' && (
-            <TouchableOpacity 
-              style={styles.filterButtonSmall}
-              onPress={() => setShowFilters(!showFilters)}
-            >
-              <Text style={styles.filterIconSmall}>⚙️</Text>
-            </TouchableOpacity>
-          )}
-          <Text style={[styles.tabText, activeTab === 'GLOB' && styles.activeTabText]}>GLOB</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'FRIENDS' && styles.activeTab]}
-          onPress={() => {
-            setActiveTab('FRIENDS');
-            setShowOrganizers(false);
-            translateX.setValue(0);
-          }}
-        >
-          {activeTab === 'FRIENDS' && (
-            <TouchableOpacity 
-              style={styles.filterButtonSmall}
-              onPress={() => setShowFilters(!showFilters)}
-            >
-              <Text style={styles.filterIconSmall}>⚙️</Text>
-            </TouchableOpacity>
-          )}
-          <Text style={[styles.tabText, activeTab === 'FRIENDS' && styles.activeTabText]}>FRIENDS</Text>
-        </TouchableOpacity>
-
-      </View>
-
-      {/* Папки для FRIENDS - перемещены ниже табов */}
-      {activeTab === 'FRIENDS' && (
-        <View style={styles.foldersContainer}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.foldersScroll}>
-            <TouchableOpacity 
-              style={[styles.folderItem, selectedFolder === null && styles.selectedFolder]}
-              onPress={() => handleFolderPress(null)}
-            >
-              <Text style={[styles.folderText, selectedFolder === null && styles.selectedFolderText]}>
-                Все
-              </Text>
-            </TouchableOpacity>
-            
-            {folders.map((folder, index) => (
-              <TouchableOpacity
-                key={folder.id}
-                style={[
-                  styles.folderItem, 
-                  selectedFolder === folder.id && styles.selectedFolder,
-                  draggedIndex === index && styles.draggedFolder
-                ]}
-                onPress={() => handleFolderPress(folder.id, index)}
-                onLongPress={() => handleDragStart(index)}
-              >
-                <Text style={[styles.folderText, selectedFolder === folder.id && styles.selectedFolderText]}>
-                  {folder.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-            
-            {/* Кнопка добавления папки */}
-            <TouchableOpacity 
-              style={styles.addFolderButtonSmall}
-              onPress={() => setShowCreateFolder(true)}
-            >
-              <Text style={styles.addFolderIconSmall}>+</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-      )}
-
       <ScrollView 
         ref={eventsScrollViewRef}
         contentContainerStyle={styles.eventsContainer}
@@ -573,6 +777,72 @@ export default function ExploreScreen() {
         }}
         scrollEventThrottle={16}
       >
+        {/* Панель с табами GLOB/FRIENDS - теперь часть прокручиваемого контента */}
+        <View style={styles.tabsBar}>
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'GLOB' && styles.activeTab]}
+            onPress={() => {
+              setActiveTab('GLOB');
+              setShowOrganizers(false);
+              translateX.setValue(0);
+            }}
+          >
+            <Text style={[styles.tabText, activeTab === 'GLOB' && styles.activeTabText]}>GLOB</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'FRIENDS' && styles.activeTab]}
+            onPress={() => {
+              setActiveTab('FRIENDS');
+              setShowOrganizers(false);
+              translateX.setValue(0);
+            }}
+          >
+            <Text style={[styles.tabText, activeTab === 'FRIENDS' && styles.activeTabText]}>FRIENDS</Text>
+          </TouchableOpacity>
+
+        </View>
+
+        {/* Папки для FRIENDS - перемещены внутрь ScrollView */}
+        {activeTab === 'FRIENDS' && (
+          <View style={styles.foldersContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.foldersScroll}>
+              <TouchableOpacity 
+                style={[styles.folderItem, selectedFolder === null && styles.selectedFolder]}
+                onPress={() => handleFolderPress(null)}
+              >
+                <Text style={[styles.folderText, selectedFolder === null && styles.selectedFolderText]}>
+                  {t.settings.profileVisibility.all}
+                </Text>
+              </TouchableOpacity>
+              
+              {folders.map((folder, index) => (
+                <TouchableOpacity
+                  key={folder.id}
+                  style={[
+                    styles.folderItem, 
+                    selectedFolder === folder.id && styles.selectedFolder,
+                    draggedIndex === index && styles.draggedFolder
+                  ]}
+                  onPress={() => handleFolderPress(folder.id, index)}
+                  onLongPress={() => handleDragStart(index)}
+                >
+                  <Text style={[styles.folderText, selectedFolder === folder.id && styles.selectedFolderText]}>
+                    {folder.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              
+              {/* Кнопка добавления папки */}
+              <TouchableOpacity 
+                style={styles.addFolderButtonSmall}
+                onPress={() => setShowCreateFolder(true)}
+              >
+                <Text style={styles.addFolderIconSmall}>+</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        )}
         {activeTab === 'GLOB' ? (
           globEvents.length > 0 ? (
             globEvents.map((event) => (
@@ -596,13 +866,15 @@ export default function ExploreScreen() {
                 mediaAspectRatio={event.mediaAspectRatio}
                 participantsList={event.participantsList}
                 participantsData={event.participantsData}
+                context="explore"
+                tags={event.tags}
                 onLayout={(height) => handleEventLayout(event.id, height)}
               />
             ))
           ) : (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Пока нет событий</Text>
-              <Text style={styles.emptySubtext}>Создайте первое событие!</Text>
+              <Text style={styles.emptyText}>{t.empty.noEvents}</Text>
+              <Text style={styles.emptySubtext}>{t.empty.noEventsSubtext}</Text>
             </View>
           )
         ) : (
@@ -628,6 +900,8 @@ export default function ExploreScreen() {
                 mediaAspectRatio={event.mediaAspectRatio}
                 participantsList={event.participantsList}
                 participantsData={event.participantsData}
+                context="explore"
+                tags={event.tags || []}
                 onLayout={(height) => handleEventLayout(event.id, height)}
               />
             ))
@@ -650,10 +924,10 @@ export default function ExploreScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Создать папку</Text>
+            <Text style={styles.modalTitle}>{t.explore.createFolder}</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Название папки"
+              placeholder={t.explore.folderName}
               value={newFolderName}
               onChangeText={setNewFolderName}
               autoFocus={true}
@@ -663,13 +937,13 @@ export default function ExploreScreen() {
                 style={styles.modalCancelButton}
                 onPress={() => setShowCreateFolder(false)}
               >
-                <Text style={styles.modalCancelText}>Отмена</Text>
+                <Text style={styles.modalCancelText}>{t.common.cancel}</Text>
               </TouchableOpacity>
               <TouchableOpacity 
                 style={styles.modalCreateButton}
                 onPress={createFolder}
               >
-                <Text style={styles.modalCreateText}>Создать</Text>
+                <Text style={styles.modalCreateText}>{t.chat.create}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -774,15 +1048,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     position: 'relative',
   },
-  filterButtonSmall: {
-    position: 'absolute',
-    left: 0,
-    padding: 4,
-    opacity: 0.8,
-  },
-  filterIconSmall: {
-    fontSize: 16,
-  },
   activeTab: {
     borderBottomWidth: 2,
     borderBottomColor: '#0066CC',
@@ -798,7 +1063,7 @@ const styles = StyleSheet.create({
   },
   eventsContainer: {
     paddingHorizontal: 20,
-    paddingTop: 0, // Убираем компенсацию - теперь структура одинаковая в обеих лентах
+    paddingTop: 0,
     paddingBottom: 20,
   },
   eventCard: {
@@ -842,6 +1107,11 @@ const styles = StyleSheet.create({
   filterRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 12,
+  },
+  filterRowTags: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     marginBottom: 12,
   },
   filterLabel: {
@@ -901,13 +1171,109 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  // Стили для меток (тегов)
+  tagsContainer: {
+    flex: 1,
+    maxHeight: 50,
+  },
+  tagsContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  tagButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#333',
+    borderWidth: 1,
+    borderColor: '#555',
+    marginRight: 8,
+    marginBottom: 4,
+  },
+  tagButtonSelected: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#8B5CF6',
+  },
+  tagButtonText: {
+    color: '#CCC',
+    fontSize: 13,
+  },
+  tagButtonTextSelected: {
+    color: '#FFF',
+    fontWeight: '600',
+  },
   // Стили для папок
-  foldersContainer: {
+  usersSearchResults: {
     backgroundColor: '#1a1a1a',
-    paddingHorizontal: 20,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#333',
+  },
+  usersSearchScrollContent: {
+    paddingHorizontal: 20,
+    paddingRight: 20,
+  },
+  userSearchItem: {
+    alignItems: 'center',
+    marginRight: 20,
+    width: 70,
+  },
+  userSearchAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginBottom: 8,
+    backgroundColor: '#333',
+  },
+  userSearchUsername: {
+    fontSize: 12,
+    color: '#FFF',
+    textAlign: 'center',
+    maxWidth: 70,
+  },
+  // Стили для примененных фильтров
+  appliedFiltersContainer: {
+    backgroundColor: '#1a1a1a',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  appliedFiltersScrollContent: {
+    paddingHorizontal: 20,
+    paddingRight: 20,
+  },
+  appliedFilterTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#8B5CF6',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginRight: 8,
+  },
+  appliedFilterText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '500',
+    marginRight: 6,
+  },
+  removeFilterButton: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeFilterIcon: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  foldersContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
   addFolderButtonSmall: {
     width: 24,

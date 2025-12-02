@@ -1,134 +1,146 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useAuth } from './AuthContext';
+import { useLanguage } from './LanguageContext';
+import { apiRequest, ApiError, API_BASE_URL } from '../services/api';
+import { createSocketConnection, disconnectSocket, getSocket } from '../services/websocket';
+import type { Socket } from 'socket.io-client';
+import type {
+  Event,
+  User,
+  UserFolder,
+  FriendRequest,
+  EventRequest,
+  ScheduledEvent,
+  Chat,
+  ChatMessage,
+  MessageFolder,
+  EventProfile,
+  EventProfilePost,
+  Notification,
+} from '../types';
+import type { ServerUser, ServerEvent, ServerChat } from '../types/api';
+import { formatDate, formatRecurringEventDate } from '../utils/dateHelpers';
+import { createLogger } from '../utils/logger';
+import { isUserEventParticipant, filterUserEvents, filterUpcomingUserEvents, filterPastUserEvents } from '../utils/eventFilters';
+import { useNotifications } from '../hooks/notifications/useNotifications';
+import { useFriends } from '../hooks/friends/useFriends';
+import { useChats, mapServerMessageToClient } from '../hooks/chats/useChats';
+import { useEventActions } from '../hooks/events/useEventActions';
+import { useEventProfiles } from '../hooks/events/useEventProfiles';
+import { useEventRequests } from '../hooks/events/useEventRequests';
+import { useSavedEvents } from '../hooks/events/useSavedEvents';
+import { useSavedMemoryPosts } from '../hooks/events/useSavedMemoryPosts';
+import { useUserFolders } from '../hooks/folders/useUserFolders';
+import { useMessageFolders } from '../hooks/folders/useMessageFolders';
 
-export interface Event {
-  id: string;
+// Создаем именованный логгер для EventsContext
+const logger = createLogger('Events');
+
+// Функция для вычисления возраста из dateOfBirth
+const calculateAge = (dateOfBirth: string | Date | null | undefined): string | undefined => {
+  if (!dateOfBirth) return undefined;
+  
+  try {
+    const birthDate = typeof dateOfBirth === 'string' ? new Date(dateOfBirth) : dateOfBirth;
+    if (isNaN(birthDate.getTime())) return undefined;
+    
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    
+    return age > 0 ? `${age} лет` : undefined;
+  } catch (error) {
+    logger.warn('Failed to calculate age from dateOfBirth:', error);
+    return undefined;
+  }
+};
+
+// Re-export types for backward compatibility
+export type { 
+  Event, 
+  User, 
+  UserFolder, 
+  FriendRequest, 
+  EventRequest, 
+  ScheduledEvent, 
+  Chat, 
+  ChatMessage, 
+  EventProfile, 
+  EventProfilePost 
+};
+
+export type CreateEventInput = {
   title: string;
-  description: string;
-  date: string; // Формат: "2024-05-15"
-  time: string; // Формат: "18:00"
-  displayDate: string; // Формат: "15 мая" - для отображения
-  displayTime: string; // Формат: "18:00" - для отображения
+  description?: string;
+  date: string;
+  time: string;
   location: string;
-  coordinates?: {
-    latitude: number;
-    longitude: number;
-  };
-  price: string;
-  participants: number;
+  price?: string;
   maxParticipants: number;
-  organizerAvatar: string;
-  organizerId: string;
-  mediaUrl?: string;
+  mediaUrl?: string; // Обрезанное фото для карточки
+  originalMediaUrl?: string; // Оригинальное фото для профиля
   mediaType?: 'image' | 'video';
   mediaAspectRatio?: number;
-  participantsList?: string[];
-  participantsData?: Array<{ avatar: string; userId: string; name?: string }>;
-  createdAt: Date;
-}
+  coordinates?: { latitude: number; longitude: number };
+  ageRestriction?: {
+    min: number;
+    max: number;
+  };
+  genderRestriction?: string[];
+  visibility?: {
+    type: 'all' | 'friends' | 'all_except_friends' | 'all_except_excluded' | 'only_me' | 'me_and_excluded';
+    excludedUsers?: string[];
+  };
+  invitedUsers?: string[];
+  // Поля для регулярных событий
+  isRecurring?: boolean;
+  recurringType?: 'daily' | 'weekly' | 'monthly' | 'custom';
+  recurringDays?: number[];
+  recurringDayOfMonth?: number;
+  recurringCustomDates?: string[];
+  // Метки (теги)
+  tags?: string[];
+  // Дополнительные поля
+  targeting?: {
+    enabled?: boolean;
+    reach?: number;
+    responses?: number;
+  };
+};
 
-export interface FriendRequest {
-  id: string;
-  fromUserId: string;
-  toUserId: string;
-  status: 'pending' | 'accepted' | 'rejected';
-  createdAt: Date;
-}
-
-export interface User {
-  id: string;
+type UserProfilePatch = Partial<{
   name: string;
   username: string;
   avatar: string;
   age: string;
   bio: string;
   geoPosition: string;
-}
+  dateOfBirth: string;
+  showAge: boolean;
+  accountType: 'personal' | 'business';
+}>;
 
-export interface UserFolder {
-  id: string;
+type UserProfile = {
   name: string;
-  userIds: string[];
-}
-
-export interface ChatMessage {
-  id: string;
-  chatId: string;
-  fromUserId: string;
-  text: string;
-  createdAt: Date;
-}
-
-export interface Chat {
-  id: string;
-  type: 'event' | 'personal';
-  eventId?: string; // Для событийных чатов
-  name: string; // Название чата
-  participants: string[]; // ID участников
-  lastMessage?: ChatMessage;
-  lastActivity: Date;
-  createdAt: Date;
-}
-
-export interface Message {
-  id: string;
-  fromUserId: string;
-  toUserId: string;
-  text: string;
-  createdAt: Date;
-}
-
-export interface EventRequest {
-  id: string;
-  eventId: string;
-  userId: string;
-  status: 'pending' | 'accepted' | 'rejected';
-  createdAt: Date;
-}
-
-export interface ScheduledEvent {
-  id: string;
-  eventId: string;
-  time: string; // HH:MM
-  date: string; // YYYY-MM-DD
-  status: 'pending' | 'confirmed' | 'cancelled';
-  createdAt: Date;
-}
-
-export interface EventProfilePost {
-  id: string;
-  eventId: string;
-  authorId: string;
-  type: 'photo' | 'video' | 'text' | 'music';
-  content: string; // URL для медиа или текст
-  caption?: string;
-  title?: string; // Для музыки: название трека
-  artist?: string; // Для музыки: исполнитель
-  artwork_url?: string; // Для музыки: обложка трека
-  createdAt: Date;
-  showInProfile?: boolean; // Флаг для отображения в профиле пользователя
-}
-
-export interface EventProfile {
-  id: string;
-  eventId: string;
-  name: string; // название события
-  description: string; // описание события
-  date: string;
-  time: string; // HH:MM - время события
-  location: string;
-  participants: string[]; // ID участников
-  organizerId: string;
-  isCompleted: boolean;
-  posts: EventProfilePost[];
-  createdAt: Date;
-}
+  username: string;
+  avatar: string;
+  age: string;
+  bio: string;
+  geoPosition: string;
+  accountType?: 'personal' | 'business'; // Тип аккаунта: личный или бизнес
+};
 
 interface EventsContextType {
   events: Event[];
-  addEvent: (event: Omit<Event, 'id' | 'createdAt'>) => void;
+  createEvent: (input: CreateEventInput) => Promise<Event | null>;
   updateEvent: (id: string, updates: Partial<Event>) => void;
-  deleteEvent: (id: string) => void;
-  getUserData: (userId: string) => { name: string; username: string; avatar: string; age: string; bio: string; geoPosition: string };
+  deleteEvent: (id: string) => Promise<void>;
+  getUserData: (userId: string) => UserProfile;
+  updateUserData: (userId: string, updates: Partial<{ name: string; username: string; avatar: string; age: string; bio: string; geoPosition: string }>) => void;
   getOrganizerStats: (organizerId: string) => {
     totalEvents: number;
     organizedEvents: number;
@@ -139,53 +151,110 @@ interface EventsContextType {
   // Система друзей
   friends: string[]; // ID друзей текущего пользователя
   friendRequests: FriendRequest[];
-  sendFriendRequest: (toUserId: string) => void;
-  removeFriend: (userId: string) => void;
-  respondToFriendRequest: (requestId: string, accepted: boolean) => void;
+  sendFriendRequest: (toUserId: string) => Promise<void>;
+  removeFriend: (userId: string) => Promise<void>;
+  respondToFriendRequest: (requestId: string, accepted: boolean) => Promise<void>;
   getFriendsList: () => User[];
+  getUserFriendsList: (userId: string) => User[];
   isFriend: (userId: string) => boolean;
   getFriendsForEvents: () => Event[];
   // Система папок пользователей
   userFolders: UserFolder[];
-  addUserToFolder: (userId: string, folderId: string) => void;
-  removeUserFromFolder: (userId: string, folderId: string) => void;
-  createUserFolder: (name: string) => void;
+  addUserToFolder: (userId: string, folderId: string) => Promise<void>;
+  removeUserFromFolder: (userId: string, folderId: string) => Promise<void>;
+  createUserFolder: (name: string) => Promise<void>;
+  deleteUserFolder: (folderId: string) => Promise<void>;
   getEventsByUserFolder: (folderId: string) => Event[];
-  // Система сообщений
-  messages: Message[];
-  addMessage: (message: Omit<Message, 'id' | 'createdAt'>) => void;
-  getMessagesByUserFolder: (folderId: string) => Message[];
+  messageFolders: MessageFolder[];
+  refreshMessageFolders: () => Promise<void>;
+  createMessageFolder: (name: string) => Promise<MessageFolder | null>;
+  addChatsToMessageFolder: (folderId: string, chatIds: string[]) => Promise<void>;
+  removeChatFromMessageFolder: (folderId: string, chatId: string) => Promise<void>;
   // Система чатов
   chats: Chat[];
   chatMessages: ChatMessage[];
   createEventChat: (eventId: string) => void;
   createEventChatWithParticipants: (eventId: string, firstAcceptedUserId: string) => void;
-  createPersonalChat: (otherUserId: string) => string;
-  sendChatMessage: (chatId: string, text: string) => void;
+  createPersonalChat: (otherUserId: string) => Promise<string>;
+  sendChatMessage: (chatId: string, text: string, eventId?: string, postId?: string) => Promise<void>;
+  sendEventToChats: (eventId: string, chatIds: string[]) => Promise<void>;
+  sendMemoryPostToChats: (eventId: string, postId: string, chatIds: string[]) => Promise<void>;
   getChatMessages: (chatId: string) => ChatMessage[];
   getChat: (chatId: string) => Chat | null;
   getChatsForUser: (userId: string) => Chat[];
-  addParticipantToChat: (eventId: string, userId: string) => void;
+  addParticipantToChat: (eventId: string, userId: string) => Promise<void>;
   // Система профилей событий
   eventRequests: EventRequest[];
   eventProfiles: EventProfile[];
   sendEventRequest: (eventId: string, userId: string) => void;
+  sendEventInvite: (eventId: string, fromUserId: string, toUserId: string, event?: Event) => void; // Отправка приглашения на событие (event опционально для новых событий)
+  acceptInvitation: (requestId: string) => Promise<void>; // Принятие приглашения (invited → accepted)
+  rejectInvitation: (requestId: string) => Promise<void>; // Отклонение приглашения (invited → rejected)
   respondToEventRequest: (requestId: string, accepted: boolean) => void;
+  cancelEventRequest: (eventId: string, userId: string) => void; // Отмена запроса на участие
+  removeEventRequestById: (requestId: string) => void; // Удаление запроса по ID
+  cancelEventParticipation: (eventId: string, userId: string) => void; // Отмена участия (удаление из участников)
+  cancelEvent: (eventId: string) => void; // Отмена события (полное удаление)
+  cancelOrganizerParticipation: (eventId: string) => void; // Отмена участия организатора (удаление организатора, событие остается)
+  removeParticipantFromEvent: (eventId: string, userId: string) => void; // Удаление участника из события (для организатора)
   getEventProfile: (eventId: string) => EventProfile | null;
-  createEventProfile: (eventId: string) => void;
-  addEventProfilePost: (eventId: string, post: Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>) => void;
-  updateEventProfile: (eventId: string, updates: Partial<EventProfile>) => void;
-  updateEventProfilePost: (eventId: string, postId: string, updates: Partial<EventProfilePost>) => void;
+  fetchEventProfile: (eventId: string) => Promise<EventProfile | null>;
+  createEventProfile: (eventId: string) => Promise<void>;
+  addEventProfilePost: (eventId: string, post: Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>) => Promise<void>;
+  updateEventProfile: (eventId: string, updates: Partial<EventProfile>) => Promise<void>;
+  updateEventProfilePost: (eventId: string, postId: string, updates: Partial<EventProfilePost>) => Promise<void>;
   getEventParticipants: (eventId: string) => string[];
   canEditEventProfile: (eventId: string, userId: string) => boolean;
   // Новые функции для системы участия
   getMyEventRequests: () => EventRequest[];
   getEventOrganizer: (eventId: string) => { name: string; username: string; avatar: string; age: string; bio: string; geoPosition: string } | null;
   getMyEventParticipationStatus: (eventId: string) => 'pending' | 'accepted' | 'rejected' | null;
+  // Универсальная проверка участия пользователя в событии
+  isUserParticipant: (event: Event, userId: string) => boolean;
   // Функции для календарей
   getMyCalendarEvents: () => Event[];
   getUserCalendarEvents: (userId: string) => Event[];
   getGlobalEvents: () => Event[];
+  // Новая декларативная система состояний
+  isEventUpcoming: (event: Event) => boolean;
+  isEventPast: (event: Event) => boolean;
+  isEventFull: (event: Event) => boolean;
+  isEventNotFull: (event: Event) => boolean;
+  isUserOrganizer: (event: Event, userId: string) => boolean;
+  isUserAttendee: (event: Event, userId: string) => boolean;
+  isUserEventMember: (event: Event, userId: string) => boolean;
+  getUserRequestStatus: (event: Event, userId: string) => 'organizer' | 'accepted' | 'rejected' | 'pending' | 'not_requested';
+  getUserRelationship: (event: Event, userId: string) => 'invited' | 'organizer' | 'accepted' | 'waiting' | 'rejected' | 'non_member';
+  isFriendOfOrganizer: (event: Event, userId: string) => boolean;
+  getAcceptedParticipants: (eventId: string) => string[];
+  // Персонализированные фото событий
+  getEventPhotoForUser: (eventId: string, userId: string, viewerUserId?: string, useOriginal?: boolean) => string | undefined;
+  setPersonalEventPhoto: (eventId: string, userId: string, photoUrl: string) => void;
+  // Сохраненные события
+  savedEvents: string[];
+  saveEvent: (eventId: string) => void;
+  removeSavedEvent: (eventId: string) => void;
+  isEventSaved: (eventId: string) => boolean;
+  getSavedEvents: () => Event[];
+  // Система сохраненных меморис постов
+  savedMemoryPosts: Array<{ eventId: string; postId: string }>;
+  saveMemoryPost: (eventId: string, postId: string) => void;
+  removeSavedMemoryPost: (eventId: string, postId: string) => void;
+  isMemoryPostSaved: (eventId: string, postId: string) => boolean;
+  getSavedMemoryPosts: <T extends { id: string }>(eventProfiles: Array<{ eventId: string; posts: T[] }>) => Array<{ post: T; eventId: string }>;
+  // Удаление и жалобы на меморис посты
+  deleteEventProfilePost: (eventId: string, postId: string) => Promise<void>;
+  reportMemoryPost: (eventId: string, postId: string) => Promise<void>;
+  // Система уведомлений
+  notifications: Notification[];
+  unreadNotificationsCount: number;
+  refreshNotifications: () => Promise<void>;
+  markNotificationAsRead: (notificationId: string) => Promise<void>;
+  markAllNotificationsAsRead: () => Promise<void>;
+  deleteNotification: (notificationId: string) => Promise<void>;
+  // Поиск пользователей по username
+  findUserByUsername: (username: string) => Promise<User | null>;
+  isUsernameAvailable: (username: string) => Promise<boolean>;
 }
 
 const EventsContext = createContext<EventsContextType | undefined>(undefined);
@@ -202,1318 +271,443 @@ interface EventsProviderProps {
   children: ReactNode;
 }
 
-// Функция для конвертации даты YYYY-MM-DD в формат ДД.ММ.ГГ
-const formatDate = (dateStr: string): string => {
-  const date = new Date(dateStr);
-  const day = date.getDate().toString().padStart(2, '0');
-  const month = (date.getMonth() + 1).toString().padStart(2, '0');
-  const year = date.getFullYear().toString().substring(2);
-  return `${day}.${month}.${year}`;
-};
+// formatDate теперь импортируется из utils/dateHelpers
 
-export const EventsProvider: React.FC<EventsProviderProps> = ({ children }) => {
-  const [events, setEvents] = useState<Event[]>([
-    // БУДУЩИЕ СОБЫТИЯ (GLOB и FRIENDS)
-    
-    // События на сегодня и завтра
-    {
-      id: '1',
-      title: 'Утренняя пробежка',
-      description: 'Легкая пробежка по набережной для всех уровней подготовки',
-      date: '2025-10-26',
-      time: '07:00',
-      displayDate: '26.10.25',
-      displayTime: '07:00',
-      location: 'Набережная Москвы-реки',
-      coordinates: { latitude: 55.7447, longitude: 37.6178 },
-      price: 'Бесплатно',
-      participants: 8,
-      maxParticipants: 15,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/1.jpg',
-      organizerId: 'organizer-1',
-      mediaUrl: 'https://picsum.photos/400/600?random=1',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [
-        'https://randomuser.me/api/portraits/women/2.jpg',
-        'https://randomuser.me/api/portraits/men/3.jpg',
-        'https://randomuser.me/api/portraits/women/4.jpg',
-        'https://randomuser.me/api/portraits/men/5.jpg',
-        'https://randomuser.me/api/portraits/women/6.jpg',
-        'https://randomuser.me/api/portraits/men/7.jpg',
-        'https://randomuser.me/api/portraits/women/8.jpg',
-        'https://randomuser.me/api/portraits/men/9.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '2',
-      title: 'Мастер-класс по рисованию',
-      description: 'Изучаем акварельную технику с профессиональным художником',
-      date: '2025-10-26',
-      time: '14:00',
-      displayDate: '26.10.25',
-      displayTime: '14:00',
-      location: 'Арт-студия "Кисточка"',
-      coordinates: { latitude: 55.7616, longitude: 37.6094 },
-      price: '2500 руб',
-      participants: 3,
-      maxParticipants: 8,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/10.jpg',
-      organizerId: 'organizer-2',
-      mediaUrl: 'https://picsum.photos/400/300?random=2',
-      mediaType: 'image',
-      mediaAspectRatio: 1.33,
-      participantsList: [
-        'https://randomuser.me/api/portraits/men/11.jpg',
-        'https://randomuser.me/api/portraits/women/12.jpg',
-        'https://randomuser.me/api/portraits/men/13.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '3',
-      title: 'Танцевальный вечер',
-      description: 'Латиноамериканские танцы для начинающих и продолжающих',
-      date: '2025-10-27',
-      time: '19:30',
-      displayDate: '27.10.25',
-      displayTime: '19:30',
-      location: 'Танцевальная школа "Пассион"',
-      coordinates: { latitude: 55.7522, longitude: 37.6156 },
-      price: '800 руб',
-      participants: 12,
-      maxParticipants: 20,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/14.jpg',
-      organizerId: 'organizer-3',
-      mediaUrl: 'https://picsum.photos/400/600?random=3',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [
-        'https://randomuser.me/api/portraits/women/15.jpg',
-        'https://randomuser.me/api/portraits/men/16.jpg',
-        'https://randomuser.me/api/portraits/women/17.jpg',
-        'https://randomuser.me/api/portraits/men/18.jpg',
-        'https://randomuser.me/api/portraits/women/19.jpg',
-        'https://randomuser.me/api/portraits/men/20.jpg',
-        'https://randomuser.me/api/portraits/women/21.jpg',
-        'https://randomuser.me/api/portraits/men/22.jpg',
-        'https://randomuser.me/api/portraits/women/23.jpg',
-        'https://randomuser.me/api/portraits/men/24.jpg',
-        'https://randomuser.me/api/portraits/women/68.jpg' // Текущий пользователь участвует
-      ],
-      participantsData: [
-        { avatar: 'https://randomuser.me/api/portraits/women/15.jpg', userId: 'organizer-1', name: 'Максим П.' },
-        { avatar: 'https://randomuser.me/api/portraits/men/16.jpg', userId: 'organizer-2', name: 'Анна К.' },
-        { avatar: 'https://randomuser.me/api/portraits/women/17.jpg', userId: 'organizer-3', name: 'Дмитрий Р.' },
-        { avatar: 'https://randomuser.me/api/portraits/men/18.jpg', userId: 'organizer-4', name: 'Елена В.' },
-        { avatar: 'https://randomuser.me/api/portraits/women/19.jpg', userId: 'organizer-5', name: 'Алексей М.' }
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '4',
-      title: 'Поход в горы',
-      description: 'Восхождение на ближайшие горы с ночевкой в палатках',
-      date: '2025-10-28',
-      time: '06:00',
-      displayDate: '21 января',
-      displayTime: '06:00',
-      location: 'Эльбрус, Кабардино-Балкария',
-      coordinates: { latitude: 43.3550, longitude: 42.4392 },
-      price: '5000 руб',
-      participants: 5,
-      maxParticipants: 10,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/25.jpg',
-      organizerId: 'organizer-4',
-      mediaUrl: 'https://picsum.photos/400/300?random=4',
-      mediaType: 'image',
-      mediaAspectRatio: 1.33,
-      participantsList: [
-        'https://randomuser.me/api/portraits/men/26.jpg',
-        'https://randomuser.me/api/portraits/women/27.jpg',
-        'https://randomuser.me/api/portraits/men/28.jpg',
-        'https://randomuser.me/api/portraits/women/29.jpg',
-        'https://randomuser.me/api/portraits/men/30.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '5',
-      title: 'Кулинарный мастер-класс',
-      description: 'Готовим итальянскую пасту от шеф-повара ресторана',
-      date: '2025-10-29',
-      time: '16:00',
-      displayDate: '22 января',
-      displayTime: '16:00',
-      location: 'Кулинарная студия "Вкус"',
-      coordinates: { latitude: 55.7749, longitude: 37.6326 },
-      price: '3500 руб',
-      participants: 6,
-      maxParticipants: 12,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/31.jpg',
-      organizerId: 'organizer-5',
-      mediaUrl: 'https://picsum.photos/400/600?random=5',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [
-        'https://randomuser.me/api/portraits/women/32.jpg',
-        'https://randomuser.me/api/portraits/men/33.jpg',
-        'https://randomuser.me/api/portraits/women/34.jpg',
-        'https://randomuser.me/api/portraits/men/35.jpg',
-        'https://randomuser.me/api/portraits/women/36.jpg',
-        'https://randomuser.me/api/portraits/men/37.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '6',
-      title: 'Встреча IT-сообщества',
-      description: 'Обсуждаем новые технологии и обмениваемся опытом',
-      date: '2025-10-30',
-      time: '18:30',
-      displayDate: '23 января',
-      displayTime: '18:30',
-      location: 'Коворкинг "Сколково"',
-      coordinates: { latitude: 55.6938, longitude: 37.3356 },
-      price: '500 руб',
-      participants: 15,
-      maxParticipants: 25,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/38.jpg',
-      organizerId: 'organizer-6',
-      mediaUrl: 'https://picsum.photos/400/300?random=6',
-      mediaType: 'image',
-      mediaAspectRatio: 1.33,
-      participantsList: [
-        'https://randomuser.me/api/portraits/women/39.jpg',
-        'https://randomuser.me/api/portraits/men/40.jpg',
-        'https://randomuser.me/api/portraits/women/41.jpg',
-        'https://randomuser.me/api/portraits/men/42.jpg',
-        'https://randomuser.me/api/portraits/women/43.jpg',
-        'https://randomuser.me/api/portraits/men/44.jpg',
-        'https://randomuser.me/api/portraits/women/45.jpg',
-        'https://randomuser.me/api/portraits/men/46.jpg',
-        'https://randomuser.me/api/portraits/women/47.jpg',
-        'https://randomuser.me/api/portraits/men/48.jpg',
-        'https://randomuser.me/api/portraits/women/49.jpg',
-        'https://randomuser.me/api/portraits/men/50.jpg',
-        'https://randomuser.me/api/portraits/women/51.jpg',
-        'https://randomuser.me/api/portraits/men/52.jpg',
-        'https://randomuser.me/api/portraits/women/68.jpg' // Текущий пользователь участвует
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '7',
-      title: 'Йога в парке',
-      description: 'Расслабляющая практика йоги на свежем воздухе',
-      date: '2025-10-31',
-      time: '09:00',
-      displayDate: '24 января',
-      displayTime: '09:00',
-      location: 'Парк Царицыно',
-      coordinates: { latitude: 55.6209, longitude: 37.6815 },
-      price: 'Бесплатно',
-      participants: 0,
-      maxParticipants: 15,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/53.jpg',
-      organizerId: 'organizer-7',
-      mediaUrl: 'https://picsum.photos/400/600?random=7',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [],
-      createdAt: new Date()
-    },
-
-    // СОБЫТИЯ, ОРГАНИЗОВАННЫЕ ТЕКУЩИМ ПОЛЬЗОВАТЕЛЕМ
-    {
-      id: '8',
-      title: 'Встреча выпускников',
-      description: 'Встречаемся с одноклассниками после долгой разлуки',
-      date: '2025-11-01',
-      time: '19:00',
-      displayDate: '25 января',
-      displayTime: '19:00',
-      location: 'Ресторан "Маяк"',
-      coordinates: { latitude: 55.7558, longitude: 37.6176 },
-      price: '3000 руб',
-      participants: 12,
-      maxParticipants: 20,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/68.jpg',
-      organizerId: 'own-profile-1',
-      mediaUrl: 'https://picsum.photos/400/300?random=8',
-      mediaType: 'image',
-      mediaAspectRatio: 1.33,
-      participantsList: [
-        'https://randomuser.me/api/portraits/men/54.jpg',
-        'https://randomuser.me/api/portraits/women/55.jpg',
-        'https://randomuser.me/api/portraits/men/56.jpg',
-        'https://randomuser.me/api/portraits/women/57.jpg',
-        'https://randomuser.me/api/portraits/men/58.jpg',
-        'https://randomuser.me/api/portraits/women/59.jpg',
-        'https://randomuser.me/api/portraits/men/60.jpg',
-        'https://randomuser.me/api/portraits/women/61.jpg',
-        'https://randomuser.me/api/portraits/men/62.jpg',
-        'https://randomuser.me/api/portraits/women/63.jpg',
-        'https://randomuser.me/api/portraits/men/64.jpg',
-        'https://randomuser.me/api/portraits/women/65.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '9',
-      title: 'Благотворительная ярмарка',
-      description: 'Продаем handmade товары в пользу детского дома',
-      date: '2025-11-02',
-      time: '12:00',
-      displayDate: '26 января',
-      displayTime: '12:00',
-      location: 'ТЦ "Галерея"',
-      coordinates: { latitude: 55.7616, longitude: 37.6094 },
-      price: 'Бесплатно',
-      participants: 8,
-      maxParticipants: 15,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/68.jpg',
-      organizerId: 'own-profile-1',
-      mediaUrl: 'https://picsum.photos/400/600?random=9',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [
-        'https://randomuser.me/api/portraits/men/66.jpg',
-        'https://randomuser.me/api/portraits/women/67.jpg',
-        'https://randomuser.me/api/portraits/men/69.jpg',
-        'https://randomuser.me/api/portraits/women/70.jpg',
-        'https://randomuser.me/api/portraits/men/71.jpg',
-        'https://randomuser.me/api/portraits/women/72.jpg',
-        'https://randomuser.me/api/portraits/men/73.jpg',
-        'https://randomuser.me/api/portraits/women/74.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '10',
-      title: 'Новогодняя вечеринка',
-      description: 'Встречаем Новый год в кругу друзей с фейерверками',
-      date: '2025-11-05',
-      time: '21:00',
-      displayDate: '29 января',
-      displayTime: '21:00',
-      location: 'Загородный дом, Подмосковье',
-      coordinates: { latitude: 55.7558, longitude: 37.6176 },
-      price: '2000 руб',
-      participants: 18,
-      maxParticipants: 30,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/68.jpg',
-      organizerId: 'own-profile-1',
-      mediaUrl: 'https://picsum.photos/400/300?random=10',
-      mediaType: 'image',
-      mediaAspectRatio: 1.33,
-      participantsList: [
-        'https://randomuser.me/api/portraits/men/75.jpg',
-        'https://randomuser.me/api/portraits/women/76.jpg',
-        'https://randomuser.me/api/portraits/men/77.jpg',
-        'https://randomuser.me/api/portraits/women/78.jpg',
-        'https://randomuser.me/api/portraits/men/79.jpg',
-        'https://randomuser.me/api/portraits/women/80.jpg',
-        'https://randomuser.me/api/portraits/men/81.jpg',
-        'https://randomuser.me/api/portraits/women/82.jpg',
-        'https://randomuser.me/api/portraits/men/83.jpg',
-        'https://randomuser.me/api/portraits/women/84.jpg',
-        'https://randomuser.me/api/portraits/men/85.jpg',
-        'https://randomuser.me/api/portraits/women/86.jpg',
-        'https://randomuser.me/api/portraits/men/87.jpg',
-        'https://randomuser.me/api/portraits/women/88.jpg',
-        'https://randomuser.me/api/portraits/men/89.jpg',
-        'https://randomuser.me/api/portraits/women/90.jpg',
-        'https://randomuser.me/api/portraits/men/91.jpg',
-        'https://randomuser.me/api/portraits/women/92.jpg'
-      ],
-      createdAt: new Date()
-    },
-
-    // СОБЫТИЯ, В КОТОРЫХ УЧАСТВУЕТ ТЕКУЩИЙ ПОЛЬЗОВАТЕЛЬ
-    {
-      id: '11',
-      title: 'Книжный клуб',
-      description: 'Обсуждаем роман "1984" Джорджа Оруэлла',
-      date: '2025-01-30',
-      time: '16:00',
-      displayDate: '30 января',
-      displayTime: '16:00',
-      location: 'Библиотека им. Ленина',
-      coordinates: { latitude: 55.7522, longitude: 37.6156 },
-      price: 'Бесплатно',
-      participants: 6,
-      maxParticipants: 10,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/93.jpg',
-      organizerId: 'organizer-8',
-      mediaUrl: 'https://picsum.photos/400/600?random=11',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [
-        'https://randomuser.me/api/portraits/women/68.jpg', // Текущий пользователь участвует
-        'https://randomuser.me/api/portraits/men/94.jpg',
-        'https://randomuser.me/api/portraits/women/95.jpg',
-        'https://randomuser.me/api/portraits/men/96.jpg',
-        'https://randomuser.me/api/portraits/women/97.jpg',
-        'https://randomuser.me/api/portraits/men/98.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '12',
-      title: 'Винная дегустация',
-      description: 'Знакомимся с французскими винами с сомелье',
-      date: '2025-01-31',
-      time: '19:30',
-      displayDate: '31 января',
-      displayTime: '19:30',
-      location: 'Винный бар "Сомелье"',
-      coordinates: { latitude: 55.7458, longitude: 37.6376 },
-      price: '4500 руб',
-      participants: 4,
-      maxParticipants: 8,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/99.jpg',
-      organizerId: 'organizer-9',
-      mediaUrl: 'https://picsum.photos/400/300?random=12',
-      mediaType: 'image',
-      mediaAspectRatio: 1.33,
-      participantsList: [
-        'https://randomuser.me/api/portraits/women/68.jpg', // Текущий пользователь участвует
-        'https://randomuser.me/api/portraits/men/100.jpg',
-        'https://randomuser.me/api/portraits/women/1.jpg',
-        'https://randomuser.me/api/portraits/men/2.jpg'
-      ],
-      createdAt: new Date()
-    },
-
-    // АРХИВНЫЕ СОБЫТИЯ (прошлые даты)
-    {
-      id: '13',
-      title: 'Встреча в кафе (архив)',
-      description: 'Прошедшая встреча друзей в уютном кафе',
-      date: '2024-11-20',
-      time: '19:00',
-      displayDate: '20 ноября',
-      displayTime: '19:00',
-      location: 'Кафе "Друзья"',
-      coordinates: { latitude: 55.7616, longitude: 37.6094 },
-      price: '800 руб',
-      participants: 4,
-      maxParticipants: 6,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/68.jpg',
-      organizerId: 'own-profile-1',
-      mediaUrl: 'https://picsum.photos/400/300?random=13',
-      mediaType: 'image',
-      mediaAspectRatio: 1.33,
-      participantsList: [
-        'https://randomuser.me/api/portraits/men/3.jpg',
-        'https://randomuser.me/api/portraits/women/4.jpg',
-        'https://randomuser.me/api/portraits/men/5.jpg',
-        'https://randomuser.me/api/portraits/women/6.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '14',
-      title: 'Спортивная тренировка (архив)',
-      description: 'Завершенная тренировка по кроссфиту',
-      date: '2024-11-15',
-      time: '10:00',
-      displayDate: '15 ноября',
-      displayTime: '10:00',
-      location: 'Фитнес-клуб "СпортАктив"',
-      coordinates: { latitude: 55.7500, longitude: 37.6200 },
-      price: '1200 руб',
-      participants: 8,
-      maxParticipants: 12,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/68.jpg',
-      organizerId: 'own-profile-1',
-      mediaUrl: 'https://picsum.photos/400/600?random=14',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [
-        'https://randomuser.me/api/portraits/men/7.jpg',
-        'https://randomuser.me/api/portraits/women/8.jpg',
-        'https://randomuser.me/api/portraits/men/9.jpg',
-        'https://randomuser.me/api/portraits/women/10.jpg',
-        'https://randomuser.me/api/portraits/men/11.jpg',
-        'https://randomuser.me/api/portraits/women/12.jpg',
-        'https://randomuser.me/api/portraits/men/13.jpg',
-        'https://randomuser.me/api/portraits/women/14.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '15',
-      title: 'Кино на открытом воздухе (архив)',
-      description: 'Смотрели фильм под звездным небом',
-      date: '2024-10-30',
-      time: '20:00',
-      displayDate: '30 октября',
-      displayTime: '20:00',
-      location: 'Парк Горького',
-      coordinates: { latitude: 55.7317, longitude: 37.6014 },
-      price: 'Бесплатно',
-      participants: 25,
-      maxParticipants: 50,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/15.jpg',
-      organizerId: 'organizer-10',
-      mediaUrl: 'https://picsum.photos/400/600?random=15',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [
-        'https://randomuser.me/api/portraits/women/68.jpg', // Текущий пользователь участвовал
-        'https://randomuser.me/api/portraits/men/16.jpg',
-        'https://randomuser.me/api/portraits/women/17.jpg',
-        'https://randomuser.me/api/portraits/men/18.jpg',
-        'https://randomuser.me/api/portraits/women/19.jpg',
-        'https://randomuser.me/api/portraits/men/20.jpg',
-        'https://randomuser.me/api/portraits/women/21.jpg',
-        'https://randomuser.me/api/portraits/men/22.jpg',
-        'https://randomuser.me/api/portraits/women/23.jpg',
-        'https://randomuser.me/api/portraits/men/24.jpg',
-        'https://randomuser.me/api/portraits/women/25.jpg',
-        'https://randomuser.me/api/portraits/men/26.jpg',
-        'https://randomuser.me/api/portraits/women/27.jpg',
-        'https://randomuser.me/api/portraits/men/28.jpg',
-        'https://randomuser.me/api/portraits/women/29.jpg',
-        'https://randomuser.me/api/portraits/men/30.jpg',
-        'https://randomuser.me/api/portraits/women/31.jpg',
-        'https://randomuser.me/api/portraits/men/32.jpg',
-        'https://randomuser.me/api/portraits/women/33.jpg',
-        'https://randomuser.me/api/portraits/men/34.jpg',
-        'https://randomuser.me/api/portraits/women/35.jpg',
-        'https://randomuser.me/api/portraits/men/36.jpg',
-        'https://randomuser.me/api/portraits/women/37.jpg',
-        'https://randomuser.me/api/portraits/men/38.jpg',
-        'https://randomuser.me/api/portraits/women/39.jpg'
-      ],
-      createdAt: new Date()
-    },
-
-    // ДОПОЛНИТЕЛЬНЫЕ СОБЫТИЯ РАЗНЫХ ТИПОВ
-    {
-      id: '16',
-      title: 'Фотосессия в студии',
-      description: 'Профессиональная съемка портретов с ретушью',
-      date: '2025-02-01',
-      time: '15:00',
-      displayDate: '1 февраля',
-      displayTime: '15:00',
-      location: 'Фотостудия "Образ"',
-      coordinates: { latitude: 55.7800, longitude: 37.6100 },
-      price: '6000 руб',
-      participants: 1,
-      maxParticipants: 2,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/40.jpg',
-      organizerId: 'organizer-11',
-      mediaUrl: 'https://picsum.photos/400/600?random=16',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [
-        'https://randomuser.me/api/portraits/women/68.jpg' // Текущий пользователь участвует
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '17',
-      title: 'Бесплатный концерт',
-      description: 'Выступление местных музыкальных групп на открытой площадке',
-      date: '2025-02-02',
-      time: '18:00',
-      displayDate: '2 февраля',
-      displayTime: '18:00',
-      location: 'Культурный центр "АртПлаза"',
-      coordinates: { latitude: 55.7900, longitude: 37.6300 },
-      price: 'Бесплатно',
-      participants: 45,
-      maxParticipants: 100,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/41.jpg',
-      organizerId: 'organizer-12',
-      mediaUrl: 'https://picsum.photos/400/300?random=17',
-      mediaType: 'image',
-      mediaAspectRatio: 1.33,
-      participantsList: Array.from({ length: 45 }, (_, i) => 
-        `https://randomuser.me/api/portraits/${i % 2 === 0 ? 'men' : 'women'}/${42 + i}.jpg`
-      ),
-      createdAt: new Date()
-    },
-
-    // ДОПОЛНИТЕЛЬНЫЕ СОБЫТИЯ ДЛЯ НАПОЛНЕНИЯ ЛЕНТ
-    {
-      id: '18',
-      title: 'Вечер настольных игр',
-      description: 'Играем в Монополию, Манчкин и другие классные игры',
-      date: '2025-10-27',
-      time: '18:00',
-      displayDate: '20 января',
-      displayTime: '18:00',
-      location: 'Кафе "Игротека"',
-      coordinates: { latitude: 55.7522, longitude: 37.6156 },
-      price: '500 руб',
-      participants: 6,
-      maxParticipants: 12,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/101.jpg',
-      organizerId: 'organizer-13',
-      mediaUrl: 'https://picsum.photos/400/300?random=18',
-      mediaType: 'image',
-      mediaAspectRatio: 1.33,
-      participantsList: [
-        'https://randomuser.me/api/portraits/women/102.jpg',
-        'https://randomuser.me/api/portraits/men/103.jpg',
-        'https://randomuser.me/api/portraits/women/104.jpg',
-        'https://randomuser.me/api/portraits/men/105.jpg',
-        'https://randomuser.me/api/portraits/women/106.jpg',
-        'https://randomuser.me/api/portraits/men/107.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '19',
-      title: 'Тренировка по боксу',
-      description: 'Интенсивная тренировка для начинающих и продолжающих',
-      date: '2025-10-28',
-      time: '19:00',
-      displayDate: '21 января',
-      displayTime: '19:00',
-      location: 'Спортивный зал "Удар"',
-      coordinates: { latitude: 55.7737, longitude: 37.6056 },
-      price: '1500 руб',
-      participants: 10,
-      maxParticipants: 15,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/108.jpg',
-      organizerId: 'organizer-14',
-      mediaUrl: 'https://picsum.photos/400/600?random=19',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [
-        'https://randomuser.me/api/portraits/women/109.jpg',
-        'https://randomuser.me/api/portraits/men/110.jpg',
-        'https://randomuser.me/api/portraits/women/111.jpg',
-        'https://randomuser.me/api/portraits/men/112.jpg',
-        'https://randomuser.me/api/portraits/women/113.jpg',
-        'https://randomuser.me/api/portraits/men/114.jpg',
-        'https://randomuser.me/api/portraits/women/115.jpg',
-        'https://randomuser.me/api/portraits/men/116.jpg',
-        'https://randomuser.me/api/portraits/women/117.jpg',
-        'https://randomuser.me/api/portraits/men/118.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '20',
-      title: 'Лекция по дизайну',
-      description: 'Современные тренды в веб-дизайне и UX',
-      date: '2025-10-29',
-      time: '16:00',
-      displayDate: '22 января',
-      displayTime: '16:00',
-      location: 'Коворкинг "ДизайнХаб"',
-      coordinates: { latitude: 55.7616, longitude: 37.6094 },
-      price: 'Бесплатно',
-      participants: 25,
-      maxParticipants: 40,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/119.jpg',
-      organizerId: 'organizer-15',
-      mediaUrl: 'https://picsum.photos/400/300?random=20',
-      mediaType: 'image',
-      mediaAspectRatio: 1.33,
-      participantsList: Array.from({ length: 25 }, (_, i) => 
-        `https://randomuser.me/api/portraits/${i % 2 === 0 ? 'men' : 'women'}/${120 + i}.jpg`
-      ),
-      createdAt: new Date()
-    },
-    {
-      id: '21',
-      title: 'Поход в кино',
-      description: 'Смотрим новый блокбастер в IMAX',
-      date: '2025-10-30',
-      time: '20:00',
-      displayDate: '23 января',
-      displayTime: '20:00',
-      location: 'Кинотеатр "Октябрь"',
-      coordinates: { latitude: 55.7588, longitude: 37.6191 },
-      price: '800 руб',
-      participants: 4,
-      maxParticipants: 8,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/145.jpg',
-      organizerId: 'organizer-16',
-      mediaUrl: 'https://picsum.photos/400/600?random=21',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [
-        'https://randomuser.me/api/portraits/women/68.jpg', // Текущий пользователь участвует
-        'https://randomuser.me/api/portraits/women/146.jpg',
-        'https://randomuser.me/api/portraits/men/147.jpg',
-        'https://randomuser.me/api/portraits/women/148.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '22',
-      title: 'Сбор вещей для приюта',
-      description: 'Собираем корм и игрушки для бездомных животных',
-      date: '2025-10-31',
-      time: '12:00',
-      displayDate: '24 января',
-      displayTime: '12:00',
-      location: 'Волонтерский центр "Добро"',
-      coordinates: { latitude: 55.7458, longitude: 37.6376 },
-      price: 'Бесплатно',
-      participants: 12,
-      maxParticipants: 20,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/150.jpg',
-      organizerId: 'organizer-17',
-      mediaUrl: 'https://picsum.photos/400/300?random=22',
-      mediaType: 'image',
-      mediaAspectRatio: 1.33,
-      participantsList: [
-        'https://randomuser.me/api/portraits/men/151.jpg',
-        'https://randomuser.me/api/portraits/women/152.jpg',
-        'https://randomuser.me/api/portraits/men/153.jpg',
-        'https://randomuser.me/api/portraits/women/154.jpg',
-        'https://randomuser.me/api/portraits/men/155.jpg',
-        'https://randomuser.me/api/portraits/women/156.jpg',
-        'https://randomuser.me/api/portraits/men/157.jpg',
-        'https://randomuser.me/api/portraits/women/158.jpg',
-        'https://randomuser.me/api/portraits/men/159.jpg',
-        'https://randomuser.me/api/portraits/women/160.jpg',
-        'https://randomuser.me/api/portraits/men/161.jpg',
-        'https://randomuser.me/api/portraits/women/162.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '23',
-      title: 'Караоке-вечер',
-      description: 'Поем любимые песни в хорошей компании',
-      date: '2025-11-01',
-      time: '19:30',
-      displayDate: '25 января',
-      displayTime: '19:30',
-      location: 'Караоке-бар "Микрофон"',
-      coordinates: { latitude: 55.7800, longitude: 37.6100 },
-      price: '1200 руб',
-      participants: 8,
-      maxParticipants: 15,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/163.jpg',
-      organizerId: 'organizer-18',
-      mediaUrl: 'https://picsum.photos/400/600?random=23',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [
-        'https://randomuser.me/api/portraits/women/68.jpg', // Текущий пользователь участвует
-        'https://randomuser.me/api/portraits/women/164.jpg',
-        'https://randomuser.me/api/portraits/men/165.jpg',
-        'https://randomuser.me/api/portraits/women/166.jpg',
-        'https://randomuser.me/api/portraits/men/167.jpg',
-        'https://randomuser.me/api/portraits/women/168.jpg',
-        'https://randomuser.me/api/portraits/men/169.jpg',
-        'https://randomuser.me/api/portraits/women/170.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '24',
-      title: 'Рыбалка на выходных',
-      description: 'Утренняя рыбалка на подмосковном озере',
-      date: '2025-11-02',
-      time: '06:30',
-      displayDate: '26 января',
-      displayTime: '06:30',
-      location: 'Озеро Бисерово',
-      coordinates: { latitude: 55.8500, longitude: 38.0000 },
-      price: '800 руб',
-      participants: 3,
-      maxParticipants: 6,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/172.jpg',
-      organizerId: 'organizer-19',
-      mediaUrl: 'https://picsum.photos/400/600?random=24',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: [
-        'https://randomuser.me/api/portraits/men/173.jpg',
-        'https://randomuser.me/api/portraits/women/174.jpg',
-        'https://randomuser.me/api/portraits/men/175.jpg'
-      ],
-      createdAt: new Date()
-    },
-    {
-      id: '25',
-      title: 'Лекция по астрономии',
-      description: 'Наблюдаем за звездами через телескоп',
-      date: '2025-11-03',
-      time: '21:00',
-      displayDate: '27 января',
-      displayTime: '21:00',
-      location: 'Планетарий Москвы',
-      coordinates: { latitude: 55.7606, longitude: 37.6107 },
-      price: '600 руб',
-      participants: 15,
-      maxParticipants: 25,
-      organizerAvatar: 'https://randomuser.me/api/portraits/women/176.jpg',
-      organizerId: 'organizer-20',
-      mediaUrl: 'https://picsum.photos/400/300?random=25',
-      mediaType: 'image',
-      mediaAspectRatio: 1.33,
-      participantsList: Array.from({ length: 15 }, (_, i) => 
-        `https://randomuser.me/api/portraits/${i % 2 === 0 ? 'men' : 'women'}/${177 + i}.jpg`
-      ),
-      createdAt: new Date()
-    },
-    {
-      id: '26',
-      title: 'Пробег на 5км',
-      description: 'Городской забег с медалями для всех участников',
-      date: '2025-11-04',
-      time: '10:00',
-      displayDate: '28 января',
-      displayTime: '10:00',
-      location: 'Парк Сокольники',
-      coordinates: { latitude: 55.7922, longitude: 37.6706 },
-      price: 'Бесплатно',
-      participants: 28,
-      maxParticipants: 50,
-      organizerAvatar: 'https://randomuser.me/api/portraits/men/192.jpg',
-      organizerId: 'organizer-21',
-      mediaUrl: 'https://picsum.photos/400/600?random=26',
-      mediaType: 'image',
-      mediaAspectRatio: 0.67,
-      participantsList: Array.from({ length: 28 }, (_, i) => 
-        `https://randomuser.me/api/portraits/${i % 2 === 0 ? 'men' : 'women'}/${193 + i}.jpg`
-      ),
-      createdAt: new Date()
-    }
-  ]);
-
-  // Состояние друзей
-  const [friends, setFriends] = useState<string[]>([
-    'organizer-2', // Анна К.
-    'organizer-3', // Дмитрий Р.
-    'organizer-5', // Игорь М.
-    'organizer-10', // Сергей Д. (принятый друг)
-  ]);
-
-  // Состояние заявок в друзья
-  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([
-    // Входящие запросы (к текущему пользователю)
-    {
-      id: 'req-1',
-      fromUserId: 'organizer-7',
-      toUserId: 'own-profile-1',
-      status: 'pending',
-      createdAt: new Date(Date.now() - 86400000) // вчера
-    },
-    {
-      id: 'req-2',
-      fromUserId: 'organizer-8',
-      toUserId: 'own-profile-1',
-      status: 'pending',
-      createdAt: new Date(Date.now() - 172800000) // позавчера
-    },
-    // Исходящие запросы (от текущего пользователя)
-    {
-      id: 'req-out-1',
-      fromUserId: 'own-profile-1',
-      toUserId: 'organizer-9',
-      status: 'pending',
-      createdAt: new Date(Date.now() - 3600000) // час назад
-    },
-    {
-      id: 'req-out-2',
-      fromUserId: 'own-profile-1',
-      toUserId: 'organizer-10',
-      status: 'accepted',
-      createdAt: new Date(Date.now() - 7200000) // 2 часа назад
-    },
-    {
-      id: 'req-out-3',
-      fromUserId: 'own-profile-1',
-      toUserId: 'organizer-11',
-      status: 'rejected',
-      createdAt: new Date(Date.now() - 10800000) // 3 часа назад
-    }
-  ]);
-
-  // Состояние папок пользователей
-  const [userFolders, setUserFolders] = useState<UserFolder[]>([
-    { id: '1', name: 'Подъезд', userIds: [] },
-    { id: '2', name: 'Школа', userIds: [] },
-    { id: '3', name: 'Беговой клуб', userIds: [] }
-  ]);
-
-  // Состояние сообщений
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      fromUserId: 'organizer-2',
-      toUserId: 'own-profile-1',
-      text: 'Привет! Как дела?',
-      createdAt: new Date(Date.now() - 3600000) // час назад
-    },
-    {
-      id: '2',
-      fromUserId: 'organizer-3',
-      toUserId: 'own-profile-1',
-      text: 'Спасибо за вчерашнюю встречу!',
-      createdAt: new Date(Date.now() - 7200000) // 2 часа назад
-    },
-    {
-      id: '3',
-      fromUserId: 'own-profile-1',
-      toUserId: 'organizer-2',
-      text: 'Да, было классно! До встречи завтра',
-      createdAt: new Date(Date.now() - 1800000) // 30 минут назад
-    }
-  ]);
-
-  // Состояние чатов - пустой массив, чаты создаются только при принятии заявок
-  const [chats, setChats] = useState<Chat[]>([]);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-
-  // Состояние заявок на участие в событиях
-  const [eventRequests, setEventRequests] = useState<EventRequest[]>([
-    {
-      id: 'event-req-1',
-      eventId: '8', // Встреча выпускников (организована текущим пользователем)
-      userId: 'organizer-7',
-      status: 'pending',
-      createdAt: new Date(Date.now() - 86400000)
-    },
-    {
-      id: 'event-req-2',
-      eventId: '9', // Благотворительная ярмарка (организована текущим пользователем)
-      userId: 'organizer-8',
-      status: 'pending',
-      createdAt: new Date(Date.now() - 172800000)
-    },
-    {
-      id: 'event-req-3',
-      eventId: '10', // Новогодняя вечеринка (организована текущим пользователем)
-      userId: 'organizer-11',
-      status: 'pending',
-      createdAt: new Date(Date.now() - 3600000)
-    }
-  ]);
-
-  // Состояние профилей событий (пабликов)
-  const [eventProfiles, setEventProfiles] = useState<EventProfile[]>([
-    {
-      id: 'profile-1',
-      eventId: '1',
-      name: 'Утренняя пробежка',
-      description: 'Легкая пробежка по набережной для всех уровней подготовки',
-      date: '2025-09-15',
-      time: '08:00',
-      location: 'Набережная Москвы-реки',
-      participants: ['organizer-1', 'organizer-2', 'own-profile-1'],
-      organizerId: 'organizer-1',
-      isCompleted: true,
-      posts: [
-        {
-          id: 'post-1',
-          eventId: '1',
-          authorId: 'own-profile-1',
-          type: 'photo',
-          content: 'https://picsum.photos/400/600?random=100',
-          caption: 'Отличная пробежка!',
-          createdAt: new Date('2025-09-15T10:00:00'),
-          showInProfile: true
-        },
-        {
-          id: 'post-2',
-          eventId: '1',
-          authorId: 'organizer-1',
-          type: 'text',
-          content: 'Спасибо всем участникам за отличную тренировку!',
-          createdAt: new Date('2025-09-15T11:00:00'),
-          showInProfile: true
-        },
-        {
-          id: 'post-3',
-          eventId: '1',
-          authorId: 'own-profile-1',
-          type: 'music',
-          content: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-          title: 'Morning Motivation',
-          artist: 'Sound Effects',
-          caption: 'Этот трек помог нам настроиться на пробежку!',
-          createdAt: new Date('2025-09-15T12:00:00'),
-          showInProfile: true
-        },
-        {
-          id: 'post-10',
-          eventId: '1',
-          authorId: 'organizer-2',
-          type: 'photo',
-          content: 'https://picsum.photos/400/600?random=101',
-          caption: 'Закат после пробежки',
-          createdAt: new Date('2025-09-15T13:00:00'),
-          showInProfile: true
-        },
-        {
-          id: 'post-11',
-          eventId: '1',
-          authorId: 'own-profile-1',
-          type: 'video',
-          content: 'https://picsum.photos/400/600?random=102',
-          caption: 'Финишная прямая',
-          createdAt: new Date('2025-09-15T14:00:00'),
-          showInProfile: true
-        }
-      ],
-      createdAt: new Date(Date.now() - 7200000)
-    },
-    {
-      id: 'profile-2',
-      eventId: '2',
-      name: 'Мастер-класс по живописи',
-      description: 'Учимся рисовать акварелью с профессиональным художником',
-      date: '2025-09-20',
-      time: '14:00',
-      location: 'Арт-студия "Кисть"',
-      participants: ['organizer-2', 'organizer-3', 'own-profile-1'],
-      organizerId: 'organizer-2',
-      isCompleted: true,
-      posts: [
-        {
-          id: 'post-4',
-          eventId: '2',
-          authorId: 'organizer-2',
-          type: 'photo',
-          content: 'https://picsum.photos/400/600?random=200',
-          caption: 'Наши шедевры! Все молодцы!',
-          createdAt: new Date('2025-09-20T10:00:00')
-        },
-        {
-          id: 'post-5',
-          eventId: '2',
-          authorId: 'own-profile-1',
-          type: 'photo',
-          content: 'https://picsum.photos/400/600?random=201',
-          caption: 'Мой первый акварельный пейзаж',
-          createdAt: new Date('2025-09-20T11:00:00')
-        },
-        {
-          id: 'post-6',
-          eventId: '2',
-          authorId: 'organizer-3',
-          type: 'video',
-          content: 'https://picsum.photos/400/600?random=202',
-          caption: 'Процесс создания картины',
-          createdAt: new Date('2025-09-20T12:00:00'),
-          showInProfile: true
-        },
-        {
-          id: 'post-12',
-          eventId: '2',
-          authorId: 'own-profile-1',
-          type: 'photo',
-          content: 'https://picsum.photos/400/600?random=203',
-          caption: 'Мои краски',
-          createdAt: new Date('2025-09-20T13:00:00'),
-          showInProfile: true
-        }
-      ],
-      createdAt: new Date(Date.now() - 14400000)
-    },
-    {
-      id: 'profile-3',
-      eventId: '3',
-      name: 'Танцевальный вечер',
-      description: 'Латиноамериканские танцы для всех уровней',
-      date: '2025-09-25',
-      time: '19:00',
-      location: 'Танцевальная студия "Ритм"',
-      participants: ['organizer-3', 'organizer-4', 'own-profile-1'],
-      organizerId: 'organizer-3',
-      isCompleted: true,
-      posts: [
-        {
-          id: 'post-7',
-          eventId: '3',
-          authorId: 'organizer-3',
-          type: 'video',
-          content: 'https://picsum.photos/400/600?random=300',
-          caption: 'Зажигательные танцы!',
-          createdAt: new Date('2025-09-25T10:00:00')
-        },
-        {
-          id: 'post-8',
-          eventId: '3',
-          authorId: 'own-profile-1',
-          type: 'music',
-          content: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-          title: 'Salsa Night',
-          artist: 'Latin Vibes',
-          caption: 'Трек, под который мы танцевали всю ночь',
-          createdAt: new Date('2025-09-25T11:00:00')
-        },
-        {
-          id: 'post-9',
-          eventId: '3',
-          authorId: 'organizer-4',
-          type: 'text',
-          content: 'Невероятная энергия! Спасибо всем за отличный вечер!',
-          createdAt: new Date('2025-09-25T12:00:00'),
-          showInProfile: true
-        },
-        {
-          id: 'post-13',
-          eventId: '3',
-          authorId: 'own-profile-1',
-          type: 'photo',
-          content: 'https://picsum.photos/400/600?random=301',
-          caption: 'Танцевальный зал',
-          createdAt: new Date('2025-09-25T13:00:00'),
-          showInProfile: true
-        },
-        {
-          id: 'post-14',
-          eventId: '3',
-          authorId: 'organizer-3',
-          type: 'music',
-          content: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-          title: 'Dance Floor',
-          artist: 'Party Mix',
-          caption: 'Хит вечера!',
-          createdAt: new Date('2025-09-25T14:00:00'),
-          showInProfile: true
-        },
-        {
-          id: 'post-15',
-          eventId: '3',
-          authorId: 'own-profile-1',
-          type: 'video',
-          content: 'https://picsum.photos/400/600?random=302',
-          caption: 'Финальный танец',
-          createdAt: new Date('2025-09-25T15:00:00'),
-          showInProfile: true
-        }
-      ],
-      createdAt: new Date(Date.now() - 21600000)
-    }
-  ]);
-
-  // Автоматически обновляем displayDate для всех событий на основе date
+export function EventsProvider({ children }: EventsProviderProps) {
+  const { accessToken, refreshToken, initializing: authInitializing, user: authUser, logout, refreshSession } = useAuth();
+  const { language } = useLanguage();
+  const currentUserId = authUser?.id ?? null;
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [events, setEvents] = useState<Event[]>([]);
+  // userFolders и setUserFolders теперь в useUserFolders хуке
+  // messageFolders и setMessageFolders теперь в useMessageFolders хуке
+  // Состояние чатов теперь в useChats хуке
+  // eventRequests и setEventRequests теперь в useEventRequests хуке
+  // eventProfiles и setEventProfiles теперь в useEventProfiles хуке
+  // savedEvents и setSavedEvents теперь в useSavedEvents хуке
+  // savedMemoryPosts и setSavedMemoryPosts теперь в useSavedMemoryPosts хуке
+  const [serverUserData, setServerUserData] = useState<Record<string, UserProfilePatch>>({});
+  const [userDataUpdates, setUserDataUpdates] = useState<Record<string, UserProfilePatch>>({});
+  // loadedChatMessages теперь в useChats хуке
+  // creatingProfiles теперь в useEventProfiles хуке
+  // Ref для отслеживания актуального токена (для предотвращения использования старого токена после переключения аккаунта)
+  const currentAccessTokenRef = useRef<string | null>(accessToken);
+  const currentUserIdRef = useRef<string | null>(currentUserId);
+  
+  // Обновляем ref при изменении токена или пользователя
   useEffect(() => {
-    setEvents(prevEvents => 
-      prevEvents.map(event => ({
-        ...event,
-        displayDate: formatDate(event.date)
-      }))
-    );
+    currentAccessTokenRef.current = accessToken;
+    currentUserIdRef.current = currentUserId;
+  }, [accessToken, currentUserId]);
+
+  // Функция для обработки ошибок авторизации (нужно объявить до использования в хуках)
+  const handleUnauthorizedError = useCallback(
+    async (error: unknown) => {
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        // КРИТИЧЕСКИ ВАЖНО: Сначала пытаемся обновить токен
+        // Только если refresh не удался - вызываем logout
+        if (refreshToken && refreshToken.trim() !== '' && refreshSession) {
+          try {
+            logger.debug('Attempting to refresh token before logout...');
+            await refreshSession(refreshToken);
+            // Если refresh успешен, токен обновлен, не нужно logout
+            return false;
+          } catch (refreshError) {
+            logger.warn('Token refresh failed, proceeding with logout', refreshError);
+            // Refresh не удался, продолжаем с logout
+          }
+        }
+        
+        // Если refresh не удался или нет refreshToken - вызываем logout
+        try {
+          await logout();
+        } catch (logoutError) {
+          logger.warn('Failed to logout after auth error', logoutError);
+        }
+        return true;
+      }
+      return false;
+    },
+    [logout, refreshToken, refreshSession],
+  );
+
+  const mergeUserRecord = useCallback((record: Record<string, UserProfilePatch>, userId: string, updates: UserProfilePatch) => {
+    const nextEntry: UserProfilePatch = { ...(record[userId] ?? {}) };
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') {
+        delete nextEntry[key as keyof UserProfilePatch];
+      } else {
+        (nextEntry as any)[key] = value;
+      }
+    });
+    if (Object.keys(nextEntry).length === 0) {
+      const { [userId]: _removed, ...rest } = record;
+      return rest;
+    }
+    return {
+      ...record,
+      [userId]: nextEntry,
+    };
   }, []);
 
-  const addEvent = (event: Omit<Event, 'id' | 'createdAt'>) => {
-    const newEvent: Event = {
-      ...event,
-      id: Date.now().toString(),
-      createdAt: new Date()
-    };
-    setEvents(prev => [newEvent, ...prev]); // Добавляем новое событие в начало
-  };
 
-  const updateEvent = (id: string, updates: Partial<Event>) => {
-    setEvents(prev => prev.map(event => 
-      event.id === id ? { ...event, ...updates } : event
-    ));
-  };
-
-  const deleteEvent = (id: string) => {
-    setEvents(prev => prev.filter(event => event.id !== id));
-  };
-
-  const getUserData = (userId: string) => {
-    const userMap: { [key: string]: { name: string; username: string; avatar: string; age: string; bio: string; geoPosition: string } } = {
-      'organizer-1': {
-        name: "Максим П.",
-        username: "@maxim_p",
-        age: "28 лет", 
-        bio: "Люблю активный отдых и пробежки по утрам",
-        avatar: "https://randomuser.me/api/portraits/men/1.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'organizer-2': {
-        name: "Анна К.",
-        username: "@anna_art",
-        age: "24 года", 
-        bio: "Художница, провожу мастер-классы по живописи",
-        avatar: "https://randomuser.me/api/portraits/women/10.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'organizer-3': {
-        name: "Дмитрий Р.",
-        username: "@dmitry_dance",
-        age: "32 года", 
-        bio: "Преподаватель танцев, латиноамериканские танцы",
-        avatar: "https://randomuser.me/api/portraits/men/14.jpg",
-        geoPosition: "Санкт-Петербург, Россия"
-      },
-      'organizer-4': {
-        name: "Елена В.",
-        username: "@elena_mtn",
-        age: "26 лет", 
-        bio: "Альпинистка, организую походы и восхождения",
-        avatar: "https://randomuser.me/api/portraits/women/25.jpg",
-        geoPosition: "Екатеринбург, Россия"
-      },
-      'organizer-5': {
-        name: "Алексей М.",
-        username: "@alex_chef",
-        age: "35 лет", 
-        bio: "Шеф-повар, веду кулинарные мастер-классы",
-        avatar: "https://randomuser.me/api/portraits/men/31.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'organizer-6': {
-        name: "Игорь С.",
-        username: "@igor_tech",
-        age: "29 лет", 
-        bio: "Tech-энтузиаст, организую IT-встречи",
-        avatar: "https://randomuser.me/api/portraits/men/38.jpg",
-        geoPosition: "Новосибирск, Россия"
-      },
-      'organizer-7': {
-        name: "Мария Л.",
-        username: "@maria_yoga",
-        age: "27 лет", 
-        bio: "Инструктор йоги, веду занятия на природе",
-        avatar: "https://randomuser.me/api/portraits/women/53.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'organizer-8': {
-        name: "Андрей К.",
-        username: "@andrey_books",
-        age: "31 год", 
-        bio: "Библиотекарь, веду книжный клуб",
-        avatar: "https://randomuser.me/api/portraits/men/93.jpg",
-        geoPosition: "Санкт-Петербург, Россия"
-      },
-      'organizer-9': {
-        name: "Ольга Н.",
-        username: "@olga_wine",
-        age: "33 года", 
-        bio: "Сомелье, провожу дегустации вин",
-        avatar: "https://randomuser.me/api/portraits/women/99.jpg",
-        geoPosition: "Краснодар, Россия"
-      },
-      'organizer-10': {
-        name: "Сергей Д.",
-        username: "@sergey_cinema",
-        age: "30 лет", 
-        bio: "Кинооператор, организую показы фильмов",
-        avatar: "https://randomuser.me/api/portraits/men/15.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'organizer-11': {
-        name: "Татьяна Ф.",
-        username: "@tanya_photo",
-        age: "28 лет", 
-        bio: "Фотограф, профессиональная съемка",
-        avatar: "https://randomuser.me/api/portraits/women/40.jpg",
-        geoPosition: "Екатеринбург, Россия"
-      },
-      'organizer-12': {
-        name: "Владимир П.",
-        username: "@vladimir_music",
-        age: "34 года", 
-        bio: "Музыкант, организую концерты",
-        avatar: "https://randomuser.me/api/portraits/men/41.jpg",
-        geoPosition: "Новосибирск, Россия"
-      },
-      'organizer-13': {
-        name: "Андрей Г.",
-        username: "@andrey_games",
-        age: "26 лет", 
-        bio: "Любитель настольных игр, коллекционер",
-        avatar: "https://randomuser.me/api/portraits/men/101.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'organizer-14': {
-        name: "Михаил Б.",
-        username: "@mikhail_box",
-        age: "30 лет", 
-        bio: "Тренер по боксу, бывший спортсмен",
-        avatar: "https://randomuser.me/api/portraits/men/108.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'organizer-15': {
-        name: "Екатерина Д.",
-        username: "@kate_design",
-        age: "27 лет", 
-        bio: "UX/UI дизайнер, веду лекции и воркшопы",
-        avatar: "https://randomuser.me/api/portraits/women/119.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'organizer-16': {
-        name: "Роман К.",
-        username: "@roman_cinema",
-        age: "29 лет", 
-        bio: "Киноман, организую походы в кино",
-        avatar: "https://randomuser.me/api/portraits/men/145.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'organizer-17': {
-        name: "Алина С.",
-        username: "@alina_volunteer",
-        age: "25 лет", 
-        bio: "Волонтер, помогаю бездомным животным",
-        avatar: "https://randomuser.me/api/portraits/women/150.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'organizer-18': {
-        name: "Денис М.",
-        username: "@denis_karaoke",
-        age: "28 лет", 
-        bio: "Люблю петь, работаю в музыкальной сфере",
-        avatar: "https://randomuser.me/api/portraits/men/163.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'organizer-19': {
-        name: "Иван Р.",
-        username: "@ivan_fishing",
-        age: "45 лет", 
-        bio: "Рыбак со стажем, знаю все лучшие места",
-        avatar: "https://randomuser.me/api/portraits/men/172.jpg",
-        geoPosition: "Московская область, Россия"
-      },
-      'organizer-20': {
-        name: "Марина Т.",
-        username: "@marina_astro",
-        age: "33 года", 
-        bio: "Астроном, работаю в планетарии",
-        avatar: "https://randomuser.me/api/portraits/women/176.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'organizer-21': {
-        name: "Павел Р.",
-        username: "@pavel_running",
-        age: "31 год", 
-        bio: "Мастер спорта по легкой атлетике",
-        avatar: "https://randomuser.me/api/portraits/men/192.jpg",
-        geoPosition: "Москва, Россия"
-      },
-      'own-profile-1': {
-        name: "Анна К.",
-        username: "@anna_k",
-        age: "24 года", 
-        bio: "Люблю спонтанные встречи и новые знакомства",
-        avatar: "https://randomuser.me/api/portraits/women/68.jpg",
-        geoPosition: "Москва, Россия"
+  const resolveUserId = useCallback(
+    (userId: string | null) => {
+      if (!userId) return '';
+      if (userId === 'own-profile-1' && currentUserId) {
+        return currentUserId;
       }
-    };
+      return userId;
+    },
+    [currentUserId],
+  );
+
+  // knownUserIds будет объявлен после всех хуков, так как использует переменные из них
+
+  // resolveRequestUserId и requestBelongsToUser теперь в useEventRequests хуке
+
+  // Нормализация ссылок медиа (устраняем старый IP в уже сохраненных URL)
+  const normalizeMediaUrl = useCallback((input?: string | null): string | undefined => {
+    if (!input) return undefined;
+    try {
+      // Получаем storage URL из переменной окружения или используем дефолтный
+      const storageUrl = process.env.EXPO_PUBLIC_STORAGE_URL || 'http://192.168.0.39:9000';
+      
+      // Заменяем старые origin на актуальный, остальную часть пути сохраняем
+      let normalized = input;
+      // Заменяем старые IP адреса на актуальный
+      normalized = normalized.replace(/http:\/\/192\.168\.0\.\d+:9000/g, storageUrl);
+      normalized = normalized.replace(/http:\/\/192\.168\.0\.\d+:4000/g, storageUrl);
+      
+      return normalized || undefined;
+    } catch {
+      return input || undefined;
+    }
+  }, []);
+
+  const applyServerUserDataToState = useCallback(
+    (serverUser: ServerUser | any) => {
+      if (!serverUser || !serverUser.id) {
+        return;
+      }
+
+      // Вычисляем возраст из dateOfBirth, если он есть
+      const computedAge = serverUser.dateOfBirth 
+        ? calculateAge(serverUser.dateOfBirth) 
+        : undefined;
+
+      setServerUserData(prev =>
+        mergeUserRecord(prev, serverUser.id, {
+          name: serverUser.name ?? undefined,
+          username: serverUser.username ?? undefined,
+          avatar: normalizeMediaUrl(serverUser.avatarUrl as string | null | undefined) ?? undefined,
+          age: computedAge ?? serverUser.age ?? undefined,
+          bio: serverUser.bio ?? undefined,
+          geoPosition: serverUser.geoPosition ?? undefined,
+          dateOfBirth: serverUser.dateOfBirth ?? undefined,
+          showAge: serverUser.showAge ?? undefined,
+        }),
+      );
+    },
+    [mergeUserRecord, normalizeMediaUrl],
+  );
+
+  // Используем хук для работы с друзьями
+  const {
+    friends,
+    friendRequests,
+    userFriendsMap,
+    sendFriendRequest,
+    removeFriend,
+    respondToFriendRequest,
+    syncFriendsFromServer,
+    syncFriendRequestsFromServer,
+    setFriends,
+    setFriendRequests,
+    setUserFriendsMap,
+  } = useFriends({
+    accessToken,
+    currentUserId,
+    handleUnauthorizedError,
+    applyServerUserDataToState,
+  });
+
+  // Используем ref для функций из useChats, чтобы избежать циклической зависимости
+  const syncChatsFromServerRef = useRef<(() => Promise<void>) | null>(null);
+  const addParticipantToChatRef = useRef<((eventId: string, userId: string) => Promise<void>) | null>(null);
+  const createEventChatWithParticipantsRef = useRef<((eventId: string, userId: string) => Promise<void>) | null>(null);
+  const setChatsRef = useRef<React.Dispatch<React.SetStateAction<Chat[]>> | null>(null);
+  const chatsRef = useRef<Chat[]>([]);
+
+  // Временные функции-обертки для функций из useChats
+  const syncChatsFromServerWrapper = useCallback(async () => {
+    if (syncChatsFromServerRef.current) {
+      return syncChatsFromServerRef.current();
+    }
+    return Promise.resolve();
+  }, []);
+
+  const addParticipantToChatWrapper = useCallback(async (eventId: string, userId: string) => {
+    if (addParticipantToChatRef.current) {
+      return addParticipantToChatRef.current(eventId, userId);
+    }
+    return Promise.resolve();
+  }, []);
+
+  const createEventChatWithParticipantsWrapper = useCallback(async (eventId: string, userId: string) => {
+    if (createEventChatWithParticipantsRef.current) {
+      return createEventChatWithParticipantsRef.current(eventId, userId);
+    }
+    return Promise.resolve();
+  }, []);
+
+  const setChatsWrapper = useCallback((value: Chat[] | ((prev: Chat[]) => Chat[])) => {
+    if (setChatsRef.current) {
+      setChatsRef.current(value);
+    }
+  }, []);
+
+  // Используем ref для updateEvent, чтобы избежать циклической зависимости
+  const updateEventRef = useRef<((id: string, updates: Partial<Event>) => Promise<void>) | null>(null);
+
+  // Временная функция-обертка для updateEvent
+  const updateEventWrapper = useCallback(async (id: string, updates: Partial<Event>) => {
+    if (updateEventRef.current) {
+      return updateEventRef.current(id, updates);
+    }
+    // Fallback - обновляем локально, если updateEvent еще не определен
+    setEvents(prev => prev.map(event => event.id === id ? { ...event, ...updates } : event));
+  }, [setEvents]);
+
+  // getUserData должен быть определен ПЕРЕД вызовом useEventRequests
+  const getUserData = useCallback((userId: string): UserProfile => {
+    const resolvedId = resolveUserId(userId);
+
+    const serverPatch = serverUserData[resolvedId] ?? {};
+    const localPatch = userDataUpdates[resolvedId] ?? {};
+
+    const baseName = authUser && resolvedId === authUser.id ? authUser.name : serverPatch.name;
+    const baseUsername =
+      authUser && resolvedId === authUser.id
+        ? authUser.username ?? (authUser.email ? authUser.email.split('@')[0] : undefined)
+        : serverPatch.username;
+    const baseAvatar =
+      authUser && resolvedId === authUser.id ? authUser.avatarUrl ?? serverPatch.avatar : serverPatch.avatar;
+    const baseBio = authUser && resolvedId === authUser.id ? authUser.bio ?? serverPatch.bio : serverPatch.bio;
+    const baseGeo =
+      authUser && resolvedId === authUser.id
+        ? authUser.geoPosition ?? serverPatch.geoPosition
+        : serverPatch.geoPosition;
     
-    return userMap[userId] || {
-      name: "Пользователь",
-      username: "@user",
-      age: "Возраст не указан", 
-      bio: "О себе не рассказал",
-      avatar: "https://randomuser.me/api/portraits/men/1.jpg",
-      geoPosition: "Не указано"
+    // Получаем dateOfBirth и showAge
+    const dateOfBirth = localPatch.dateOfBirth ?? serverPatch.dateOfBirth ?? 
+      (authUser && resolvedId === authUser.id && authUser.dateOfBirth ? authUser.dateOfBirth : undefined);
+    const showAge = localPatch.showAge ?? serverPatch.showAge ?? 
+      (authUser && resolvedId === authUser.id && authUser.showAge !== undefined ? authUser.showAge : true);
+    
+    // Вычисляем возраст из dateOfBirth, если он есть
+    const computedAge = dateOfBirth ? calculateAge(dateOfBirth) : undefined;
+    const baseAge = computedAge ?? (authUser && resolvedId === authUser.id ? authUser.age : undefined) ?? serverPatch.age;
+
+    // Получаем accountType
+    const baseAccountType = authUser && resolvedId === authUser.id 
+      ? (authUser.accountType ?? serverPatch.accountType)
+      : serverPatch.accountType;
+    const accountType = localPatch.accountType ?? baseAccountType ?? 'personal';
+
+    return {
+      name: localPatch.name ?? baseName ?? 'Пользователь',
+      username: localPatch.username ?? baseUsername ?? 'user',
+      avatar: (() => {
+        const chosen = localPatch.avatar ?? baseAvatar;
+        if (chosen && chosen.trim() !== '') return chosen;
+        // Фолбэк: возьмем обложку любого события, где пользователь организатор
+        const organizerEvent = events.find(e => e.organizerId === resolvedId && e.mediaUrl);
+        return organizerEvent?.mediaUrl ?? DEFAULT_AVATAR_URL;
+      })(),
+      age: (() => {
+        // Если showAge = false, не показываем возраст
+        if (showAge === false) {
+          return '';
+        }
+        return localPatch.age ?? baseAge ?? '';
+      })(),
+      bio: localPatch.bio ?? baseBio ?? '',
+      geoPosition: localPatch.geoPosition ?? baseGeo ?? '',
+      accountType,
     };
+  }, [authUser, serverUserData, userDataUpdates, events, resolveUserId]);
+
+  // Используем хук для работы с запросами на участие в событиях
+  const {
+    eventRequests,
+    setEventRequests,
+    refreshPendingJoinRequests,
+    sendEventRequest,
+    sendEventInvite,
+    acceptInvitation,
+    rejectInvitation,
+    respondToEventRequest,
+    cancelEventRequest,
+    cancelEventParticipation,
+    removeEventRequestById,
+    resolveRequestUserId,
+    requestBelongsToUser,
+  } = useEventRequests({
+    accessToken,
+    currentUserId,
+    refreshToken,
+    handleUnauthorizedError,
+    refreshSession,
+    applyServerUserDataToState,
+    events,
+    setEvents,
+    setEventProfiles,
+    setChats: setChatsWrapper,
+    updateEvent: updateEventWrapper,
+    syncEventsFromServer,
+    syncChatsFromServer: syncChatsFromServerWrapper,
+    createEventProfile,
+    addParticipantToChat: addParticipantToChatWrapper,
+    createEventChatWithParticipants: createEventChatWithParticipantsWrapper,
+    getUserData,
+    isUserEventMember,
+    isEventPast,
+    resolveUserId,
+    chats: chatsRef.current,
+    eventProfiles,
+  });
+
+  // Используем хук для работы с чатами
+  const {
+    chats,
+    chatMessages,
+    syncChatsFromServer,
+    createEventChat,
+    createEventChatWithParticipants,
+    createPersonalChat,
+    sendChatMessage,
+    getChatMessages,
+    getChat,
+    getChatsForUser,
+    addParticipantToChat,
+    fetchMessagesForChat,
+    setChats,
+    setChatMessages,
+  } = useChats({
+    accessToken,
+    currentUserId,
+    handleUnauthorizedError,
+    applyServerUserDataToState,
+    events,
+    eventRequests,
+    eventProfiles,
+    resolveRequestUserId,
+    getUserData,
+  });
+
+  // Обновляем refs после определения функций из useChats
+  // Используем useEffect для обновления refs, чтобы избежать проблем с порядком выполнения
+  useEffect(() => {
+    syncChatsFromServerRef.current = syncChatsFromServer;
+    addParticipantToChatRef.current = addParticipantToChat;
+    createEventChatWithParticipantsRef.current = createEventChatWithParticipants;
+    setChatsRef.current = setChats;
+    chatsRef.current = chats;
+  }, [syncChatsFromServer, addParticipantToChat, createEventChatWithParticipants, setChats, chats]);
+
+  // Функция для проверки, является ли пользователь другом другого пользователя
+  // Используется для проверки возможности приглашения
+  const isUserInFriendsList = (userId: string, friendId: string): boolean => {
+    const userFriends = userFriendsMap[userId] || [];
+    return userFriends.includes(friendId);
   };
+
+  // createEvent, updateEvent, deleteEvent, cancelEvent, cancelOrganizerParticipation, removeParticipantFromEvent
+  // теперь в useEventActions хуке (вызывается после fetchEventProfile)
+
+  // Используем хук для действий с событиями
+  // (вызывается после fetchEventProfile ниже)
+  // getUserData теперь определен выше, перед вызовом useEventRequests
+
+  // Функция для обновления данных пользователя
+  const updateUserData = (userId: string, updates: UserProfilePatch) => {
+    setServerUserData(prev => mergeUserRecord(prev, userId, updates));
+    setUserDataUpdates(prev => mergeUserRecord(prev, userId, updates));
+  };
+
+  // Эти функции теперь находятся в useEventActions hook
+
+  // Функции updateEvent и deleteEvent теперь находятся в useEventActions hook
+
+  // Поиск пользователя по username (без учета регистра и символа @)
+  const findUserByUsername = useCallback(async (username: string): Promise<User | null> => {
+    const cleanUsername = username.startsWith('@') ? username.slice(1).toLowerCase() : username.toLowerCase();
+    
+    // Сначала проверяем локальный кэш
+    for (const userId of knownUserIds) {
+      const userData = getUserData(userId);
+      if (userData.username.toLowerCase() === cleanUsername) {
+        return {
+          id: userId,
+          ...userData
+        };
+      }
+    }
+    
+    // Если не найдено локально, ищем на бэкенде
+    if (accessToken) {
+      try {
+        const response = await apiRequest(
+          `/users/search?username=${encodeURIComponent(cleanUsername)}`,
+          { method: 'GET' },
+          accessToken,
+        );
+        
+        if (response && response.length > 0) {
+          const user = response[0];
+          const mappedUser = mapServerUserToClient(user);
+          applyServerUserDataToState(mappedUser);
+          return mappedUser;
+        }
+      } catch (error) {
+        logger.error('Failed to search user by username', error);
+      }
+    }
+    
+    return null;
+  }, [accessToken, knownUserIds, getUserData, applyServerUserDataToState]);
+
+  // Проверка доступности username (не используется ли уже)
+  const isUsernameAvailable = useCallback(async (username: string): Promise<boolean> => {
+    const cleanUsername = username.startsWith('@') ? username.slice(1).toLowerCase() : username.toLowerCase();
+    
+    // Проверяем локально
+    for (const userId of knownUserIds) {
+      const userData = getUserData(userId);
+      if (userData.username.toLowerCase() === cleanUsername) {
+        return false;
+      }
+    }
+    
+    // Проверяем на бэкенде
+    if (accessToken) {
+      try {
+        const response = await apiRequest(
+          `/users/search?username=${encodeURIComponent(cleanUsername)}`,
+          { method: 'GET' },
+          accessToken,
+        );
+        return !response || response.length === 0;
+      } catch (error) {
+        logger.error('Failed to check username availability', error);
+        // При ошибке считаем, что username доступен (оптимистично)
+        return true;
+      }
+    }
+    
+    return true;
+  }, [accessToken, knownUserIds, getUserData]);
 
   // Функция для детерминированной генерации значений на основе ID
   const generateDeterministicStats = (organizerId: string) => {
@@ -1532,92 +726,104 @@ export const EventsProvider: React.FC<EventsProviderProps> = ({ children }) => {
     return { complaints, friends };
   };
 
-  const getOrganizerStats = (organizerId: string) => {
-    // Получаем все события
+  // Кэш для количества жалоб по пользователям
+  const complaintsCountCache = useRef<Record<string, number>>({});
+  const [organizerStatsCache, setOrganizerStatsCache] = useState<Record<string, {
+    totalEvents: number;
+    organizedEvents: number;
+    participatedEvents: number;
+    complaints: number;
+    friends: number;
+  }>>({});
+
+  // Загружаем статистику жалоб для пользователя
+  const loadComplaintsCount = useCallback(async (userId: string) => {
+    if (complaintsCountCache.current[userId] !== undefined) {
+      return complaintsCountCache.current[userId];
+    }
+    
+    if (!accessToken) {
+      complaintsCountCache.current[userId] = 0;
+      return 0;
+    }
+
+    try {
+      const response = await apiRequest(`/complaints/count/${userId}`, {}, accessToken);
+      const count = response.count || 0;
+      complaintsCountCache.current[userId] = count;
+      return count;
+    } catch (error) {
+      complaintsCountCache.current[userId] = 0;
+      return 0;
+    }
+  }, [accessToken]);
+
+  const getOrganizerStats = useCallback((organizerId: string) => {
+    // Получаем все события где пользователь является членом (организатор или участник)
+    const allUserEvents = events.filter(event => isUserEventMember(event, organizerId));
+    
+    // Получаем события где пользователь организатор
     const organizedEvents = events.filter(event => event.organizerId === organizerId);
     
-    // Подсчитываем участие в событиях (где пользователь в participantsList)
-    const userAvatar = getUserData(organizerId).avatar;
+    // Получаем события где пользователь участник (но не организатор)
     const participatedEvents = events.filter(event => 
-      event.participantsList?.includes(userAvatar) || 
-      event.participantsData?.some(p => p.userId === organizerId)
+      isUserAttendee(event, organizerId)
     );
 
-    // Получаем реальное количество друзей или детерминированное значение
-    let friendsCount = 0;
-    if (organizerId === 'own-profile-1') {
-      friendsCount = friends.length;
-    } else {
-      const { friends: generatedFriends } = generateDeterministicStats(organizerId);
-      friendsCount = generatedFriends;
-    }
+    // Получаем реальное количество друзей из userFriendsMap (единый источник истины)
+    const userFriends = userFriendsMap[organizerId] || [];
+    const friendsCount = userFriends.length;
 
-    // Получаем детерминированные значения для жалоб
-    const { complaints } = generateDeterministicStats(organizerId);
+    // Получаем количество жалоб из кэша (загружается асинхронно)
+    const complaintsCount = complaintsCountCache.current[organizerId] ?? 0;
+
+    // Загружаем жалобы асинхронно, если еще не загружены
+    if (complaintsCountCache.current[organizerId] === undefined && accessToken) {
+      loadComplaintsCount(organizerId).then(count => {
+        setOrganizerStatsCache(prev => ({
+          ...prev,
+          [organizerId]: {
+            totalEvents: allUserEvents.length,
+            organizedEvents: organizedEvents.length,
+            participatedEvents: participatedEvents.length,
+            complaints: count,
+            friends: friendsCount,
+          }
+        }));
+      });
+    }
 
     return {
-      totalEvents: organizedEvents.length + participatedEvents.length,
+      totalEvents: allUserEvents.length, // Уникальные события (как в профиле)
       organizedEvents: organizedEvents.length,
       participatedEvents: participatedEvents.length,
-      complaints: complaints,
+      complaints: complaintsCount,
       friends: friendsCount,
     };
-  };
-
-  // Функции для работы с друзьями
-  const sendFriendRequest = (toUserId: string) => {
-    // Не отправляем запрос, если уже в друзьях
-    if (friends.includes(toUserId)) {
-      return;
-    }
-    
-    // Проверяем, не отправлена ли уже заявка
-    const existingRequest = friendRequests.find(
-      req => req.fromUserId === 'own-profile-1' && req.toUserId === toUserId && req.status === 'pending'
-    );
-    
-    if (!existingRequest) {
-      const newRequest: FriendRequest = {
-        id: Date.now().toString(),
-        fromUserId: 'own-profile-1',
-        toUserId,
-        status: 'pending',
-        createdAt: new Date()
-      };
-      setFriendRequests(prev => [...prev, newRequest]);
-    }
-  };
-
-  const removeFriend = (userId: string) => {
-    setFriends(prev => prev.filter(id => id !== userId));
-    // Удаляем все связанные запросы
-    setFriendRequests(prev => 
-      prev.filter(req => 
-        !(req.fromUserId === 'own-profile-1' && req.toUserId === userId) &&
-        !(req.fromUserId === userId && req.toUserId === 'own-profile-1')
-      )
-    );
-  };
-
-  const respondToFriendRequest = (requestId: string, accepted: boolean) => {
-    setFriendRequests(prev => 
-      prev.map(req => 
-        req.id === requestId 
-          ? { ...req, status: accepted ? 'accepted' : 'rejected' }
-          : req
-      )
-    );
-
-    if (accepted) {
-      const request = friendRequests.find(req => req.id === requestId);
-      if (request) {
-        setFriends(prev => [...prev, request.fromUserId]);
-      }
-    }
-  };
+  }, [events, isUserEventMember, isUserAttendee, userFriendsMap, accessToken, loadComplaintsCount]);
 
   const getFriendsList = (): User[] => {
-    return friends.map(friendId => {
+    if (!currentUserId) {
+      return [];
+    }
+    const friendIds = userFriendsMap[currentUserId] ?? friends;
+    return friendIds.map(friendId => {
+      const userData = getUserData(friendId);
+      return {
+        id: friendId,
+        ...userData,
+      };
+    });
+  };
+
+  // Получить реальный список друзей для любого пользователя
+  // Использует единый источник истины - userFriendsMap
+  const getUserFriendsList = (userId: string): User[] => {
+    const resolvedUserId = resolveUserId(userId);
+    const friendIds = userFriendsMap[resolvedUserId] || [];
+    
+    // Возвращаем список друзей с данными пользователей
+    return friendIds.map(friendId => {
       const userData = getUserData(friendId);
       return {
         id: friendId,
@@ -1630,469 +836,837 @@ export const EventsProvider: React.FC<EventsProviderProps> = ({ children }) => {
     return friends.includes(userId);
   };
 
+  // Обновленная логика FRIENDS согласно новой системе
   const getFriendsForEvents = (): Event[] => {
-    // Возвращаем события только друзей, а не все события
-    return events.filter(event => friends.includes(event.organizerId));
-  };
-
-  // Функции для работы с папками пользователей
-  const addUserToFolder = (userId: string, folderId: string) => {
-    setUserFolders(prev => prev.map(folder => 
-      folder.id === folderId 
-        ? { ...folder, userIds: [...folder.userIds.filter(id => id !== userId), userId] }
-        : folder
-    ));
-  };
-
-  const removeUserFromFolder = (userId: string, folderId: string) => {
-    setUserFolders(prev => prev.map(folder => 
-      folder.id === folderId 
-        ? { ...folder, userIds: folder.userIds.filter(id => id !== userId) }
-        : folder
-    ));
-  };
-
-  const createUserFolder = (name: string) => {
-    const newFolder: UserFolder = {
-      id: Date.now().toString(),
-      name: name.trim(),
-      userIds: []
-    };
-    setUserFolders(prev => [...prev, newFolder]);
-  };
-
-  const getEventsByUserFolder = (folderId: string): Event[] => {
-    const folder = userFolders.find(f => f.id === folderId);
-    if (!folder) return [];
+    if (!currentUserId) {
+      return [];
+    }
+    const viewerId = currentUserId;
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 часа назад
     
-    return events.filter(event => 
-      folder.userIds.includes(event.organizerId)
-    );
-  };
+    const recentWindowMs = 2 * 60 * 60 * 1000; // 2 часа назад
+    const filtered = events.filter(event => {
+      const eventStart = getEventDateTime(event);
+      const recentlyStarted = eventStart.getTime() >= now.getTime() - recentWindowMs;
 
-  // Функции для работы с сообщениями
-  const addMessage = (message: Omit<Message, 'id' | 'createdAt'>) => {
-    const newMessage: Message = {
-      ...message,
-      id: Date.now().toString(),
-      createdAt: new Date()
-    };
-    setMessages(prev => [...prev, newMessage]);
-  };
-
-  const getMessagesByUserFolder = (folderId: string): Message[] => {
-    const folder = userFolders.find(f => f.id === folderId);
-    if (!folder) return [];
-    
-    return messages.filter(message => 
-      folder.userIds.includes(message.fromUserId) || folder.userIds.includes(message.toUserId)
-    );
-  };
-
-  // Функции для работы с чатами
-  const createEventChatWithParticipants = (eventId: string, firstAcceptedUserId: string) => {
-    const event = events.find(e => e.id === eventId);
-    if (!event) {
-      console.log('❌ Событие не найдено:', eventId);
-      return;
-    }
-
-    // Проверяем, есть ли уже чат для этого события ТОЛЬКО по eventId и типу 'event'
-    const existingChat = chats.find(c => c.eventId === eventId && c.type === 'event');
-    if (existingChat) {
-      console.log('⚠️ Чат уже существует для события:', eventId);
-      return;
-    }
-
-    // Формируем уникальный ID чата на основе eventId
-    const chatId = `chat-event-${eventId}`;
-
-    // Формируем название чата: дата + название события
-    const chatName = `${event.displayDate} - ${event.title}`;
-
-    // Получаем участников: организатор + новый участник (проверяем на дубликаты)
-    const participants: string[] = [event.organizerId];
-    if (!participants.includes(firstAcceptedUserId)) {
-      participants.push(firstAcceptedUserId);
-    }
-
-    const newChat: Chat = {
-      id: chatId,
-      type: 'event',
-      eventId: eventId,
-      name: chatName,
-      participants,
-      lastActivity: new Date(),
-      createdAt: new Date()
-    };
-
-    setChats(prev => [...prev, newChat]);
-    console.log('✅ Создан новый чат события:', chatId, 'с участниками:', participants.length);
-  };
-
-  const createEventChat = (eventId: string) => {
-    const event = events.find(e => e.id === eventId);
-    if (!event) {
-      console.log('❌ Событие не найдено:', eventId);
-      return;
-    }
-
-    // Проверяем, есть ли уже чат для этого события ТОЛЬКО по eventId и типу 'event'
-    const existingChat = chats.find(c => c.eventId === eventId && c.type === 'event');
-    if (existingChat) {
-      console.log('⚠️ Чат уже существует для события:', eventId);
-      return;
-    }
-
-    // Формируем уникальный ID чата на основе eventId
-    const chatId = `chat-event-${eventId}`;
-
-    // Формируем название чата: дата + название события
-    const chatName = `${event.displayDate} - ${event.title}`;
-
-    // Получаем участников события
-    const participants: string[] = [event.organizerId];
-    
-    // Добавляем принятых участников
-    const acceptedRequests = eventRequests.filter(req => 
-      req.eventId === eventId && req.status === 'accepted'
-    );
-    
-    acceptedRequests.forEach(req => {
-      if (!participants.includes(req.userId)) {
-        participants.push(req.userId);
-      }
+      // предстоящее или только что начавшееся
+      if (!isEventUpcoming(event) && !recentlyStarted) return false;
+      // не_набрано
+      if (isEventFull(event)) return false;
+      
+      // Исключаем отклоненные события
+      const userStatus = getUserRequestStatus(event, viewerId);
+      if (userStatus === 'rejected') return false;
+      
+      // Для остальных событий применяем обычные фильтры:
+      // !я_член_события (скрываем все события, где мы уже участники, но не организаторы)
+      if (isUserEventMember(event, viewerId) && !isUserOrganizer(event, viewerId)) return false;
+      // друг_организатора
+      if (!isFriendOfOrganizer(event, viewerId)) return false;
+      return true;
     });
-
-    // Создаем чат только если участников >= 2
-    if (participants.length >= 2) {
-      const newChat: Chat = {
-        id: chatId,
-        type: 'event',
-        eventId: eventId,
-        name: chatName,
-        participants,
-        lastActivity: new Date(),
-        createdAt: new Date()
-      };
-
-      setChats(prev => [...prev, newChat]);
-      console.log('✅ Создан новый чат события:', chatId, 'с участниками:', participants.length);
-    } else {
-      console.log('❌ Недостаточно участников для создания чата:', participants.length);
-    }
-  };
-
-  const createPersonalChat = (otherUserId: string): string => {
-    // Проверяем, есть ли уже личный чат с этим пользователем
-    const existingChat = chats.find(c => 
-      c.type === 'personal' && c.participants.includes('own-profile-1') && c.participants.includes(otherUserId)
-    );
     
-    if (existingChat) {
-      return existingChat.id;
-    }
-
-    // Получаем имя другого пользователя для названия чата
-    const otherUserData = getUserData(otherUserId);
-    const chatName = otherUserData.name;
-
-    const newChat: Chat = {
-      id: `chat-personal-${Date.now()}`,
-      type: 'personal',
-      name: chatName,
-      participants: ['own-profile-1', otherUserId],
-      lastActivity: new Date(),
-      createdAt: new Date()
-    };
-
-    setChats(prev => [...prev, newChat]);
-    return newChat.id;
+    // Сортируем: сначала события, где я организатор (недавно созданные), затем остальные
+    return filtered.sort((a, b) => {
+      const aIsMyOrganizer = isUserOrganizer(a, viewerId);
+      const bIsMyOrganizer = isUserOrganizer(b, viewerId);
+      if (aIsMyOrganizer && !bIsMyOrganizer) return -1;
+      if (!aIsMyOrganizer && bIsMyOrganizer) return 1;
+      return 0;
+    });
   };
 
-  const sendChatMessage = (chatId: string, text: string) => {
-    const newMessage: ChatMessage = {
-      id: Date.now().toString(),
-      chatId,
-      fromUserId: 'own-profile-1',
-      text,
-      createdAt: new Date()
-    };
+  // getEventsByUserFolder теперь в useUserFolders хуке
 
-    setChatMessages(prev => [...prev, newMessage]);
+  // Функции для работы с чатами теперь в useChats хуке
 
-    // Обновляем последнее сообщение и активность в чате
-    setChats(prev => prev.map(chat => 
-      chat.id === chatId 
-        ? { 
-            ...chat, 
-            lastMessage: newMessage,
-            lastActivity: new Date()
-          }
-        : chat
-    ));
-  };
-
-  const getChatMessages = (chatId: string): ChatMessage[] => {
-    return chatMessages.filter(msg => msg.chatId === chatId).sort((a, b) => 
-      a.createdAt.getTime() - b.createdAt.getTime()
+  // Обертки для отправки событий и постов в чаты (используют функции из useChats хука)
+  const sendEventToChats = async (eventId: string, chatIds: string[]) => {
+    logger.debug('sendEventToChats called:', { eventId, chatIds });
+    await Promise.all(
+      chatIds.map(chatId => {
+        logger.debug('Sending event to chat:', chatId, 'eventId:', eventId);
+        return sendChatMessage(chatId, '', eventId);
+      }),
     );
   };
 
-  const getChat = (chatId: string): Chat | null => {
-    return chats.find(c => c.id === chatId) || null;
-  };
-
-  const getChatsForUser = (userId: string): Chat[] => {
-    return chats.filter(chat => chat.participants.includes(userId)).sort((a, b) => 
-      b.lastActivity.getTime() - a.lastActivity.getTime()
+  const sendMemoryPostToChats = async (eventId: string, postId: string, chatIds: string[]) => {
+    logger.debug('sendMemoryPostToChats called:', { eventId, postId, chatIds });
+    await Promise.all(
+      chatIds.map(chatId => {
+        logger.debug('Sending memory post to chat:', chatId, 'eventId:', eventId, 'postId:', postId);
+        return sendChatMessage(chatId, '', eventId, postId);
+      }),
     );
   };
 
-  // Функция для добавления участника в существующий чат
-  const addParticipantToChat = (eventId: string, userId: string) => {
-    // Ищем чат ТОЛЬКО по eventId и типу 'event'
-    const eventChat = chats.find(c => c.eventId === eventId && c.type === 'event');
-    
-    if (!eventChat) {
-      console.log('❌ Чат не найден для события:', eventId);
-      return;
-    }
-    
-    // Проверяем, что пользователь еще не в чате
-    if (eventChat.participants.includes(userId)) {
-      // Пользователь уже в чате - тихо возвращаемся без логирования ошибки
-      return;
-    }
-    
-    // Добавляем участника в чат
-    setChats(prev => prev.map(chat =>
-      chat.id === eventChat.id
-        ? { ...chat, participants: [...chat.participants, userId] }
-        : chat
-    ));
-    console.log('✅ Участник добавлен в чат события:', eventId);
-  };
+  // refreshPendingJoinRequests и sendEventRequest теперь в useEventRequests хуке
 
-  // Функции для работы с профилями событий
-  const sendEventRequest = (eventId: string, userId: string) => {
-    const existingRequest = eventRequests.find(
-      req => req.eventId === eventId && req.userId === userId && req.status === 'pending'
-    );
-    
-    if (!existingRequest) {
-      const newRequest: EventRequest = {
-        id: Date.now().toString(),
-        eventId,
-        userId,
-        status: 'pending',
-        createdAt: new Date()
-      };
-      setEventRequests(prev => [...prev, newRequest]);
-    }
-  };
+  // Все функции запросов на участие теперь в useEventRequests хуке
+  // cancelEvent и cancelOrganizerParticipation теперь в useEventActions хуке
 
-  const respondToEventRequest = (requestId: string, accepted: boolean) => {
-    // Находим запрос ДО обновления состояния
-    const request = eventRequests.find(req => req.id === requestId);
-    if (!request) {
-      console.log('❌ Запрос не найден:', requestId);
-      return;
+  // Используем хук для работы с профилями событий
+  const {
+    eventProfiles,
+    setEventProfiles,
+    getEventProfile,
+    fetchEventProfile,
+    createEventProfile,
+    addEventProfilePost,
+    updateEventProfile,
+    updateEventProfilePost,
+    deleteEventProfilePost,
+    canEditEventProfile,
+  } = useEventProfiles({
+        accessToken,
+    currentUserId,
+    events,
+    setEvents,
+    isEventPast,
+    normalizeMediaUrl,
+    removeSavedMemoryPost,
+  });
+
+  // Функции профилей событий теперь находятся в useEventProfiles хуке
+  // Функции запросов на участие теперь находятся в useEventRequests хуке
+
+  // Определяем mapServerEventToClient ДО использования в useEventActions
+  const mapServerEventToClient = useCallback((serverEvent: any, eventLanguage: string = 'en'): Event => {
+    const lang = (eventLanguage === 'ru' || eventLanguage === 'en') ? eventLanguage : 'en';
+    if (!serverEvent) {
+      throw new Error('Invalid event payload');
     }
 
-    // Обновляем статус заявки
-    setEventRequests(prev => 
-      prev.map(req => 
-        req.id === requestId 
-          ? { ...req, status: accepted ? 'accepted' : 'rejected' }
-          : req
-      )
-    );
+    const start = serverEvent.startTime ? new Date(serverEvent.startTime) : null;
+    const date = start ? start.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+    const time = start ? start.toISOString().slice(11, 16) : '00:00';
 
-    if (accepted && request) {
-      const event = events.find(e => e.id === request.eventId);
-      if (!event) {
-        console.log('❌ Событие не найдено:', request.eventId);
-        return;
-      }
+    // Фильтруем только ACCEPTED memberships - pending приглашения не должны показываться как участники
+    const participantsData = (serverEvent.memberships ?? [])
+      .filter((membership: any) => membership.status === 'ACCEPTED')
+      .map((membership: any) => {
+        const user = membership.user ?? {};
+        return {
+          avatar: normalizeMediaUrl(user.avatarUrl) ?? '',
+          userId: user.id ?? '',
+          name: user.name ?? user.username ?? 'Участник',
+        };
+      })
+      .filter((participant: { userId: string }) => Boolean(participant.userId));
 
-      console.log('✅ Принимаем запрос:', {
-        requestId,
-        eventId: request.eventId,
-        userId: request.userId,
-        eventName: event.title
-      });
-      
-      // Добавляем участника в событие
-      updateEvent(request.eventId, {
-        participants: event.participants + 1
-      });
-      
-      // Используем setTimeout для доступа к обновленному состоянию chats после обновления eventRequests
-      setTimeout(() => {
-        // Ищем чат ТОЛЬКО по eventId и типу 'event'
-        const existingChat = chats.find(c => c.eventId === request.eventId && c.type === 'event');
-        
-        if (existingChat) {
-          // Чат уже существует - проверяем наличие участника перед добавлением
-          if (!existingChat.participants.includes(request.userId)) {
-            console.log('Добавляем участника в существующий чат');
-            addParticipantToChat(request.eventId, request.userId);
-          } else {
-            console.log('Участник уже в чате, пропускаем добавление');
-          }
-        } else {
-          // Чат не существует - создаем его с участниками
-          console.log('Создаем новый чат для события');
-          createEventChatWithParticipants(request.eventId, request.userId);
+    return {
+      id: serverEvent.id,
+      title: serverEvent.title ?? 'Событие',
+      description: serverEvent.description ?? '',
+      date,
+      time,
+      displayDate: serverEvent.isRecurring 
+        ? formatRecurringEventDate({
+            isRecurring: serverEvent.isRecurring,
+            recurringType: serverEvent.recurringType,
+            recurringDays: serverEvent.recurringDays,
+            recurringDayOfMonth: serverEvent.recurringDayOfMonth,
+            recurringCustomDates: serverEvent.recurringCustomDates,
+            date: date,
+          }, lang)
+        : formatDate(date),
+      displayTime: time,
+      location: serverEvent.location ?? '',
+      price: serverEvent.price ?? 'Бесплатно',
+      participants: participantsData.length,
+      maxParticipants: serverEvent.maxParticipants ?? 0,
+      organizerAvatar: normalizeMediaUrl(serverEvent.organizer?.avatarUrl) ?? '',
+      organizerId: serverEvent.organizerId,
+      // Если mediaUrl отсутствует, но есть originalMediaUrl - используем его
+      mediaUrl: normalizeMediaUrl(serverEvent.mediaUrl) ?? normalizeMediaUrl(serverEvent.originalMediaUrl) ?? undefined,
+      originalMediaUrl: normalizeMediaUrl(serverEvent.originalMediaUrl) ?? undefined,
+      mediaType: serverEvent.mediaType ?? 'image',
+      mediaAspectRatio: serverEvent.mediaAspectRatio ?? 1,
+      participantsList: participantsData
+        .map((participant: { avatar: string }) => participant.avatar)
+        .filter(Boolean),
+      participantsData,
+      createdAt: serverEvent.createdAt ? new Date(serverEvent.createdAt) : new Date(),
+      // Маппим координаты из бэкенда
+      coordinates: (() => {
+        if (serverEvent.latitude != null && serverEvent.longitude != null) {
+          return { latitude: Number(serverEvent.latitude), longitude: Number(serverEvent.longitude) };
         }
-      }, 100);
-      
-      // Автоматически создаем профиль события после принятия первой заявки
-      setTimeout(() => {
-        createEventProfile(request.eventId);
-      }, 1000);
-    }
-  };
+        if (serverEvent.coordinates) {
+          return { latitude: Number(serverEvent.coordinates.latitude), longitude: Number(serverEvent.coordinates.longitude) };
+        }
+        return undefined;
+      })(),
+      // Маппим personalPhotos из массива в объект { userId: photoUrl }
+      personalPhotos: serverEvent.personalPhotos
+        ? (Array.isArray(serverEvent.personalPhotos)
+          ? serverEvent.personalPhotos.reduce((acc: Record<string, string>, photo: any) => {
+              if ('userId' in photo && 'photoUrl' in photo && photo.userId && photo.photoUrl) {
+                acc[photo.userId] = normalizeMediaUrl(photo.photoUrl) || photo.photoUrl;
+              }
+              return acc;
+            }, {})
+          : serverEvent.personalPhotos as Record<string, string>)
+        : undefined,
+      // Поля для регулярных событий
+      isRecurring: serverEvent.isRecurring ?? false,
+      recurringType: serverEvent.recurringType ?? undefined,
+      recurringDays: serverEvent.recurringDays ?? undefined,
+      recurringDayOfMonth: serverEvent.recurringDayOfMonth ?? undefined,
+      recurringCustomDates: serverEvent.recurringCustomDates 
+        ? serverEvent.recurringCustomDates.map((d: string | Date) => 
+            typeof d === 'string' ? d : d.toISOString().split('T')[0]
+          )
+        : undefined,
+      // Метки (теги) - объединяем автоматические и пользовательские, фильтруя дубликаты
+      tags: (() => {
+        const autoTags = serverEvent.autoTags || [];
+        const customTags = serverEvent.customTags || [];
+        
+        // Словарь эквивалентов тегов
+        const tagEquivalents: Record<string, string[]> = {
+          'recurring': ['recurring', 'регулярное', 'regular', 'регулярно'],
+          'women_only': ['women_only', 'women only', 'только женщины', 'only women'],
+          'age_18_plus': ['age_18_plus', '18+', '18 плюс', '18 plus'],
+          'starting_soon': ['starting_soon', 'скоро', 'через', 'soon'],
+        };
+        
+        const normalizedAutoTags = new Set<string>();
+        autoTags.forEach((tag: string) => {
+          const normalized = tag.toLowerCase().trim();
+          normalizedAutoTags.add(normalized);
+          for (const equivalents of Object.values(tagEquivalents)) {
+            if (equivalents.some(eq => eq.toLowerCase() === normalized)) {
+              equivalents.forEach(eq => normalizedAutoTags.add(eq.toLowerCase()));
+              break;
+            }
+          }
+        });
+        
+        const filteredCustomTags = customTags.filter((tag: string) => {
+          const normalized = tag.toLowerCase().trim();
+          if (normalizedAutoTags.has(normalized)) {
+            return false;
+          }
+          for (const equivalents of Object.values(tagEquivalents)) {
+            if (equivalents.some(eq => eq.toLowerCase() === normalized)) {
+              const hasAutoEquivalent = autoTags.some((autoTag: string) => {
+                const autoNormalized = autoTag.toLowerCase().trim();
+                return equivalents.some(eq => eq.toLowerCase() === autoNormalized);
+              });
+              if (hasAutoEquivalent) {
+                return false;
+              }
+            }
+          }
+          return true;
+        });
+        
+        return [...autoTags, ...filteredCustomTags];
+      })(),
+      ageRestriction: serverEvent.ageRestriction ?? undefined,
+      genderRestriction: serverEvent.genderRestriction ?? undefined,
+      visibility: serverEvent.visibility ?? undefined,
+      invitedUsers: serverEvent.invitedUsers ?? undefined,
+    };
+  }, [normalizeMediaUrl]);
 
-  const getEventProfile = (eventId: string): EventProfile | null => {
-    return eventProfiles.find(profile => profile.eventId === eventId) || null;
-  };
+  // Используем хук для действий с событиями
+  const {
+    createEvent,
+    updateEvent,
+    deleteEvent,
+    cancelEvent,
+    cancelOrganizerParticipation,
+    removeParticipantFromEvent,
+  } = useEventActions({
+          accessToken,
+    currentUserId,
+    refreshToken,
+    handleUnauthorizedError,
+    refreshSession,
+    applyServerUserDataToState,
+    setEvents,
+    setEventProfiles,
+    setEventRequests,
+    setChats,
+    mapServerEventToClient,
+    isEventPast,
+    fetchEventProfile,
+    refreshPendingJoinRequests,
+    syncEventsFromServer,
+    getEventParticipants,
+    events,
+    eventProfiles,
+    language,
+  });
 
-  const createEventProfile = (eventId: string) => {
+  // Обновляем ref после определения updateEvent
+  updateEventRef.current = updateEvent;
+
+  // Используем хук для работы с сохраненными событиями
+  const {
+    savedEvents,
+    setSavedEvents,
+    saveEvent,
+    removeSavedEvent,
+    isEventSaved,
+    getSavedEvents,
+  } = useSavedEvents({
+    events,
+  });
+
+  // Используем хук для работы с папками пользователей
+  const {
+    userFolders,
+    setUserFolders,
+    syncUserFoldersFromServer,
+    addUserToFolder,
+    removeUserFromFolder,
+    createUserFolder,
+    deleteUserFolder,
+    getEventsByUserFolder,
+  } = useUserFolders({
+          accessToken,
+    currentUserId,
+    events,
+    applyServerUserDataToState,
+    handleUnauthorizedError,
+  });
+
+  // Используем хук для работы с папками сообщений
+  const {
+    messageFolders,
+    setMessageFolders,
+    syncMessageFolders,
+    createMessageFolder,
+    addChatsToMessageFolder,
+    removeChatFromMessageFolder,
+  } = useMessageFolders({
+      accessToken,
+      currentUserId,
+      applyServerUserDataToState,
+      handleUnauthorizedError,
+  });
+
+  // Используем хук для работы с сохраненными меморис постами
+  const {
+    savedMemoryPosts,
+    setSavedMemoryPosts,
+    saveMemoryPost,
+    removeSavedMemoryPost,
+    isMemoryPostSaved,
+    getSavedMemoryPosts,
+  } = useSavedMemoryPosts({
+    eventProfiles,
+  });
+
+  // Функции запросов на участие теперь находятся в useEventRequests хуке
+  // Функции сохраненных событий теперь находятся в useSavedEvents хуке
+  // Функции папок пользователей теперь находятся в useUserFolders хуке
+  // Функции папок сообщений теперь находятся в useMessageFolders хуке
+  // Функции сохраненных меморис постов теперь находятся в useSavedMemoryPosts хуке
+
+  // Используем хук для работы с уведомлениями (после всех хуков, чтобы избежать проблем с порядком)
+  const {
+    notifications,
+    unreadNotificationsCount,
+    refreshNotifications,
+    markNotificationAsRead,
+    markAllNotificationsAsRead,
+    deleteNotification,
+    setNotifications,
+  } = useNotifications(accessToken, currentUserId, handleUnauthorizedError);
+
+  // knownUserIds вычисляется после объявления всех хуков
+  const knownUserIds = useMemo(() => {
+    const ids = new Set<string>(Object.keys(serverUserData));
+    Object.keys(userDataUpdates).forEach(id => ids.add(id));
+    events.forEach(event => {
+      ids.add(event.organizerId);
+      event.participantsData?.forEach(p => {
+        if (p.userId) {
+          ids.add(p.userId);
+        }
+      });
+      event.invitedUsers?.forEach(id => ids.add(id));
+    });
+    eventProfiles.forEach(profile => {
+      ids.add(profile.organizerId);
+      profile.participants.forEach(id => ids.add(id));
+    });
+    eventRequests.forEach(request => {
+      if (request.fromUserId) ids.add(request.fromUserId);
+      if (request.toUserId) ids.add(request.toUserId);
+      if (request.userId) ids.add(request.userId);
+    });
+    friends.forEach(id => ids.add(id));
+    Object.keys(userFriendsMap).forEach(id => ids.add(id));
+    Object.values(userFriendsMap).forEach(list => list.forEach(id => ids.add(id)));
+    if (currentUserId) ids.add(currentUserId);
+    if (authUser?.id) ids.add(authUser.id);
+    return Array.from(ids);
+  }, [events, eventProfiles, eventRequests, userDataUpdates, friends, userFriendsMap, currentUserId, authUser?.id, serverUserData]);
+
+  // ========== НОВАЯ ДЕКЛАРАТИВНАЯ СИСТЕМА СОСТОЯНИЙ СОБЫТИЙ ==========
+  
+  // 1. БАЗОВЫЕ АТРИБУТЫ (вычисляются из данных события)
+  
+  // Получить DateTime события
+  const getEventDateTime = (event: Event): Date => {
+    if (!event?.date || !event?.time) return new Date(0);
+    const [hh, mm] = event.time.split(':').map((v: string) => parseInt(v, 10));
+    return new Date(event.date + 'T' + `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00`);
+  };
+  
+  // Получить список принятых участников (только userId)
+  const getAcceptedParticipants = (eventId: string): string[] => {
     const event = events.find(e => e.id === eventId);
-    if (!event) return;
-
-    // Валидация: Event Profiles можно создавать только для прошедших событий
-    const eventDate = new Date(event.date);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    if (!event) return [];
     
-    if (eventDate > today) {
-      console.warn('Event Profiles можно создавать только для прошедших событий');
-      return;
-    }
-
-    const existingProfile = eventProfiles.find(p => p.eventId === eventId);
-    if (existingProfile) return;
-
-    const participants = [event.organizerId];
+    const participants = new Set<string>();
     
-    // Добавляем текущего пользователя если он участвовал в событии
-    if (event.organizerId === 'own-profile-1') {
-      // Если текущий пользователь - организатор, он уже добавлен
-    } else {
-      // Проверяем, участвовал ли текущий пользователь в событии
-      // Для архивных событий добавляем его как участника
-      if (!participants.includes('own-profile-1')) {
-        participants.push('own-profile-1');
-      }
+    // Добавляем участников из eventProfile
+    const profile = eventProfiles.find(p => p.eventId === eventId);
+    if (profile) {
+      profile.participants.forEach(id => participants.add(id));
     }
     
-    // Добавляем принятых участников из заявок
-    const acceptedRequests = eventRequests.filter(req => 
-      req.eventId === eventId && req.status === 'accepted'
+    // Добавляем участников из accepted requests
+    const acceptedRequests = eventRequests.filter(
+      req => req.eventId === eventId && req.status === 'accepted'
     );
     acceptedRequests.forEach(req => {
-      if (!participants.includes(req.userId)) {
-        participants.push(req.userId);
+      const participantId = resolveRequestUserId(req);
+      if (participantId) {
+        participants.add(participantId);
       }
     });
-
-    const newProfile: EventProfile = {
-      id: `profile-${eventId}`,
-      eventId,
-      name: event.title,
-      description: event.description,
-      date: event.date,
-      time: event.time, // Используем время из события
-      location: event.location,
-      participants,
-      organizerId: event.organizerId,
-      isCompleted: true,
-      posts: [],
-      createdAt: new Date()
-    };
-
-    setEventProfiles(prev => [...prev, newProfile]);
+    
+    // Добавляем участников из participantsData
+    if (event.participantsData) {
+      event.participantsData.forEach(p => {
+        if (p.userId) {
+          participants.add(p.userId);
+        }
+      });
+    }
+    
+    // Добавляем участников из participantsList (через avatar -> userId)
+    if (event.participantsList) {
+      event.participantsList.forEach(avatar => {
+        for (const uid of knownUserIds) {
+          const user = getUserData(uid);
+          if (user.avatar === avatar) {
+            participants.add(uid);
+            break;
+          }
+        }
+      });
+    }
+    
+    return Array.from(participants);
+  };
+  
+  // Получить статус заявки пользователя
+  type RequestStatus = 'organizer' | 'accepted' | 'rejected' | 'pending' | 'not_requested';
+  const getUserRequestStatus = (event: Event, userId: string | null): RequestStatus => {
+    if (!userId) return 'not_requested';
+    const resolvedUserId = resolveUserId(userId);
+    // Если пользователь - организатор
+    if (event.organizerId === resolvedUserId) {
+      return 'organizer';
+    }
+    
+    // Сначала проверяем memberships из события (данные с бэкенда)
+    // Ищем membership для текущего пользователя в participantsData
+    const userMembership = event.participantsData?.find(
+      (p: { userId: string }) => p.userId === resolvedUserId
+    );
+    
+    // Если membership найден в данных события, это означает, что пользователь принят
+    if (userMembership) {
+      return 'accepted';
+    }
+    
+    // Проверяем pending memberships через eventRequests (для приглашений и запросов)
+    const request = eventRequests.find(
+      req => req.eventId === event.id && requestBelongsToUser(req, resolvedUserId)
+    );
+    
+    if (request) {
+      if (request.status === 'accepted') return 'accepted';
+      if (request.status === 'rejected') return 'rejected';
+      if (request.status === 'pending') return 'pending';
+    }
+    
+    return 'not_requested';
   };
 
-  const addEventProfilePost = (eventId: string, post: Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>) => {
-    // Валидация: Memory Posts могут быть только прошедших событий (дата события <= сегодня)
-    const event = events.find(e => e.id === eventId);
-    const profile = eventProfiles.find(p => p.eventId === eventId);
+  // НОВАЯ ФУНКЦИЯ: Определяет отношения пользователя к событию с приоритетом для приглашений
+  const getUserRelationship = (event: Event, userId: string | null): 'invited' | 'organizer' | 'accepted' | 'waiting' | 'rejected' | 'non_member' => {
+    if (!userId) return 'non_member';
+    const resolvedUserId = resolveUserId(userId);
     
-    if (event) {
-      const eventDate = new Date(event.date);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+    // 🎯 ПРИОРИТЕТ 1: Приглашение имеет высший приоритет
+    const inviteRequest = eventRequests.find(req => 
+      req.eventId === event.id &&
+      req.type === 'invite' &&
+      req.toUserId === resolvedUserId &&
+      req.status === 'pending'
+    );
+    if (inviteRequest) {
+      return 'invited';
+    }
+    
+    // ПРИОРИТЕТ 2: Организатор
+    if (event.organizerId === resolvedUserId) {
+      return 'organizer';
+    }
+    
+    // ПРИОРИТЕТ 3: Участник (accepted)
+    const userMembership = event.participantsData?.find(
+      (p: { userId: string }) => p.userId === resolvedUserId
+    );
+    if (userMembership) {
+      return 'accepted';
+    }
+    
+    // Проверяем accepted через eventRequests
+    const acceptedRequest = eventRequests.find(req => 
+      req.eventId === event.id && 
+      requestBelongsToUser(req, resolvedUserId) &&
+      req.status === 'accepted'
+    );
+    if (acceptedRequest) {
+      return 'accepted';
+    }
+    
+    // ПРИОРИТЕТ 4: В ожидании (waiting) - pending join request
+    const pendingRequest = eventRequests.find(req => 
+      req.eventId === event.id &&
+      req.type === 'join' &&
+      req.fromUserId === resolvedUserId &&
+      req.status === 'pending'
+    );
+    if (pendingRequest) {
+      return 'waiting';
+    }
+    
+    // ПРИОРИТЕТ 5: Отклонен (rejected)
+    const rejectedRequest = eventRequests.find(req => 
+      req.eventId === event.id && 
+      requestBelongsToUser(req, resolvedUserId) &&
+      req.status === 'rejected'
+    );
+    if (rejectedRequest) {
+      return 'rejected';
+    }
+    
+    // ПРИОРИТЕТ 6: Не член (non_member)
+    return 'non_member';
+  };
+
+  // Персонализированные фото событий
+  // Получить фото события для конкретного пользователя с учетом viewerUserId
+  // Логика:
+  // 1. По умолчанию - фото организатора (event.mediaUrl)
+  // 2. Если событие прошло И viewerUserId указан (третье лицо смотрит через профиль участника) - показываем персональное фото viewerUserId (если есть)
+  // 3. Если событие прошло И userId имеет персональное фото - показываем его (для самого участника)
+  // 4. Иначе - фото организатора
+  const getEventPhotoForUser = (eventId: string, userId: string, viewerUserId?: string, useOriginal: boolean = false): string | undefined => {
+    const event = events.find(e => e.id === eventId);
+    if (!event) return undefined;
+
+    // Проверяем, прошло ли событие
+    const isPast = isEventPast(event);
+
+    // Если событие прошло
+    if (isPast && event.personalPhotos) {
+      // Приоритет 1: Для третьих лиц - персональное фото участника, через профиль которого смотрят
+      if (viewerUserId && event.personalPhotos[viewerUserId]) {
+        return event.personalPhotos[viewerUserId];
+      }
       
-      // Memory Posts можно добавлять только к прошедшим событиям
-      if (eventDate > today) {
-        console.warn('Memory Posts можно добавлять только к прошедшим событиям');
-        return;
+      // Приоритет 2: Для самого участника - его персональное фото (если есть)
+      if (event.personalPhotos[userId]) {
+        return event.personalPhotos[userId];
+      }
+    }
+
+    // Если запрашивается оригинальное фото - используем originalMediaUrl
+    if (useOriginal && event.originalMediaUrl) {
+      return event.originalMediaUrl;
+    }
+
+    // По умолчанию - обрезанное фото события (mediaUrl)
+    if (event.mediaUrl) {
+      return event.mediaUrl;
+    }
+
+    // Fallback на avatar из eventProfile (только если нет mediaUrl)
+    const profile = eventProfiles.find(p => p.eventId === eventId);
+    if (profile?.avatar) {
+      return profile.avatar;
+    }
+
+    // Последний fallback - НЕ возвращаем аватарку организатора, возвращаем undefined
+    // чтобы было видно, что фото не установлено
+    return undefined;
+  };
+
+  // Установить персональное фото события для пользователя (объявлена после syncEventsFromServer)
+  
+  // 2. ПРОИЗВОДНЫЕ АТРИБУТЫ (вычисляются)
+  
+  // Событие предстоящее
+  const isEventUpcoming = (event: Event): boolean => {
+    // Для регулярных событий проверяем ближайшую будущую дату
+    if (event.isRecurring) {
+      const now = Date.now();
+      const [hh, mm] = event.time.split(':').map((v: string) => parseInt(v, 10));
+      
+      switch (event.recurringType) {
+        case 'daily':
+          // Ежедневные события всегда предстоящие
+          return true;
+          
+        case 'weekly':
+        case 'monthly':
+          // Для weekly и monthly события всегда предстоящие (они повторяются)
+          return true;
+          
+        case 'custom':
+          // Для custom проверяем, есть ли хотя бы одна будущая дата
+          if (event.recurringCustomDates && event.recurringCustomDates.length > 0) {
+            const hasFutureDate = event.recurringCustomDates.some(dateStr => {
+              const dateTime = new Date(dateStr + 'T' + `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00`);
+              return dateTime.getTime() > now;
+            });
+            return hasFutureDate;
+          }
+          return false;
+          
+        default:
+          // Для неизвестного типа используем стандартную логику
+          const eventDateTime = getEventDateTime(event);
+          return eventDateTime.getTime() > Date.now();
       }
     }
     
-    const newPost: EventProfilePost = {
-      ...post,
-      id: Date.now().toString(),
-      eventId,
-      createdAt: new Date()
-    };
-
-    setEventProfiles(prev => prev.map(profile => 
-      profile.eventId === eventId 
-        ? { ...profile, posts: [...profile.posts, newPost] }
-        : profile
-    ));
+    // Для обычных событий проверяем дату события
+    const eventDateTime = getEventDateTime(event);
+    return eventDateTime.getTime() > Date.now();
   };
-
-  const updateEventProfile = (eventId: string, updates: Partial<EventProfile>) => {
-    setEventProfiles(prev => prev.map(profile => 
-      profile.eventId === eventId 
-        ? { ...profile, ...updates }
-        : profile
-    ));
-  };
-
-  const updateEventProfilePost = (eventId: string, postId: string, updates: Partial<EventProfilePost>) => {
-    setEventProfiles(prev => prev.map(profile => 
-      profile.eventId === eventId 
-        ? { 
-            ...profile, 
-            posts: profile.posts.map(post => 
-              post.id === postId 
-                ? { ...post, ...updates }
-                : post
-            )
+  
+  // Событие прошедшее
+  const isEventPast = (event: Event): boolean => {
+    // Для регулярных событий проверяем ближайшую будущую дату
+    if (event.isRecurring) {
+      const now = Date.now();
+      const [hh, mm] = event.time.split(':').map((v: string) => parseInt(v, 10));
+      
+      switch (event.recurringType) {
+        case 'daily':
+          // Для ежедневных событий проверяем время сегодня
+          // Если время уже прошло сегодня, событие будет завтра
+          const today = new Date();
+          today.setHours(hh, mm || 0, 0, 0);
+          // Событие прошедшее только если оно было в прошлом и больше не повторяется
+          // Для ежедневных событий это никогда (они всегда актуальны)
+          return false;
+          
+        case 'weekly':
+        case 'monthly':
+          // Для weekly и monthly проверяем, есть ли еще будущие даты
+          // Ближайшая дата - это дата из event.date
+          const eventDateTime = new Date(event.date + 'T' + `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00`);
+          // Если текущая дата прошла, ищем следующую
+          if (eventDateTime.getTime() <= now) {
+            // Для weekly/monthly событий, если первая дата прошла, 
+            // событие все еще актуально (будет на следующей неделе/месяце)
+            return false;
           }
-        : profile
-    ));
+          return false;
+          
+        case 'custom':
+          // Для custom проверяем, есть ли хотя бы одна будущая дата
+          if (event.recurringCustomDates && event.recurringCustomDates.length > 0) {
+            // Сбрасываем время для корректного сравнения только по дате
+            const nowDateOnly = new Date();
+            nowDateOnly.setHours(0, 0, 0, 0);
+            
+            const hasFutureDate = event.recurringCustomDates.some(dateStr => {
+              // dateStr может быть в формате "YYYY-MM-DD" или Date объект
+              const dateOnly = typeof dateStr === 'string' 
+                ? new Date(dateStr + 'T00:00:00')
+                : new Date(dateStr);
+              dateOnly.setHours(0, 0, 0, 0);
+              return dateOnly >= nowDateOnly;
+            });
+            // Событие прошедшее только если все даты в прошлом
+            return !hasFutureDate;
+          }
+          // Если дат нет - считаем событие прошедшим (невалидное событие)
+          return true;
+          
+        default:
+          return false;
+      }
+    }
+    
+    // Для обычных событий проверяем дату события
+    const eventDateTime = new Date(event.date + 'T' + event.time + ':00');
+    return eventDateTime.getTime() <= Date.now();
+  };
+  
+  // Событие набрано (достигнут максимум участников)
+  const isEventFull = (event: Event): boolean => {
+    const acceptedParticipants = getAcceptedParticipants(event.id);
+    return acceptedParticipants.length >= event.maxParticipants;
+  };
+  
+  // Событие не набрано
+  const isEventNotFull = (event: Event): boolean => {
+    return !isEventFull(event);
+  };
+  
+  // 3. ОТНОШЕНИЕ ТЕКУЩЕГО ПОЛЬЗОВАТЕЛЯ К СОБЫТИЮ
+  
+  // Я организатор
+  const isUserOrganizer = (event: Event, userId: string): boolean => {
+    const resolvedUserId = resolveUserId(userId);
+    return event.organizerId === resolvedUserId;
+  };
+  
+  // Я участник (принятый, но не организатор)
+  const isUserAttendee = (event: Event, userId: string): boolean => {
+    const resolvedUserId = resolveUserId(userId);
+    if (event.organizerId === resolvedUserId) return false; // Организатор не является участником
+    
+    const acceptedParticipants = getAcceptedParticipants(event.id);
+    const isInAccepted = acceptedParticipants.includes(resolvedUserId);
+    
+    // Дополнительная проверка через participantsData и participantsList
+    // Это важно для случаев, когда userId есть в данных, но не в eventRequests
+    if (event.participantsData) {
+      const foundInParticipantsData = event.participantsData.some(p => p.userId === resolvedUserId);
+      if (foundInParticipantsData) return true;
+    }
+    
+    // Проверяем через participantsList (avatar -> userId mapping)
+    if (event.participantsList) {
+      const userData = getUserData(resolvedUserId);
+      const foundInParticipantsList = event.participantsList.includes(userData.avatar);
+      if (foundInParticipantsList) return true;
+    }
+    
+    return isInAccepted;
+  };
+  
+  // Я член события (организатор ИЛИ принятый участник)
+  const isUserEventMember = (event: Event, userId: string): boolean => {
+    return isUserOrganizer(event, userId) || isUserAttendee(event, userId);
+  };
+  
+  // 4. ОТНОШЕНИЕ К ДРУГИМ ПОЛЬЗОВАТЕЛЯМ
+  
+  // Организатор события - мой друг
+  const isFriendOfOrganizer = (event: Event, userId: string | null): boolean => {
+    if (!userId) return false;
+    const resolvedUserId = resolveUserId(userId);
+    const friendIds = userFriendsMap[resolvedUserId] ?? [];
+    return friendIds.includes(event.organizerId);
+  };
+  
+  // Универсальная функция для проверки участия пользователя в событии (для обратной совместимости)
+  const isUserParticipant = (event: Event, userId: string): boolean => {
+    return isUserEventMember(event, userId);
   };
 
   const getEventParticipants = (eventId: string): string[] => {
+    const event = events.find(e => e.id === eventId);
+    if (!event) return [];
+    
+    // Всегда начинаем с организатора
+    const participants = new Set<string>([event.organizerId]);
+    
+    // Добавляем участников из eventProfile
     const profile = eventProfiles.find(p => p.eventId === eventId);
     if (profile) {
-      return profile.participants;
+      profile.participants.forEach(id => participants.add(id));
     }
     
-    // Fallback к событию
-    const event = events.find(e => e.id === eventId);
-    return event ? [event.organizerId] : [];
+    // Добавляем участников из accepted requests
+    const acceptedRequests = eventRequests.filter(
+      req => req.eventId === eventId && req.status === 'accepted'
+    );
+    acceptedRequests.forEach(req => {
+      const participantId = resolveRequestUserId(req);
+      if (participantId) {
+        participants.add(participantId);
+      }
+    });
+    
+    // Добавляем участников из participantsData
+    if (event.participantsData) {
+      event.participantsData.forEach(p => {
+        if (p.userId) {
+          participants.add(p.userId);
+        }
+      });
+    }
+    
+    // Добавляем участников из participantsList (через avatar -> userId)
+    if (event.participantsList) {
+      event.participantsList.forEach(avatar => {
+        for (const uid of knownUserIds) {
+          const user = getUserData(uid);
+          if (user.avatar === avatar) {
+            participants.add(uid);
+            break;
+          }
+        }
+      });
+    }
+    
+    return Array.from(participants);
   };
 
-  const canEditEventProfile = (eventId: string, userId: string): boolean => {
-    const profile = eventProfiles.find(p => p.eventId === eventId);
-    if (!profile) return false;
-    
-    return profile.organizerId === userId || profile.participants.includes(userId);
-  };
+  // canEditEventProfile теперь находится в useEventProfiles хуке
 
   // Получить мои исходящие запросы на события
   const getMyEventRequests = (): EventRequest[] => {
-    const currentUserId = 'own-profile-1';
-    return eventRequests.filter(req => req.userId === currentUserId);
+    const myUserId = currentUserId;
+    if (!myUserId) return [];
+    
+    // Возвращаем как запросы на участие (join), так и приглашения (invite)
+    // Для join: где пользователь является отправителем (fromUserId === myUserId)
+    // Для invite: где пользователь является отправителем (fromUserId === myUserId) ИЛИ получателем (toUserId === myUserId)
+    const result = eventRequests.filter(req => {
+      // Для запросов типа 'join' проверяем userId или fromUserId
+      if (req.type === 'join' || !req.type) {
+        // Проверяем несколько вариантов для совместимости
+        const belongsToUser = requestBelongsToUser(req, myUserId);
+        const matchesFromUserId = req.fromUserId === myUserId;
+        const matchesUserId = req.userId === myUserId;
+        return belongsToUser || matchesFromUserId || matchesUserId;
+      }
+      // Для приглашений (invite) проверяем:
+      // - fromUserId (отправитель приглашения - исходящие)
+      // - toUserId (получатель приглашения - входящие)
+      if (req.type === 'invite') {
+        return req.fromUserId === myUserId || req.toUserId === myUserId;
+      }
+      return false;
+    });
+    logger.debug('getMyEventRequests вызван, eventRequests.length:', eventRequests.length, 'результат:', result.length);
+    result.forEach(req => {
+      logger.debug('Мой запрос:', { id: req.id, type: req.type, eventId: req.eventId, fromUserId: req.fromUserId, toUserId: req.toUserId, userId: req.userId, status: req.status });
+    });
+    return result;
   };
 
   // Получить организатора события
@@ -2104,16 +1678,14 @@ export const EventsProvider: React.FC<EventsProviderProps> = ({ children }) => {
 
   // Проверить мой статус участия в событии
   const getMyEventParticipationStatus = (eventId: string): 'pending' | 'accepted' | 'rejected' | null => {
-    const currentUserId = 'own-profile-1';
     const request = eventRequests.find(req => 
-      req.eventId === eventId && req.userId === currentUserId
+      req.eventId === eventId && requestBelongsToUser(req, currentUserId)
     );
     return request ? request.status : null;
   };
 
   // Получить события для моего календаря (только где я организатор или участник со статусом accepted)
   const getMyCalendarEvents = (): Event[] => {
-    const currentUserId = 'own-profile-1';
     return events.filter(event => {
       // Я организатор
       if (event.organizerId === currentUserId) {
@@ -2147,34 +1719,845 @@ export const EventsProvider: React.FC<EventsProviderProps> = ({ children }) => {
   };
 
   // Получить глобальные события (на которые я еще не откликался)
+  // Показываем только события НЕ-друзей
+  // Обновленная логика GLOB согласно новой системе
   const getGlobalEvents = (): Event[] => {
-    const currentUserId = 'own-profile-1';
-    return events.filter(event => {
-      // Исключаем события, где я организатор
-      if (event.organizerId === currentUserId) {
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 часа назад
+    
+    const filtered = events.filter(event => {
+      // предстоящее
+      if (!isEventUpcoming(event)) {
+        logger.debug(`[getGlobalEvents] Event ${event.id} filtered: not upcoming`);
         return false;
       }
-      // Исключаем события, на которые я уже откликнулся (pending или accepted)
-      const status = getMyEventParticipationStatus(event.id);
-      if (status === 'pending' || status === 'accepted') {
+      // не_набрано
+      if (isEventFull(event)) {
+        logger.debug(`[getGlobalEvents] Event ${event.id} filtered: full`);
         return false;
       }
-      // Исключаем события, где я уже участник
-      const isParticipant = event.participantsList?.includes('https://randomuser.me/api/portraits/women/68.jpg');
-      if (isParticipant) {
+      
+      // Используем getUserRelationship для определения отношений
+      const relationship = getUserRelationship(event, currentUserId);
+      
+      // Скрываем отклоненные приглашения
+      if (relationship === 'rejected') {
+        logger.debug(`[getGlobalEvents] Event ${event.id} filtered: rejected`);
         return false;
       }
+      
+      // События, где я организатор И которые были созданы недавно (за последние 24 часа)
+      // ИЛИ регулярные события (они всегда актуальны)
+      if (relationship === 'organizer') {
+        const eventCreatedAt = event.createdAt instanceof Date ? event.createdAt : new Date(event.createdAt);
+        // Для регулярных событий показываем всегда (они актуальны)
+        if (event.isRecurring) {
+          logger.debug(`[getGlobalEvents] Event ${event.id} included: organizer, recurring`);
+          return true;
+        }
+        // Для обычных событий показываем только если созданы за последние 24 часа
+        if (eventCreatedAt >= oneDayAgo) {
+          logger.debug(`[getGlobalEvents] Event ${event.id} included: organizer, recent`);
+          return true;
+        } else {
+          logger.debug(`[getGlobalEvents] Event ${event.id} filtered: organizer, too old`);
+        }
+      }
+      
+      // ПРАВИЛО: я_участник = исчезает из лент (скрываем все события, где мы уже участники, но не организаторы)
+      if (relationship === 'accepted') {
+        logger.debug(`[getGlobalEvents] Event ${event.id} filtered: accepted`);
+        return false;
+      }
+      
+      // Показываем приглашения (invited) - они должны быть видны в ленте
+      if (relationship === 'invited') {
+        logger.debug(`[getGlobalEvents] Event ${event.id} included: invited`);
+        return true;
+      }
+      
+      // Показываем запланированные события (waiting) - они должны оставаться в ленте со значком часов
+      if (relationship === 'waiting') {
+        logger.debug(`[getGlobalEvents] Event ${event.id} included: waiting`);
+        return true;
+      }
+      
+      // !друг_организатора
+      if (currentUserId && isFriendOfOrganizer(event, currentUserId)) {
+        logger.debug(`[getGlobalEvents] Event ${event.id} filtered: friend of organizer`);
+        return false;
+      }
+      
+      logger.debug(`[getGlobalEvents] Event ${event.id} included: default`);
       return true;
     });
+    
+    // Сортируем: сначала события, где я организатор (недавно созданные), затем остальные
+    return filtered.sort((a, b) => {
+      const aIsMyOrganizer = currentUserId ? isUserOrganizer(a, currentUserId) : false;
+      const bIsMyOrganizer = currentUserId ? isUserOrganizer(b, currentUserId) : false;
+      if (aIsMyOrganizer && !bIsMyOrganizer) return -1;
+      if (!aIsMyOrganizer && bIsMyOrganizer) return 1;
+      return 0;
+    });
   };
+
+// mapServerFriendRequest теперь в hooks/friends/useFriends.ts
+
+const DEFAULT_AVATAR_URL = 'https://cdn.jsdelivr.net/gh/identicons/jasonlong/resources/png/identicon.png';
+
+const mapServerUserToClient = (user: ServerUser): User => {
+  if (!user?.id) {
+    throw new Error('Invalid user payload');
+  }
+  return {
+    id: user.id,
+    name: user.name ?? user.username ?? 'Пользователь',
+    username: user.username ?? '',
+    avatar: String(user.avatarUrl ?? DEFAULT_AVATAR_URL),
+    bio: user.bio ?? '',
+    age: user.age ?? '',
+    geoPosition: user.geoPosition ?? '',
+  };
+};
+
+const isHttpUrl = (value?: string | null): boolean => {
+  if (!value) return false;
+  return /^https?:\/\/.+/i.test(value.trim());
+};
+
+// mapServerMessageToClient и mapServerChatToClient теперь в hooks/chats/useChats.ts
+
+// mapServerFolderToMessageFolder теперь в useMessageFolders хуке
+
+  // Функции для работы с друзьями теперь в useFriends хуке
+  
+  // syncChatsFromServer теперь в useChats хуке
+
+  // syncUserFoldersFromServer, addUserToFolder, removeUserFromFolder, createUserFolder, deleteUserFolder теперь в useUserFolders хуке
+
+  // createEventChatWithParticipants и fetchMessagesForChat теперь в useChats хуке
+
+  const syncEventsFromServer = useCallback(async () => {
+    // Используем актуальный токен из ref
+    const actualToken = currentAccessTokenRef.current;
+    const actualUserId = currentUserIdRef.current;
+    
+    if (!actualToken || !actualUserId) return;
+    
+    // Проверяем, что токен не изменился
+    if (actualToken !== accessToken || actualUserId !== currentUserId) {
+      logger.debug('syncEventsFromServer: токен или userId изменились, отменяем');
+      return;
+    }
+    
+    setIsSyncing(true);
+    try {
+      logger.info('[syncEventsFromServer] Starting sync...', {
+        hasToken: !!actualToken,
+        userId: actualUserId,
+        apiUrl: API_BASE_URL
+      });
+      const response = await apiRequest('/events', {}, actualToken);
+      logger.info('[syncEventsFromServer] Received response:', {
+        isArray: Array.isArray(response),
+        length: Array.isArray(response) ? response.length : 'not array',
+        type: typeof response
+      });
+      if (Array.isArray(response)) {
+        // Extract pending memberships (invitations) for current user
+        const pendingInvitations: EventRequest[] = [];
+        const outgoingInvitations: EventRequest[] = [];
+        
+        response.forEach((serverEvent: any) => {
+          // Логируем координаты для отладки
+          if (serverEvent.latitude != null || serverEvent.longitude != null) {
+            logger.debug(`Server event ${serverEvent.id} has coordinates:`, {
+              latitude: serverEvent.latitude,
+              longitude: serverEvent.longitude,
+              title: serverEvent.title
+            });
+          } else {
+            logger.debug(`Server event ${serverEvent.id} has NO coordinates:`, {
+              latitude: serverEvent.latitude,
+              longitude: serverEvent.longitude,
+              title: serverEvent.title,
+              hasCoordinatesField: 'coordinates' in serverEvent
+            });
+          }
+          
+          if (serverEvent?.organizer) {
+            applyServerUserDataToState(serverEvent.organizer);
+          }
+          (serverEvent?.memberships ?? []).forEach((membership: any) => {
+            if (membership?.user) {
+              applyServerUserDataToState(membership.user);
+            }
+            
+            // If membership is pending and has invitedBy, it's an invitation
+            // Входящее приглашение: я приглашен (invitedBy !== actualUserId, userId === actualUserId)
+            if (
+              membership.status === 'PENDING' &&
+              membership.invitedBy &&
+              membership.userId === actualUserId &&
+              membership.invitedBy !== actualUserId
+            ) {
+              pendingInvitations.push({
+                id: membership.id,
+                type: 'invite',
+                eventId: membership.eventId,
+                fromUserId: membership.invitedBy,
+                toUserId: membership.userId,
+                userId: membership.userId, // Добавляем userId для правильной работы requestBelongsToUser
+                status: 'pending',
+                createdAt: membership.createdAt ? new Date(membership.createdAt) : new Date(),
+              });
+            }
+            
+            // Исходящее приглашение: я организатор и пригласил кого-то (invitedBy === actualUserId, userId !== actualUserId)
+            if (
+              membership.status === 'PENDING' &&
+              membership.invitedBy === actualUserId &&
+              membership.userId !== actualUserId &&
+              serverEvent.organizerId === actualUserId
+            ) {
+              outgoingInvitations.push({
+                id: membership.id,
+                type: 'invite',
+                eventId: membership.eventId,
+                fromUserId: membership.invitedBy,
+                toUserId: membership.userId,
+                userId: membership.userId, // Добавляем userId для правильной работы requestBelongsToUser
+                status: 'pending',
+                createdAt: membership.createdAt ? new Date(membership.createdAt) : new Date(),
+              });
+            }
+          });
+        });
+        
+        const mapped = response.map((event: any) => mapServerEventToClient(event, language));
+        logger.info('syncEventsFromServer success', mapped.length, 'events');
+        
+        // ВАЖНО: Объединяем события с сервера с существующими, чтобы сохранить прошедшие события
+        // Прошедшие события могут не возвращаться с сервера, но должны оставаться в локальном состоянии
+        setEvents(prev => {
+          const serverEventIds = new Set(mapped.map(e => e.id));
+          // Сохраняем прошедшие события, которых нет в ответе сервера
+          const pastEventsToKeep = prev.filter(event => {
+            const isPast = isEventPast(event);
+            const notInServer = !serverEventIds.has(event.id);
+            return isPast && notInServer;
+          });
+          
+          // Объединяем: события с сервера + сохраненные прошедшие события
+          const merged = [...mapped, ...pastEventsToKeep];
+          
+          logger.debug('syncEventsFromServer: объединено событий', {
+            fromServer: mapped.length,
+            pastEventsKept: pastEventsToKeep.length,
+            total: merged.length
+          });
+          
+          return merged;
+        });
+        
+        // Update eventRequests with pending invitations (both incoming and outgoing)
+        // ВАЖНО: всегда обновляем eventRequests, даже если нет новых приглашений, чтобы сохранить существующие
+        setEventRequests(prev => {
+          const byId = new Map<string, EventRequest>();
+          // Сохраняем все существующие запросы, кроме приглашений, которые могут быть обновлены
+          prev.forEach(req => {
+            // Сохраняем join-запросы
+            if (req.type !== 'invite') {
+              byId.set(req.id, req);
+            }
+            // Сохраняем приглашения, которые не относятся к текущему пользователю (чтобы не потерять чужие)
+            else if (req.fromUserId !== actualUserId && req.toUserId !== actualUserId) {
+              byId.set(req.id, req);
+            }
+            // Приглашения, где текущий пользователь участвует, будут обновлены ниже
+          });
+          // Add/update incoming invitations
+          pendingInvitations.forEach(inv => byId.set(inv.id, inv));
+          // Add/update outgoing invitations - ВАЖНО: сохраняем исходящие приглашения
+          outgoingInvitations.forEach(inv => {
+            byId.set(inv.id, inv);
+            logger.debug('✅ Сохранено исходящее приглашение:', { id: inv.id, eventId: inv.eventId, toUserId: inv.toUserId });
+          });
+          const result = Array.from(byId.values());
+          logger.debug('Обновлено eventRequests:', result.length, 'исходящих приглашений:', outgoingInvitations.length);
+          return result;
+        });
+        
+        await refreshPendingJoinRequests(mapped);
+      }
+    } catch (error) {
+      // Проверяем только 401/403 - другие ошибки не должны вызывать logout
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        if (await handleUnauthorizedError(error)) {
+          return;
+        }
+      }
+      logger.error('Failed to load events from API', error);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [accessToken, currentUserId, language, applyServerUserDataToState, handleUnauthorizedError, refreshPendingJoinRequests, events.length, isEventPast]);
+
+  // cancelEventRequest и cancelEventParticipation теперь в useEventRequests хуке
+  // removeParticipantFromEvent теперь в useEventActions хуке
+
+  // Установить персональное фото события для пользователя (объявлена после syncEventsFromServer)
+  const setPersonalEventPhoto = useCallback(async (eventId: string, userId: string, photoUrl: string) => {
+    if (!accessToken || !currentUserId || userId !== currentUserId) {
+      // Fallback: обновляем локально
+      setEvents(prev => prev.map(event => {
+        if (event.id === eventId) {
+          return {
+            ...event,
+            personalPhotos: {
+              ...event.personalPhotos,
+              [userId]: photoUrl
+            }
+          };
+        }
+        return event;
+      }));
+      return;
+    }
+
+    try {
+      // Загружаем фото на бэкенд
+      // photoUrl может быть локальным URI или уже загруженным URL
+      if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://')) {
+        // Если уже загружено, просто сохраняем URL
+        await apiRequest(
+          `/events/${eventId}/personal-photo`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ photoUrl }),
+          },
+          accessToken,
+        );
+      } else {
+        // Если локальный URI, загружаем файл через FormData
+        const formData = new FormData();
+        const filename = photoUrl.split('/').pop() || 'photo.jpg';
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : 'image/jpeg';
+        
+        formData.append('file', {
+          uri: photoUrl,
+          name: filename,
+          type: type,
+        } as any);
+
+        // ВАЖНО: Не устанавливаем Content-Type вручную для FormData
+        // React Native автоматически установит правильный Content-Type с boundary
+        const response = await fetch(`${API_BASE_URL}/events/${eventId}/personal-photo`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            // НЕ устанавливаем Content-Type - React Native сделает это автоматически для FormData
+          },
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to upload photo: ${response.status} ${errorText}`);
+        }
+
+        const result = await response.json();
+        // Обновляем локально с загруженным URL
+        if (result.photoUrl || result.publicUrl) {
+          setEvents(prev => prev.map(event => {
+            if (event.id === eventId) {
+              return {
+                ...event,
+                personalPhotos: {
+                  ...event.personalPhotos,
+                  [userId]: result.photoUrl || result.publicUrl
+                }
+              };
+            }
+            return event;
+          }));
+        }
+      }
+
+      // Синхронизируем с сервером после успешной загрузки
+      await syncEventsFromServer();
+    } catch (error) {
+      logger.error('Failed to set personal photo', error);
+      // Fallback: обновляем локально при ошибке
+      setEvents(prev => prev.map(event => {
+        if (event.id === eventId) {
+          return {
+            ...event,
+            personalPhotos: {
+              ...event.personalPhotos,
+              [userId]: photoUrl
+            }
+          };
+        }
+        return event;
+      }));
+    }
+  }, [accessToken, currentUserId, syncEventsFromServer]);
+
+  // syncMessageFolders, createMessageFolder, addChatsToMessageFolder, removeChatFromMessageFolder теперь в useMessageFolders хуке
+
+  const previousUserIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (authUser?.id) {
+      applyServerUserDataToState(authUser);
+    }
+  }, [authUser, applyServerUserDataToState]);
+
+  // Track last sync to prevent infinite loops
+  const lastSyncRef = useRef<{ userId: string | null; accessToken: string | null }>({
+    userId: null,
+    accessToken: null,
+  });
+
+  useEffect(() => {
+    const previousUserId = previousUserIdRef.current;
+    const userChanged = previousUserId !== (currentUserId ?? null);
+
+    // Если пользователь изменился (переключение аккаунта), очищаем состояние СРАЗУ
+    // Это предотвращает выполнение старых запросов с новым токеном
+    if (userChanged && previousUserId && currentUserId) {
+      logger.info('Account switched, clearing user-specific data');
+      // Очищаем данные, специфичные для пользователя
+      setFriends([]);
+      setFriendRequests([]);
+      setUserFolders([]);
+      setMessageFolders([]);
+      setChats([]);
+      setChatMessages([]);
+      setEventRequests([]);
+      setNotifications([]);
+      setSavedEvents([]);
+      setSavedMemoryPosts([]);
+      // loadedChatMessages теперь в useChats хуке, очистка происходит через setChatMessages([])
+      // Очищаем userFriendsMap, оставляя только данные для нового пользователя
+      setUserFriendsMap({});
+    }
+
+    // Only sync if user/accessToken changed, not on every render
+    const shouldSync =
+      !authInitializing &&
+      accessToken &&
+      currentUserId &&
+      (lastSyncRef.current.userId !== currentUserId ||
+        lastSyncRef.current.accessToken !== accessToken);
+
+    if (shouldSync) {
+      lastSyncRef.current = { userId: currentUserId, accessToken };
+      
+      // Синхронизируем параллельно
+      // Используем Promise.allSettled, чтобы ошибка в одной синхронизации не прерывала остальные
+      Promise.allSettled([
+        syncEventsFromServer(),
+        syncFriendsFromServer(),
+        syncFriendRequestsFromServer(),
+        syncChatsFromServer(),
+        syncMessageFolders(),
+        syncUserFoldersFromServer(),
+        refreshPendingJoinRequests(), // Синхронизируем приглашения при загрузке
+        refreshNotifications(), // Синхронизируем уведомления при загрузке
+      ]).then((results) => {
+        // Логируем ошибки, но не прерываем процесс
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            const syncNames = ['events', 'friends', 'friendRequests', 'chats', 'messageFolders', 'userFolders', 'requests', 'notifications'];
+            logger.warn(`Sync ${syncNames[index]} failed:`, result.reason);
+          }
+        });
+      }).catch((error) => {
+        logger.error('Error during sync after account switch:', error);
+      });
+    }
+
+    if (!currentUserId && userChanged) {
+      // logged out - очищаем все
+      setEvents([]);
+      setFriends([]);
+      setFriendRequests([]);
+      setUserFriendsMap({});
+      setUserFolders([]);
+      setMessageFolders([]);
+      setChats([]);
+      setChatMessages([]);
+      setEventRequests([]);
+      setEventProfiles([]);
+      setNotifications([]);
+      setSavedEvents([]);
+      setSavedMemoryPosts([]);
+      // loadedChatMessages теперь в useChats хуке, очистка происходит через setChatMessages([])
+      lastSyncRef.current = { userId: null, accessToken: null };
+      // Отключаем WebSocket при выходе
+      disconnectSocket();
+    }
+
+    previousUserIdRef.current = currentUserId ?? null;
+  }, [
+    currentUserId,
+    accessToken,
+    authInitializing,
+    syncEventsFromServer,
+    syncFriendsFromServer,
+    syncFriendRequestsFromServer,
+    syncChatsFromServer,
+    syncMessageFolders,
+    syncUserFoldersFromServer,
+    refreshPendingJoinRequests,
+    refreshNotifications,
+  ]);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    chats.forEach(chat => {
+      fetchMessagesForChat(chat.id);
+    });
+  }, [accessToken, chats, fetchMessagesForChat]);
+
+  // WebSocket подключение для real-time обновлений чатов
+  useEffect(() => {
+    if (!accessToken || !currentUserId) {
+      disconnectSocket();
+      return;
+    }
+
+    // Callback для обновления токена перед подключением к WebSocket
+    const refreshTokenForSocket = async (): Promise<string | null> => {
+      if (!refreshToken || !refreshSession) {
+        return null;
+      }
+      try {
+        await refreshSession(refreshToken);
+        // После обновления токена, accessToken обновится в AuthContext
+        // Но нам нужно подождать, пока он обновится
+        // Возвращаем null - useEffect перезапустится с новым accessToken
+        // и создаст новое подключение
+        return null;
+      } catch (error) {
+        logger.warn('Failed to refresh token for WebSocket:', error);
+        return null;
+      }
+    };
+
+    const socket = createSocketConnection(accessToken, refreshTokenForSocket);
+    
+    // Если сокет не создан (токен истек и обновляется), выходим
+    if (!socket) {
+      return;
+    }
+
+    // Храним обработчики для возможности их удаления
+    const eventHandlers: Array<{ event: string; handler: (...args: any[]) => void }> = [];
+
+    // Подписка на новые сообщения
+    const handleMessageNew = (message: any) => {
+      logger.debug('📨 Получено новое сообщение через WebSocket:', message);
+      
+      // Применяем данные отправителя
+      if (message?.sender) {
+        applyServerUserDataToState(message.sender);
+      }
+
+      // Преобразуем сообщение и добавляем в состояние
+      const mappedMessage = mapServerMessageToClient(message);
+      
+      setChatMessages(prev => {
+        // Проверяем, нет ли уже такого сообщения
+        const exists = prev.find(msg => msg.id === mappedMessage.id);
+        if (exists) return prev;
+        
+        // Добавляем новое сообщение
+        return [...prev, mappedMessage];
+      });
+
+      // Обновляем lastMessage в чате
+      setChats(prev => {
+        const chat = prev.find(c => c.id === message.chatId);
+        if (!chat) return prev;
+        
+        return prev.map(c => 
+          c.id === message.chatId 
+            ? { ...c, lastMessage: mappedMessage, lastActivity: new Date() }
+            : c
+        );
+      });
+
+      // Помечаем, что сообщения для этого чата загружены через fetchMessagesForChat из useChats
+      // loadedChatMessages теперь в useChats хуке
+    };
+    socket.on('message:new', handleMessageNew);
+    eventHandlers.push({ event: 'message:new', handler: handleMessageNew });
+
+    // Подписка на обновление списка чатов
+    const handleChatsUpdate = () => {
+      logger.debug('🔄 Получено обновление списка чатов через WebSocket');
+      // Синхронизируем список чатов с сервера
+      syncChatsFromServer().catch(error => {
+        logger.error('Failed to sync chats after WebSocket update:', error);
+      });
+    };
+    socket.on('chats:update', handleChatsUpdate);
+    eventHandlers.push({ event: 'chats:update', handler: handleChatsUpdate });
+
+    // Подписка на создание нового события
+    socket.on('event:created', (eventData: any) => {
+      logger.debug('📅 Получено новое событие через WebSocket:', eventData);
+      // Подключаемся к комнате нового события, если это событие текущего пользователя
+      if (eventData.id && currentUserId) {
+        socket.emit('event:join', { eventId: eventData.id });
+      }
+      // Синхронизируем события с сервера, чтобы получить полные данные
+      syncEventsFromServer().catch(error => {
+        logger.error('Failed to sync events after WebSocket event:created:', error);
+      });
+    });
+
+    // Подписка на обновление события
+    socket.on('event:updated', (eventData: any) => {
+      logger.debug('🔄 Получено обновление события через WebSocket:', eventData);
+      // Синхронизируем события с сервера
+      syncEventsFromServer().catch(error => {
+        logger.error('Failed to sync events after WebSocket event:updated:', error);
+      });
+    });
+
+    // Подписка на удаление события
+    socket.on('event:deleted', (eventData: any) => {
+      logger.debug('🗑️ Получено событие об удалении события через WebSocket:', eventData);
+      // Удаляем событие из состояния
+      if (eventData.eventId) {
+        setEvents(prev => prev.filter(event => event.id !== eventData.eventId));
+        // Также удаляем из сохраненных
+        setSavedEvents(prev => prev.filter(id => id !== eventData.eventId));
+      }
+    });
+
+    // Подписка на новый запрос на участие в событии
+    socket.on('event:request:new', (requestData: any) => {
+      logger.debug('📨 Получен новый запрос на участие через WebSocket:', requestData);
+      // Если это запрос от текущего пользователя, подключаемся к комнате события
+      if (requestData.eventId && requestData.userId === currentUserId) {
+        socket.emit('event:join', { eventId: requestData.eventId });
+      }
+      // Обновляем запросы на участие
+      refreshPendingJoinRequests().catch(error => {
+        logger.error('Failed to refresh requests after WebSocket event:request:new:', error);
+      });
+      // Также синхронизируем события
+      syncEventsFromServer().catch(error => {
+        logger.error('Failed to sync events after WebSocket event:request:new:', error);
+      });
+    });
+
+    // Подписка на обновление статуса запроса/приглашения
+    socket.on('event:request:updated', (requestData: any) => {
+      logger.debug('🔄 Получено обновление статуса запроса через WebSocket:', requestData);
+      // Если запрос принят и это запрос текущего пользователя, подключаемся к комнате события
+      if (requestData.status === 'ACCEPTED' && requestData.userId === currentUserId && requestData.eventId) {
+        socket.emit('event:join', { eventId: requestData.eventId });
+      }
+      // Обновляем запросы на участие
+      refreshPendingJoinRequests().catch(error => {
+        logger.error('Failed to refresh requests after WebSocket event:request:updated:', error);
+      });
+      // Синхронизируем события
+      syncEventsFromServer().catch(error => {
+        logger.error('Failed to sync events after WebSocket event:request:updated:', error);
+      });
+    });
+
+    // Подписка на статус запроса (отправляется конкретному пользователю)
+    socket.on('event:request:status', (requestData: any) => {
+      logger.debug('📊 Получен статус запроса через WebSocket:', requestData);
+      // Если запрос принят и это запрос текущего пользователя, подключаемся к комнате события
+      if (requestData.status === 'ACCEPTED' && requestData.userId === currentUserId && requestData.eventId) {
+        socket.emit('event:join', { eventId: requestData.eventId });
+      }
+      // Обновляем запросы на участие
+      refreshPendingJoinRequests().catch(error => {
+        logger.error('Failed to refresh requests after WebSocket event:request:status:', error);
+      });
+      // Синхронизируем события
+      syncEventsFromServer().catch(error => {
+        logger.error('Failed to sync events after WebSocket event:request:status:', error);
+      });
+    });
+
+    // Подписка на новый запрос в друзья
+    socket.on('friend:request:new', (requestData: any) => {
+      logger.debug('👥 Получен новый запрос в друзья через WebSocket:', requestData);
+      // Синхронизируем запросы в друзья
+      syncFriendRequestsFromServer().catch(error => {
+        logger.error('Failed to sync friend requests after WebSocket friend:request:new:', error);
+      });
+    });
+
+    // Подписка на обновление статуса запроса в друзья
+    socket.on('friend:request:status', (requestData: any) => {
+      logger.debug('🔄 Получено обновление статуса запроса в друзья через WebSocket:', requestData);
+      // Синхронизируем запросы в друзья и друзей
+      Promise.all([
+        syncFriendRequestsFromServer(),
+        syncFriendsFromServer(),
+      ]).catch(error => {
+        logger.error('Failed to sync friends after WebSocket friend:request:status:', error);
+      });
+    });
+
+    // Подписка на новое уведомление
+    socket.on('notification:new', (notificationData: any) => {
+      logger.debug('🔔 Получено новое уведомление через WebSocket:', notificationData);
+      // Добавляем уведомление в состояние
+      setNotifications(prev => {
+        // Проверяем, нет ли уже такого уведомления
+        const exists = prev.find(n => n.id === notificationData.id);
+        if (exists) return prev;
+        
+        // Преобразуем данные уведомления в формат клиента
+        const notification: Notification = {
+          id: notificationData.id,
+          userId: notificationData.userId || currentUserId || '',
+          type: notificationData.type,
+          payload: notificationData.payload || {},
+          readAt: notificationData.readAt ? new Date(notificationData.readAt) : null,
+          createdAt: new Date(notificationData.createdAt),
+        };
+        
+        return [notification, ...prev];
+      });
+      
+      // Также обновляем счетчик непрочитанных
+      refreshNotifications().catch(error => {
+        logger.error('Failed to refresh notifications after WebSocket notification:new:', error);
+      });
+    });
+
+    // Подключение к комнатам всех чатов пользователя
+    const joinChatRooms = () => {
+      if (!socket.connected) return;
+      chats.forEach(chat => {
+        socket.emit('chat:join', { chatId: chat.id });
+        logger.debug('✅ Подключились к комнате чата:', chat.id);
+      });
+    };
+
+    // Если чаты уже загружены и сокет подключен, сразу подключаемся к комнатам
+    if (chats.length > 0 && socket.connected) {
+      joinChatRooms();
+    }
+
+    // Обработчик подключения - подключаемся к комнатам
+    const onConnect = () => {
+      logger.info('✅ WebSocket подключен, присоединяемся к чатам');
+      // Используем актуальный список чатов из состояния с небольшой задержкой
+      setTimeout(() => {
+        if (socket?.connected && chats.length > 0) {
+          chats.forEach(chat => {
+            socket?.emit('chat:join', { chatId: chat.id });
+          });
+        }
+      }, 100);
+    };
+    
+    socket.on('connect', onConnect);
+    eventHandlers.push({ event: 'connect', handler: onConnect });
+
+      // Функция для подключения к комнате конкретного чата (используется при открытии чата)
+    const joinChat = (chatId: string) => {
+      socket.emit('chat:join', { chatId });
+    };
+
+    // Экспортируем функцию для использования вне этого эффекта
+    (socket as any).joinChat = joinChat;
+
+    // Очистка при размонтировании или переподключении
+    return () => {
+      // Удаляем все сохраненные обработчики
+      eventHandlers.forEach(({ event, handler }) => {
+        socket.off(event, handler as any);
+      });
+      // Также удаляем все обработчики напрямую для гарантии
+      socket.off('message:new');
+      socket.off('chats:update');
+      socket.off('event:created');
+      socket.off('event:updated');
+      socket.off('event:deleted');
+      socket.off('event:request:new');
+      socket.off('event:request:updated');
+      socket.off('event:request:status');
+      socket.off('friend:request:new');
+      socket.off('friend:request:status');
+      socket.off('notification:new');
+      socket.off('connect');
+      // НЕ отключаем сокет полностью, так как он может использоваться после смены токена
+      // Отключение произойдет только при отсутствии токена или смене пользователя
+    };
+  }, [accessToken, currentUserId, refreshToken, refreshSession]);
+
+  // Автоматическое подключение к новым чатам при их добавлении
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket || !socket.connected) return;
+
+    // Подключаемся к новым чатам
+    chats.forEach(chat => {
+      socket.emit('chat:join', { chatId: chat.id });
+    });
+  }, [chats]);
+
+  // Загружаем уведомления при изменении accessToken или currentUserId
+  useEffect(() => {
+    if (accessToken && currentUserId) {
+      refreshNotifications();
+    }
+  }, [accessToken, currentUserId, refreshNotifications]);
+
+  // saveEvent, removeSavedEvent, isEventSaved, getSavedEvents теперь в useSavedEvents хуке
+
+  // saveMemoryPost, removeSavedMemoryPost, isMemoryPostSaved, getSavedMemoryPosts теперь в useSavedMemoryPosts хуке
+
+  // deleteEventProfilePost теперь находится в useEventProfiles хуке
+
+  // Жалоба на меморис пост
+  const reportMemoryPost = useCallback(async (eventId: string, postId: string) => {
+    if (!accessToken || !currentUserId) {
+      logger.warn('Cannot report post: no access');
+      return;
+    }
+
+    try {
+      await apiRequest(
+        `/events/${eventId}/profile/posts/${postId}/report`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ reason: 'inappropriate' }),
+        },
+        accessToken,
+      );
+    } catch (error) {
+      logger.error('Failed to report memory post', error);
+      throw error;
+    }
+  }, [accessToken, currentUserId]);
 
   return (
     <EventsContext.Provider value={{ 
       events, 
-      addEvent, 
+      createEvent, 
       updateEvent, 
       deleteEvent, 
-      getUserData, 
+      getUserData,
+      updateUserData,
       getOrganizerStats,
       friends,
       friendRequests,
@@ -2182,22 +2565,28 @@ export const EventsProvider: React.FC<EventsProviderProps> = ({ children }) => {
       removeFriend,
       respondToFriendRequest,
       getFriendsList,
+      getUserFriendsList,
       isFriend,
       getFriendsForEvents,
       userFolders,
       addUserToFolder,
       removeUserFromFolder,
       createUserFolder,
+      deleteUserFolder,
       getEventsByUserFolder,
-      messages,
-      addMessage,
-      getMessagesByUserFolder,
+      messageFolders,
+      refreshMessageFolders: syncMessageFolders,
+      createMessageFolder,
+      addChatsToMessageFolder,
+      removeChatFromMessageFolder,
       chats,
       chatMessages,
       createEventChat,
       createEventChatWithParticipants,
       createPersonalChat,
       sendChatMessage,
+      sendEventToChats,
+      sendMemoryPostToChats,
       getChatMessages,
       getChat,
       getChatsForUser,
@@ -2205,8 +2594,18 @@ export const EventsProvider: React.FC<EventsProviderProps> = ({ children }) => {
       eventRequests,
       eventProfiles,
       sendEventRequest,
+      sendEventInvite,
+      acceptInvitation,
+      rejectInvitation,
       respondToEventRequest,
+      cancelEventRequest,
+      removeEventRequestById,
+      cancelEventParticipation,
+      cancelEvent,
+      cancelOrganizerParticipation,
+      removeParticipantFromEvent,
       getEventProfile,
+      fetchEventProfile,
       createEventProfile,
       addEventProfilePost,
       updateEventProfile,
@@ -2216,11 +2615,50 @@ export const EventsProvider: React.FC<EventsProviderProps> = ({ children }) => {
       getMyEventRequests,
       getEventOrganizer,
       getMyEventParticipationStatus,
+      isUserParticipant,
       getMyCalendarEvents,
       getUserCalendarEvents,
-      getGlobalEvents
+      getGlobalEvents,
+      // Новая декларативная система состояний
+      isEventUpcoming,
+      isEventPast,
+      isEventFull,
+      isEventNotFull,
+      isUserOrganizer,
+      isUserAttendee,
+      isUserEventMember,
+      getUserRequestStatus,
+      getUserRelationship,
+      isFriendOfOrganizer,
+      getAcceptedParticipants,
+      // Персонализированные фото событий
+      getEventPhotoForUser,
+      setPersonalEventPhoto,
+      // Сохраненные события
+      savedEvents,
+      saveEvent,
+      removeSavedEvent,
+      isEventSaved,
+      getSavedEvents,
+      savedMemoryPosts,
+      saveMemoryPost,
+      removeSavedMemoryPost,
+      isMemoryPostSaved,
+      getSavedMemoryPosts,
+      deleteEventProfilePost,
+      reportMemoryPost,
+      // Система уведомлений
+      notifications,
+      unreadNotificationsCount,
+      refreshNotifications,
+      markNotificationAsRead,
+      markAllNotificationsAsRead,
+      deleteNotification,
+      // Поиск пользователей по username
+      findUserByUsername,
+      isUsernameAvailable
     }}>
       {children}
     </EventsContext.Provider>
   );
-};
+}

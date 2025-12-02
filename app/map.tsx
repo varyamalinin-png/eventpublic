@@ -1,42 +1,277 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, ScrollView, Dimensions } from 'react-native';
-import { WebView } from 'react-native-webview';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, ScrollView, Dimensions, Image } from 'react-native';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
+import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import * as Location from 'expo-location';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('Map');
 
 const { width, height } = Dimensions.get('window');
 
+// Темная тема для карты
+const darkMapStyle = [
+  {
+    elementType: "geometry",
+    stylers: [{ color: "#242f3e" }]
+  },
+  {
+    elementType: "labels.text.stroke",
+    stylers: [{ color: "#242f3e" }]
+  },
+  {
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#746855" }]
+  },
+  {
+    featureType: "administrative.locality",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#d59563" }]
+  },
+  {
+    featureType: "poi",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#d59563" }]
+  },
+  {
+    featureType: "poi.park",
+    elementType: "geometry",
+    stylers: [{ color: "#263c3f" }]
+  },
+  {
+    featureType: "poi.park",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#6b9a76" }]
+  },
+  {
+    featureType: "road",
+    elementType: "geometry",
+    stylers: [{ color: "#38414e" }]
+  },
+  {
+    featureType: "road",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#212a37" }]
+  },
+  {
+    featureType: "road",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#9ca5b3" }]
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry",
+    stylers: [{ color: "#746855" }]
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#1f2835" }]
+  },
+  {
+    featureType: "road.highway",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#f3d19c" }]
+  },
+  {
+    featureType: "transit",
+    elementType: "geometry",
+    stylers: [{ color: "#2f3948" }]
+  },
+  {
+    featureType: "transit.station",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#d59563" }]
+  },
+  {
+    featureType: "water",
+    elementType: "geometry",
+    stylers: [{ color: "#17263c" }]
+  },
+  {
+    featureType: "water",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#515c6d" }]
+  },
+  {
+    featureType: "water",
+    elementType: "labels.text.stroke",
+    stylers: [{ color: "#17263c" }]
+  }
+];
+
 export default function MapScreen() {
   const router = useRouter();
-  const { events } = useEvents();
-  const { eventId, selectLocation, userId } = useLocalSearchParams();
+  const { t } = useLanguage();
+  const { events, eventProfiles, isUserEventMember, isEventUpcoming, isEventNotFull, isEventPast, getEventPhotoForUser, getGlobalEvents, getFriendsForEvents, isUserOrganizer, isEventFull, isFriendOfOrganizer, getUserData } = useEvents();
+  const { eventId, selectLocation, userId, exploreTab } = useLocalSearchParams();
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [mapHtml, setMapHtml] = useState<string>('');
+  const mapRef = useRef<MapView>(null);
+  const navigationRef = useRef<{ isNavigating: boolean; lastEventId: string | null; lastNavigateTime: number }>({
+    isNavigating: false,
+    lastEventId: null,
+    lastNavigateTime: 0
+  });
+  const { user: authUser } = useAuth();
+  const currentUserId = authUser?.id ?? null;
+  const rawUserId = Array.isArray(userId) ? userId[0] : typeof userId === 'string' ? userId : undefined;
 
-  // Получаем события для отображения
-  // Фильтруем события: показываем только те, где пользователь участник или организатор
-  const eventsToShow = eventId 
-    ? events.filter(event => event.id === eventId)
-    : events.filter(event => {
-        if (!event.coordinates) return false;
-        
-        // Если указан userId - фильтруем для другого пользователя
-        if (userId && userId !== 'own-profile-1') {
-          // Для другого пользователя показываем только события, где он организатор
-          return event.organizerId === userId;
+  // Получаем события для отображения в зависимости от типа карты
+  const eventsToShow = useMemo(() => {
+    logger.debug('Calculating eventsToShow:', {
+      eventId,
+      userId,
+      exploreTab,
+      totalEvents: events.length,
+      eventsWithCoordinates: events.filter(e => e.coordinates).length
+    });
+    
+    if (eventId) {
+      const filtered = events.filter(event => event.id === eventId);
+      logger.debug('Single event mode', { count: filtered.length, eventId });
+      return filtered;
+    }
+
+    const eventsWithCoordinates = events.filter(event => event.coordinates);
+    logger.debug('Events with coordinates', { count: eventsWithCoordinates.length });
+
+    // 1. КАРТА ГЛОБ (из ленты GLOB в explore)
+    if (exploreTab === 'GLOB') {
+      const globEvents = getGlobalEvents().filter(event => event.coordinates);
+      logger.debug('GLOB map events', { count: globEvents.length, events: globEvents.map(e => ({ id: e.id, title: e.title, hasCoordinates: !!e.coordinates })) });
+      return globEvents;
+    }
+
+    // 2. КАРТА FRIENDS (из ленты FRIENDS в explore)
+    if (exploreTab === 'FRIENDS') {
+      const friendsEvents = getFriendsForEvents().filter(event => event.coordinates);
+      logger.debug('FRIENDS map events', { count: friendsEvents.length });
+      return friendsEvents;
+    }
+
+    // 3. КАРТА В ЧУЖОМ ПРОФИЛЕ
+    if (rawUserId && (!currentUserId || rawUserId !== currentUserId)) {
+      // Показываем все события, где этот пользователь является членом (будущие и прошедшие)
+      // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий проверяем через eventProfiles, чтобы учесть удаление
+      const userEvents = eventsWithCoordinates.filter(event => {
+        // Для текущих событий - проверяем обычным способом
+        if (isEventUpcoming(event)) {
+          return isUserEventMember(event, rawUserId);
         }
         
-        // Для текущего пользователя: проверяем участник или организатор
-        const isParticipant = event.participantsList?.includes('https://randomuser.me/api/portraits/women/68.jpg');
-        const isOrganizer = event.organizerId === 'own-profile-1';
-        return isParticipant || isOrganizer;
+        // Для прошедших событий - проверяем через профиль
+        if (isEventPast(event)) {
+          const profile = eventProfiles.find(p => p.eventId === event.id);
+          if (profile) {
+            // Проверяем, есть ли пользователь в participants
+            return profile.participants.includes(rawUserId);
+          }
+          // Если профиля нет - не показываем (пользователь был удален)
+          return false;
+        }
+        
+        return isUserEventMember(event, rawUserId);
       });
+      logger.debug('User profile map events', { count: userEvents.length });
+      return userEvents;
+    }
+
+    // 4. КАРТА В МОЕМ ПРОФИЛЕ
+    // Показываем все события, где я являюсь членом (будущие и прошедшие)
+    // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий проверяем через eventProfiles, чтобы учесть удаление
+    if (!currentUserId) {
+      return [];
+    }
+    const myEvents = eventsWithCoordinates.filter(event => {
+      // Для текущих событий - проверяем обычным способом
+      if (isEventUpcoming(event)) {
+        return isUserEventMember(event, currentUserId);
+      }
+      
+      // Для прошедших событий - проверяем через профиль
+      if (isEventPast(event)) {
+        const profile = eventProfiles.find(p => p.eventId === event.id);
+        if (profile) {
+          // Проверяем, есть ли пользователь в participants
+          return profile.participants.includes(currentUserId);
+        }
+        // Если профиля нет - не показываем (пользователь был удален)
+        return false;
+      }
+      
+      return isUserEventMember(event, currentUserId);
+    });
+    logger.debug('My profile map events', { count: myEvents.length, events: myEvents.map(e => ({ id: e.id, title: e.title, hasCoordinates: !!e.coordinates })) });
+    return myEvents;
+  }, [eventId, events, eventProfiles, rawUserId, exploreTab, isUserEventMember, isEventUpcoming, isEventPast, getGlobalEvents, getFriendsForEvents, currentUserId]);
+
+  // Вычисляем фото для всех событий - теперь используем Image из React Native, который работает с file://
+  const eventPhotosMap = useMemo(() => {
+    const photos: Record<string, string> = {};
+    eventsToShow.forEach(event => {
+      // Точно так же, как в календаре для текущего пользователя
+      const photoUrl = getEventPhotoForUser(event.id, currentUserId ?? '', undefined);
+      if (photoUrl) {
+        photos[event.id] = photoUrl;
+      }
+    });
+    return photos;
+  }, [eventsToShow, currentUserId, getEventPhotoForUser]);
+
 
   useEffect(() => {
     getCurrentLocation();
-    generateMapHtml();
-  }, [eventsToShow, location]);
+  }, []);
+
+  // Вычисляем центр карты и регион
+  const mapRegion = useMemo(() => {
+    if (eventsToShow.length === 0) {
+      return {
+        latitude: 55.7558,
+        longitude: 37.6176,
+        latitudeDelta: 0.1,
+        longitudeDelta: 0.1,
+      };
+    }
+    
+    if (eventId && eventsToShow.length === 1) {
+      const event = eventsToShow[0];
+      return {
+        latitude: event.coordinates?.latitude || 55.7558,
+        longitude: event.coordinates?.longitude || 37.6176,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      };
+    }
+    
+    // Вычисляем центр для всех событий
+    const lats = eventsToShow.map(e => e.coordinates?.latitude).filter(Boolean) as number[];
+    const lngs = eventsToShow.map(e => e.coordinates?.longitude).filter(Boolean) as number[];
+    
+    if (lats.length === 0) {
+      return {
+        latitude: 55.7558,
+        longitude: 37.6176,
+        latitudeDelta: 0.1,
+        longitudeDelta: 0.1,
+      };
+    }
+    
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+    
+    return {
+      latitude: (minLat + maxLat) / 2,
+      longitude: (minLng + maxLng) / 2,
+      latitudeDelta: Math.max((maxLat - minLat) * 1.5, 0.1),
+      longitudeDelta: Math.max((maxLng - minLng) * 1.5, 0.1),
+    };
+  }, [eventsToShow, eventId]);
 
   const getCurrentLocation = async () => {
     try {
@@ -49,177 +284,127 @@ export default function MapScreen() {
       const currentLocation = await Location.getCurrentPositionAsync({});
       setLocation(currentLocation);
     } catch (error) {
-      console.error('Ошибка получения местоположения:', error);
+      logger.error('Ошибка получения местоположения:', error);
     }
   };
 
-  const generateMapHtml = () => {
-    if (eventsToShow.length === 0) {
-      setMapHtml(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body { margin: 0; padding: 20px; background: #1a1a1a; color: white; font-family: Arial; text-align: center; }
-            .no-events { margin-top: 50px; }
-          </style>
-        </head>
-        <body>
-          <div class="no-events">
-            <h2>🗺️</h2>
-            <h3>События не найдены</h3>
-            <p>Нет событий с координатами для отображения на карте</p>
-          </div>
-        </body>
-        </html>
-      `);
-      return;
-    }
-
-    // Используем Яндекс.Карты для отображения
-    const centerLat = eventsToShow[0]?.coordinates?.latitude || 55.7558;
-    const centerLng = eventsToShow[0]?.coordinates?.longitude || 37.6176;
+  const handleMarkerPress = useCallback((eventId: string) => {
+    const now = Date.now();
     
-    console.log('Map HTML Generation:', {
-      eventId,
-      eventsCount: eventsToShow.length,
-      firstEventId: eventsToShow[0]?.id,
-      firstEventTitle: eventsToShow[0]?.title,
-      firstEventLocation: eventsToShow[0]?.location,
-      coordinates: eventsToShow[0]?.coordinates,
-      centerLat,
-      centerLng
-    });
-    
-    // Определяем zoom в зависимости от количества событий
-    const zoom = eventId ? 15 : 10;
-    
-    const markers = eventsToShow.map((event, index) => {
-      const lat = event.coordinates?.latitude || 55.7558;
-      const lng = event.coordinates?.longitude || 37.6176;
-      return `new ymaps.Placemark([${lat}, ${lng}], {
-        balloonContentHeader: ${JSON.stringify(event.title)},
-        balloonContentBody: ${JSON.stringify(event.location)}
-      })`;
-    }).join(',\n      ');
-    
-    const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <script src="https://api-maps.yandex.ru/2.1/?apikey=e95f18c1-e796-4e6a-b2a9-0aafe5e420c4&lang=ru_RU" type="text/javascript"></script>
-        <style>
-          body, html { margin: 0; padding: 0; height: 100%; background: #121212; }
-          #map { width: 100%; height: 100%; }
-        </style>
-      </head>
-      <body>
-        <div id="map"></div>
-        <script>
-          ymaps.ready(function () {
-            var myMap = new ymaps.Map('map', {
-              center: [${centerLat}, ${centerLng}],
-              zoom: ${zoom}
-            });
-
-            ${eventsToShow.map((event, index) => {
-              const lat = event.coordinates?.latitude || 55.7558;
-              const lng = event.coordinates?.longitude || 37.6176;
-              return `
-              var marker${index} = new ymaps.Placemark([${lat}, ${lng}], {
-                balloonContentHeader: ${JSON.stringify(event.title)},
-                balloonContentBody: ${JSON.stringify(`${event.location}<br>${event.date} в ${event.time}`)}
-                }, {
-                  preset: 'islands#circleDotIcon',
-                  iconColor: '#8B5CF6'
-                });
-              myMap.geoObjects.add(marker${index});`;
-            }).join('\n            ')}
-
-            // Открытие Яндекс.Карт при клике на маркер
-            myMap.geoObjects.events.add('click', function (e) {
-              var target = e.get('target');
-              var coords = target.geometry.getCoordinates();
-              var yandexMapsUrl = 'yandexmaps://maps.yandex.ru/?pt=' + coords[1] + ',' + coords[0] + '&z=16';
-              window.ReactNativeWebView?.postMessage(JSON.stringify({
-                type: 'openYandexMaps',
-                url: yandexMapsUrl
-              }));
-            });
-          });
-        </script>
-      </body>
-      </html>
-    `;
-    
-    setMapHtml(html);
-  };
-
-  const openInYandexMaps = (latitude: number, longitude: number, locationName: string) => {
-    const yandexMapsUrl = `yandexmaps://maps.yandex.ru/?pt=${longitude},${latitude}&z=16&l=map`;
-    const fallbackUrl = `https://yandex.ru/maps/?pt=${longitude},${latitude}&z=16&l=map`;
-    
-    Linking.canOpenURL(yandexMapsUrl).then(supported => {
-      if (supported) {
-        Linking.openURL(yandexMapsUrl);
-      } else {
-        Linking.openURL(fallbackUrl);
-      }
-    }).catch(err => {
-      console.error('Ошибка открытия Яндекс Карт:', err);
-      Alert.alert('Ошибка', 'Не удалось открыть Яндекс Карты');
-    });
-  };
-
-  const handleWebViewMessage = (event: any) => {
-    try {
-      const data = JSON.parse(event.nativeEvent.data);
+    if (eventId && 
+        (!navigationRef.current.isNavigating || 
+         navigationRef.current.lastEventId !== eventId ||
+         now - navigationRef.current.lastNavigateTime > 500)) {
       
-      if (data.type === 'openYandexMaps') {
-        Linking.openURL(data.url).catch(err => {
-          console.error('Ошибка открытия Яндекс.Карт:', err);
-          const fallbackUrl = data.url.replace('yandexmaps://', 'https://yandex.ru/maps/');
-          Linking.openURL(fallbackUrl);
-        });
-      }
-    } catch (error) {
-      console.error('Error parsing WebView message:', error);
+      navigationRef.current.isNavigating = true;
+      navigationRef.current.lastEventId = eventId;
+      navigationRef.current.lastNavigateTime = now;
+      
+      router.push(`/event-profile/${eventId}`);
+      
+      setTimeout(() => {
+        navigationRef.current.isNavigating = false;
+      }, 1000);
     }
+  }, [router]);
+
+  // Определяем заголовок карты в зависимости от контекста
+  const getMapTitle = () => {
+    if (selectLocation) {
+      return t.map.selectLocation || 'Select location';
+    }
+    if (eventId) {
+      return t.map.eventLocation || 'Event location';
+    }
+    if (exploreTab === 'GLOB') {
+      return t.map.allEventsMap || 'All events map';
+    }
+    if (exploreTab === 'FRIENDS') {
+      return t.map.friendsEventsMap || 'Friends events map';
+    }
+    if (rawUserId && (!currentUserId || rawUserId !== currentUserId)) {
+      const user = getUserData(rawUserId);
+      const username = user?.username || user?.name || 'User';
+      return `${username} ${t.map.eventsMap || 'events map'}`;
+    }
+    if (currentUserId) {
+      return t.map.myEventsMap || 'My events map';
+    }
+    return t.map.eventsMap || 'Events map';
   };
 
   return (
     <View style={styles.container}>
-      {/* Заголовок */}
-      <View style={styles.header}>
+      {/* Кнопка назад с отдельной оверлейной рамкой */}
+      <View style={styles.backButtonOverlay}>
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => router.back()}
         >
-          <Text style={styles.backButtonText}>← Назад</Text>
+          <Text style={styles.backButtonText}>← {t.common.back}</Text>
         </TouchableOpacity>
+      </View>
+      
+      {/* Наименование карты с отдельной оверлейной рамкой */}
+      <View style={styles.titleOverlay}>
         <Text style={styles.headerTitle}>
-          {selectLocation ? 'Выберите место' : eventId ? 'Место события' : 'Карта событий'}
+          {getMapTitle()}
         </Text>
       </View>
 
-      {/* Карта на весь экран */}
+      {/* Карта на весь экран без отступов */}
       <View style={styles.mapContainer}>
-        <WebView
-          source={{ html: mapHtml }}
-          style={styles.mapWebView}
-          javaScriptEnabled={true}
-          domStorageEnabled={true}
-          startInLoadingState={true}
-          onError={(syntheticEvent) => {
-            const { nativeEvent } = syntheticEvent;
-            console.warn('WebView error: ', nativeEvent);
-          }}
-          onMessage={handleWebViewMessage}
-        />
+        {eventsToShow.length === 0 ? (
+          <View style={styles.noEventsContainer}>
+            <Text style={styles.noEventsText}>🗺️</Text>
+            <Text style={styles.noEventsTitle}>{t.map.noEventsFound || 'Events not found'}</Text>
+            <Text style={styles.noEventsSubtitle}>{t.map.noEventsWithCoordinates || 'No events with coordinates to display on the map'}</Text>
+          </View>
+        ) : (
+          <MapView
+            ref={mapRef}
+            style={styles.map}
+            provider={PROVIDER_GOOGLE}
+            initialRegion={mapRegion}
+            showsUserLocation={true}
+            showsMyLocationButton={false}
+            mapType="standard"
+            customMapStyle={darkMapStyle}
+          >
+            {eventsToShow.map((event) => {
+              const lat = event.coordinates?.latitude;
+              const lng = event.coordinates?.longitude;
+              if (!lat || !lng) return null;
+              
+              const photoUrl = eventPhotosMap[event.id];
+              const isPast = isEventPast(event);
+              
+              return (
+                <Marker
+                  key={event.id}
+                  coordinate={{ latitude: lat, longitude: lng }}
+                  onPress={() => handleMarkerPress(event.id)}
+                >
+                  <View style={styles.markerContainer}>
+                    <View style={[styles.markerCircle, isPast && styles.markerCirclePast]}>
+                      {photoUrl ? (
+                        <Image 
+                          source={{ uri: photoUrl }} 
+                          style={styles.markerImage}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={styles.markerPlaceholder}>
+                          <Text style={styles.markerPlaceholderText}>📅</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                </Marker>
+              );
+            })}
+          </MapView>
+        )}
       </View>
     </View>
   );
@@ -230,21 +415,35 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
-    backgroundColor: '#000',
+  backButtonOverlay: {
+    position: 'absolute',
+    top: 50,
+    left: 16,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
   },
   backButton: {
-    marginRight: 15,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
   },
   backButtonText: {
-    color: '#8B5CF6',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  titleOverlay: {
+    position: 'absolute',
+    top: 50,
+    right: 16,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    maxWidth: '60%',
   },
   headerTitle: {
     color: '#FFFFFF',
@@ -253,14 +452,64 @@ const styles = StyleSheet.create({
   },
   mapContainer: {
     flex: 1,
-    margin: 20,
-    borderRadius: 12,
+    margin: 0,
+    borderRadius: 0,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#333',
   },
-  mapWebView: {
+  map: {
     flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  noEventsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    padding: 20,
+  },
+  noEventsText: {
+    fontSize: 64,
+    marginBottom: 20,
+  },
+  noEventsTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  noEventsSubtitle: {
+    color: '#999',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  markerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markerCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    overflow: 'hidden',
+    backgroundColor: '#8B5CF6',
+  },
+  markerCirclePast: {
+    opacity: 0.65, // Затемнение для прошедших событий
+  },
+  markerImage: {
+    width: '100%',
+    height: '100%',
+  },
+  markerPlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#8B5CF6',
+  },
+  markerPlaceholderText: {
+    fontSize: 32,
   },
   eventsList: {
     flex: 1,

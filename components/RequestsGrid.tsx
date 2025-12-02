@@ -21,7 +21,7 @@ interface RequestsGridProps {
   }>;
   onAccept: (id: string) => void;
   onDecline: (id: string) => void;
-  onRequestPress?: (request: any) => void;
+  onRequestPress?: (request: { id: string; type: 'event' | 'friend'; eventId?: string; userId?: string }) => void;
 }
 
 export default function RequestsGrid({ requests, onAccept, onDecline, onRequestPress }: RequestsGridProps) {
@@ -88,28 +88,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-
-import RequestMiniCard from './RequestMiniCard';
-
-interface RequestCardProps {
-  id: string;
-  type: 'event' | 'friend';
-  eventId?: string;
-  userId?: string;
-  onAccept: (id: string) => void;
-  onDecline: (id: string) => void;
-  onPress?: () => void;
-}
-
-interface RequestsGridProps {
-  requests: Array<{
-    id: string;
-    type: 'event' | 'friend';
-    eventId?: string;
-    userId?: string;
-  }>;
-  onAccept: (id: string) => void;
-  onDecline: (id: string) => void;
-  onRequestPress?: (request: any) => void;
-}
-

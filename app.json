@@ -1,6 +1,7 @@
 {
   "expo": {
     "name": "event_app_new",
+    "scheme": "eventapp",
     "slug": "event_app_new",
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
@@ -18,10 +19,32 @@
       "android",
       "web"
     ],
-    "privacy": "public",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.event-app-new"
+      "bundleIdentifier": "com.varyamalinina.eventapp",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSExceptionDomains": {
+            "192.168.0.39": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
+            },
+            "localhost": {
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            },
+            "iventapp.ru": {
+              "NSExceptionAllowsInsecureHTTPLoads": false,
+              "NSIncludesSubdomains": true
+            },
+            "89.169.173.152": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
+            }
+          }
+        }
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -35,7 +58,8 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.MODIFY_AUDIO_SETTINGS"
-      ]
+      ],
+      "package": "com.varyamalinina.eventapp"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -75,6 +99,7 @@
       "router": {
         "origin": false
       },
+      "apiUrl": "https://iventapp.ru",
       "YANDEX_MAPS_API_KEY": "e95f18c1-e796-4e6a-b2a9-0aafe5e420c4",
       "YANDEX_GEOCODER_API_KEY": "d84ff24e-0878-41ab-a83b-517487e2903a",
       "YANDEX_MAPKIT_API_KEY": "0b6f9cca-f83d-4b26-a837-7f0affdf242f"

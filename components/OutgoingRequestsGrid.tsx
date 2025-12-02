@@ -8,8 +8,9 @@ interface OutgoingRequestsGridProps {
     type: 'event' | 'friend';
     eventId?: string;
     userId?: string;
+    status?: 'pending' | 'accepted' | 'rejected';
   }>;
-  onRequestPress?: (request: any) => void;
+  onRequestPress?: (request: { id: string; type: 'event' | 'friend'; eventId?: string; userId?: string; status?: 'pending' | 'accepted' | 'rejected' }) => void;
 }
 
 export default function OutgoingRequestsGrid({ requests, onRequestPress }: OutgoingRequestsGridProps) {
@@ -32,6 +33,7 @@ export default function OutgoingRequestsGrid({ requests, onRequestPress }: Outgo
               type={request.type}
               eventId={request.eventId}
               userId={request.userId}
+              status={request.status}
               onPress={() => onRequestPress?.(request)}
             />
           </View>
@@ -74,16 +76,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import OutgoingRequestMiniCard from './OutgoingRequestMiniCard';
-
-interface OutgoingRequestsGridProps {
-  requests: Array<{
-    id: string;
-    type: 'event' | 'friend';
-    eventId?: string;
-    userId?: string;
-  }>;
-  onRequestPress?: (request: any) => void;
-}
 

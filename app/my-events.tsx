@@ -3,20 +3,34 @@ import { useLocalSearchParams } from 'expo-router';
 import { useState, useRef, useEffect } from 'react';
 import EventCard from '../components/EventCard';
 import { useEvents, Event } from '../context/EventsContext';
+import { useAuth } from '../context/AuthContext';
 
 export default function MyEventsScreen() {
   const { eventId } = useLocalSearchParams();
-  const { events } = useEvents();
+  const { events, isUserOrganizer, isUserEventMember } = useEvents();
+  const { user: authUser } = useAuth();
   const [showEventFeed, setShowEventFeed] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  const currentUserId = authUser?.id ?? null;
+  
+  if (!currentUserId) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={styles.loginPromptTitle}>Авторизуйтесь</Text>
+        <Text style={styles.loginPromptText}>
+          Войдите, чтобы увидеть ваши события и участие в мероприятиях.
+        </Text>
+      </View>
+    );
+  }
   
   // Получаем события, организованные пользователем
-  const organizedEvents = events.filter(event => event.organizerId === 'own-profile-1');
+  const organizedEvents = events.filter(event => isUserOrganizer(event, currentUserId));
   
   // Получаем события, в которых участвует пользователь
-  const participatedEvents = events.filter(event => 
-    event.participantsList?.includes('https://randomuser.me/api/portraits/women/68.jpg')
+  const participatedEvents = events.filter(
+    event => isUserEventMember(event, currentUserId) && !isUserOrganizer(event, currentUserId),
   );
   
   // Получаем архивные события
@@ -24,8 +38,7 @@ export default function MyEventsScreen() {
     const isArchived = event.title.toLowerCase().includes('архив') || 
                       event.date.includes('прошло') ||
                       event.date.includes('завершено');
-    const isUserEvent = event.organizerId === 'own-profile-1' || 
-                       event.participantsList?.includes('https://randomuser.me/api/portraits/women/68.jpg');
+    const isUserEvent = isUserOrganizer(event, currentUserId) || isUserEventMember(event, currentUserId);
     return isArchived && isUserEvent;
   }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
@@ -83,8 +96,8 @@ export default function MyEventsScreen() {
             const isCurrentEvent = !event.title.toLowerCase().includes('архив') && 
                                  !event.date.includes('прошло') && 
                                  !event.date.includes('завершено');
-            const isNotParticipating = !event.participantsList?.includes('https://randomuser.me/api/portraits/women/68.jpg');
-            const canJoin = isCurrentEvent && isNotParticipating && event.organizerId !== 'own-profile-1';
+            const isNotParticipating = !isUserEventMember(event, currentUserId);
+            const canJoin = isCurrentEvent && isNotParticipating && event.organizerId !== currentUserId;
             
             return (
               <View 
@@ -135,6 +148,24 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#121212',
+  },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  loginPromptTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  loginPromptText: {
+    fontSize: 16,
+    color: '#BBBBCC',
+    textAlign: 'center',
+    lineHeight: 22,
   },
   backButton: {
     paddingHorizontal: 20,

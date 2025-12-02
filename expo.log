@@ -1,0 +1,18 @@
+env: load .env
+env: export EXPO_PUBLIC_API_URL
+Starting project at /Users/varya.malinina.2003mail.ru/event_app_new/client
+Starting Metro Bundler
+Tunnel connected.
+Tunnel connected.
+Tunnel ready.
+The following packages should be updated for best compatibility with the installed expo version:
+  expo@54.0.20 - expected version: 54.0.23
+  expo-auth-session@5.5.2 - expected version: ~7.0.8
+  expo-router@6.0.13 - expected version: ~6.0.14
+  expo-web-browser@15.0.8 - expected version: ~15.0.9
+  expo-secure-store@13.0.2 - expected version: ~15.0.7
+  @types/react@19.2.2 - expected version: ~19.1.10
+  typescript@5.8.3 - expected version: ~5.9.2
+Your project may not work correctly until you install the expected versions of the packages.
+Waiting on http://localhost:8081
+Logs for your project will appear below.
