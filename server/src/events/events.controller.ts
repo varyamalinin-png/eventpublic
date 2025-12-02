@@ -69,11 +69,11 @@ export class EventsController {
     }
   }
 
-  // 📥 ПОЛУЧЕНИЕ ЗАПРОСОВ ПОЛЬЗОВАТЕЛЯ (входящие и исходящие приглашения)
+  // 📥 ПОЛУЧЕНИЕ ЗАПРОСОВ ПОЛЬЗОВАТЕЛЯ (входящие и исходящие приглашения, а также исходящие join-запросы)
   @UseGuards(JwtAuthGuard)
   @Get('requests/user')
   async getUserRequests(
-    @Query('type') type: 'incoming' | 'outgoing',
+    @Query('type') type: 'incoming' | 'outgoing' | 'join',
     @RequestUser('userId') userId: string,
   ) {
     try {

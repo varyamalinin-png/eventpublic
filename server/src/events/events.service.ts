@@ -1439,8 +1439,8 @@ export class EventsService {
     });
   }
 
-  // 📥 ПОЛУЧЕНИЕ ЗАПРОСОВ ПОЛЬЗОВАТЕЛЯ (входящие и исходящие приглашения)
-  async getUserRequests(userId: string, type: 'incoming' | 'outgoing' = 'incoming') {
+  // 📥 ПОЛУЧЕНИЕ ЗАПРОСОВ ПОЛЬЗОВАТЕЛЯ (входящие и исходящие приглашения, а также исходящие join-запросы)
+  async getUserRequests(userId: string, type: 'incoming' | 'outgoing' | 'join' = 'incoming') {
     let whereClause: any = {};
 
     if (type === 'incoming') {
@@ -1455,6 +1455,18 @@ export class EventsService {
       whereClause = {
         invitedBy: userId,
         status: { in: [MembershipStatus.PENDING, MembershipStatus.ACCEPTED, MembershipStatus.REJECTED] }, // Показываем все статусы
+      };
+    } else if (type === 'join') {
+      // Исходящие join-запросы: мои запросы на участие в событиях (где я НЕ организатор)
+      // invitedBy = null означает, что это не приглашение, а запрос на участие
+      whereClause = {
+        userId,
+        invitedBy: null, // Это не приглашение, а join-запрос
+        status: { in: [MembershipStatus.PENDING, MembershipStatus.ACCEPTED, MembershipStatus.REJECTED] }, // Показываем все статусы
+        // Исключаем события, где пользователь является организатором
+        event: {
+          organizerId: { not: userId },
+        },
       };
     }
 
