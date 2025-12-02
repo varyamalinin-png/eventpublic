@@ -352,6 +352,11 @@ export function useChats({
           return [...prev, mappedChat];
         });
 
+        // Синхронизируем список чатов с сервера, чтобы убедиться, что оба участника видят чат
+        syncChatsFromServer().catch(error => {
+          logger.warn('Failed to sync chats after creating personal chat:', error);
+        });
+
         return mappedChat.id;
       }
     } catch (error) {
