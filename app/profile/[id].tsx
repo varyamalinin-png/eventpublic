@@ -18,7 +18,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export default function OtherProfileScreen() {
   const { id, eventId } = useLocalSearchParams();
   const router = useRouter();
-  const { events, getUserData: contextGetUserData, getOrganizerStats, getFriendsList, getEventProfile, createEventProfile, eventProfiles, sendFriendRequest, removeFriend, isFriend, userFolders, addUserToFolder, removeUserFromFolder, createPersonalChat, getChatsForUser, isUserParticipant, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember, friendRequests, respondToFriendRequest, getUserRequestStatus, fetchEventProfile } = useEvents();
+  const { events, getUserData: contextGetUserData, getOrganizerStats, getFriendsList, getEventProfile, createEventProfile, eventProfiles, sendFriendRequest, removeFriend, isFriend, userFolders, addUserToFolder, removeUserFromFolder, createPersonalChat, getChatsForUser, isUserParticipant, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember, friendRequests, respondToFriendRequest, getUserRequestStatus, fetchEventProfile, getUserFriendsList } = useEvents();
   const { user: authUser } = useAuth();
   const { t } = useLanguage();
   const [showEventFeed, setShowEventFeed] = useState(false);
@@ -43,7 +43,7 @@ export default function OtherProfileScreen() {
       const stats = getOrganizerStats(userId);
       setOrganizerStats({ complaints: stats.complaints, friends: stats.friends });
     }
-  }, [userId, getOrganizerStats, userFriendsMap]); // Добавлено userFriendsMap в зависимости
+  }, [userId, getOrganizerStats]); // getOrganizerStats уже зависит от userFriendsMap внутри
   
   // Проверяем, есть ли входящий запрос в друзья от этого пользователя
   const incomingFriendRequest = friendRequests.find(
