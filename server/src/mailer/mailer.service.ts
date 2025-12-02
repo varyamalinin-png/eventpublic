@@ -52,8 +52,16 @@ export class MailerService {
       throw new Error('Yandex Cloud Email API is not configured');
     }
 
-    const yandexCloudUrl = `${this.yandexCloudApiEndpoint}/v2/email/outbound-emails`;
-    const url = new URL(yandexCloudUrl);
+    // Используем api.cloud.yandex.net вместо mail-api.cloud.yandex.net
+    // так как SSL сертификат выдан для *.api.cloud.yandex.net
+    let yandexCloudUrl = this.yandexCloudApiEndpoint;
+    if (yandexCloudUrl.includes('mail-api.cloud.yandex.net')) {
+      yandexCloudUrl = yandexCloudUrl.replace('mail-api.cloud.yandex.net', 'api.cloud.yandex.net');
+      this.logger.log(`[MailerService] ⚠️ Replacing mail-api.cloud.yandex.net with api.cloud.yandex.net for SSL compatibility`);
+    }
+    
+    const fullUrl = `${yandexCloudUrl}/v2/email/outbound-emails`;
+    const url = new URL(fullUrl);
 
     const requestBody = {
       FromEmailAddress: this.yandexCloudFromEmail,
@@ -81,7 +89,7 @@ export class MailerService {
     };
 
     this.logger.log(`[MailerService] ✅ Using Yandex Cloud Email API to send email to ${email}`);
-    this.logger.log(`[MailerService] URL: ${yandexCloudUrl}`);
+    this.logger.log(`[MailerService] URL: ${fullUrl}`);
     this.logger.log(`[MailerService] From: ${this.yandexCloudFromEmail}, To: ${email}`);
 
     return new Promise((resolve, reject) => {
@@ -97,6 +105,9 @@ export class MailerService {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(postData),
         },
+        // Добавляем servername для SNI (Server Name Indication)
+        // Это необходимо для правильной проверки SSL сертификата
+        servername: url.hostname,
         timeout: 30000,
       };
 
@@ -119,17 +130,17 @@ export class MailerService {
             }
           } else {
             let errorMessage = `Yandex Cloud API error: ${res.statusCode} ${res.statusMessage || 'Unknown'}`;
-            
-            try {
+      
+      try {
               const errorJson = JSON.parse(data);
               errorMessage += ` - ${errorJson.message || errorJson.Code || data}`;
-            } catch {
+      } catch {
               errorMessage += ` - ${data}`;
             }
             
             this.logger.error(`[MailerService] ❌ Yandex Cloud error: ${errorMessage}`);
             reject(new Error(errorMessage));
-          }
+      }
         });
       });
 
