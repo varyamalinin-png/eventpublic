@@ -146,12 +146,12 @@ export class MailerService {
         
         // Детальная диагностика DNS ошибок
         if (error.code === 'ENOTFOUND' || error.message?.includes('ENOTFOUND')) {
-          const detailedError = `DNS resolution failed for ${url.hostname}. This might be due to network restrictions on Railway. Possible solutions:
-1. Check if Railway region allows access to Yandex Cloud domains
-2. Consider using a different email service provider
-3. Contact Railway support about DNS resolution for .yandex.net domains`;
+          const detailedError = `DNS resolution failed for ${url.hostname}. Possible solutions:
+1. Check DNS configuration on the server
+2. Add entry to /etc/hosts if DNS cannot resolve the domain
+3. Contact Yandex Cloud support about Email API endpoint`;
           this.logger.error(`[MailerService] ${detailedError}`);
-          reject(new Error(`DNS resolution failed: Cannot resolve ${url.hostname}. Railway may block access to Yandex Cloud domains. Please check network settings or use alternative email service.`));
+          reject(new Error(`DNS resolution failed: Cannot resolve ${url.hostname}. Please check DNS configuration or contact support.`));
         } else {
           reject(new Error(`Network error: Unable to connect to Yandex Cloud API. ${error.message}`));
         }
