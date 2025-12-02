@@ -2280,11 +2280,26 @@ const isHttpUrl = (value?: string | null): boolean => {
         return [...prev, mappedMessage];
       });
 
-      // Обновляем lastMessage в чате
+      // Проверяем, есть ли чат в локальном состоянии
       setChats(prev => {
         const chat = prev.find(c => c.id === message.chatId);
-        if (!chat) return prev;
         
+        // Если чата нет в списке - синхронизируем с сервера
+        if (!chat) {
+          logger.debug('📨 Чат не найден в локальном состоянии, синхронизируем с сервера:', message.chatId);
+          // Вызываем синхронизацию в следующем тике, чтобы не блокировать состояние
+          // Используем wrapper, который использует ref для безопасного вызова
+          if (syncChatsFromServerRef.current) {
+            setTimeout(() => {
+              syncChatsFromServerRef.current?.().catch(error => {
+                logger.error('Failed to sync chats after receiving new message:', error);
+              });
+            }, 100);
+          }
+          return prev;
+        }
+        
+        // Обновляем lastMessage в существующем чате
         return prev.map(c => 
           c.id === message.chatId 
             ? { ...c, lastMessage: mappedMessage, lastActivity: new Date() }
