@@ -412,14 +412,19 @@ export default function CalendarScreen() {
     
     // СНАЧАЛА добавляем preview событие (если передано через GO)
     // Это приоритетно, чтобы оно показывалось с кнопкой
+    // НО только если статус еще не waiting (запрос уже отправлен)
     if (previewEvent && previewEvent.date === dateKey) {
       const eventHour = parseInt(previewEvent.time.split(':')[0]);
       if (eventHour === hour) {
         const status = getMyEventParticipationStatus(previewEvent.id);
+        // Проверяем статус через getUserRelationship для правильного определения waiting
+        const relationship = getUserRelationship(previewEvent, currentUserId ?? '');
         // Проверяем, не является ли событие уже обычным событием (пользователь уже участник)
         const isAlreadyMember = currentUserId ? isUserEventMember(previewEvent, currentUserId) : false;
-        // Если есть inviteId, всегда показываем кнопку подтверждения (если еще не участник)
-        const shouldShowConfirmation = inviteId ? !isAlreadyMember : (!status && !isAlreadyMember);
+        // Если статус уже waiting - не показываем как preview, оно будет показано в pending секции
+        const isWaiting = relationship === 'waiting';
+        // Если есть inviteId, всегда показываем кнопку подтверждения (если еще не участник и не waiting)
+        const shouldShowConfirmation = inviteId ? !isAlreadyMember && !isWaiting : (!status && !isAlreadyMember && !isWaiting);
         if (shouldShowConfirmation) {
           result.push({
             ...previewEvent,
@@ -921,16 +926,17 @@ export default function CalendarScreen() {
 
                   // Preview (GO) — показать подтверждение
                   // Показываем кнопку если: это preview событие с needsConfirmation
-                  // И (нет статуса участия ИЛИ это приглашение - invited ИЛИ это waiting - но еще не принято)
+                  // И (нет статуса участия ИЛИ это приглашение - invited)
+                  // НО НЕ показываем, если статус уже waiting (запрос уже отправлен)
                   const isPreviewWithButton = (event as any).needsConfirmation === true || (event as any).isPreview === true;
                   const hasNoStatus = !participationStatus;
                   const isInvited = relationship === 'invited';
                   const isWaiting = relationship === 'waiting';
                   const hasInviteId = inviteId && participationStatus !== 'accepted';
-                  // Показываем кнопку если это preview событие И (нет статуса ИЛИ есть приглашение ИЛИ это waiting - но еще не принято)
-                  // НО НЕ показываем, если пользователь уже является участником
+                  // Показываем кнопку если это preview событие И (нет статуса ИЛИ есть приглашение)
+                  // НО НЕ показываем, если пользователь уже является участником ИЛИ статус уже waiting
                   const isAlreadyMember = currentUserId ? isUserEventMember(event, currentUserId) : false;
-                  const shouldShowPreviewButton = isPreviewWithButton && !isAlreadyMember && (hasNoStatus || hasInviteId || isInvited || isWaiting);
+                  const shouldShowPreviewButton = isPreviewWithButton && !isAlreadyMember && !isWaiting && (hasNoStatus || hasInviteId || isInvited);
                   
                   if (shouldShowPreviewButton) {
                     return (
