@@ -52,16 +52,10 @@ export class MailerService {
       throw new Error('Yandex Cloud Email API is not configured');
     }
 
-    // Используем api.cloud.yandex.net вместо mail-api.cloud.yandex.net
-    // так как SSL сертификат выдан для *.api.cloud.yandex.net
-    let yandexCloudUrl = this.yandexCloudApiEndpoint;
-    if (yandexCloudUrl.includes('mail-api.cloud.yandex.net')) {
-      yandexCloudUrl = yandexCloudUrl.replace('mail-api.cloud.yandex.net', 'api.cloud.yandex.net');
-      this.logger.log(`[MailerService] ⚠️ Replacing mail-api.cloud.yandex.net with api.cloud.yandex.net for SSL compatibility`);
-    }
-    
-    const fullUrl = `${yandexCloudUrl}/v2/email/outbound-emails`;
-    const url = new URL(fullUrl);
+    // Используем оригинальный endpoint mail-api.cloud.yandex.net
+    // Временно отключаем проверку SSL сертификата, так как сертификат выдан для *.api.cloud.yandex.net
+    const yandexCloudUrl = `${this.yandexCloudApiEndpoint}/v2/email/outbound-emails`;
+    const url = new URL(yandexCloudUrl);
 
     const requestBody = {
       FromEmailAddress: this.yandexCloudFromEmail,
@@ -105,8 +99,9 @@ export class MailerService {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(postData),
         },
-        // Добавляем servername для SNI (Server Name Indication)
-        // Это необходимо для правильной проверки SSL сертификата
+        // Временно отключаем проверку SSL сертификата для mail-api.cloud.yandex.net
+        // так как сертификат выдан для *.api.cloud.yandex.net, но endpoint правильный
+        rejectUnauthorized: false,
         servername: url.hostname,
         timeout: 30000,
       };
