@@ -37,4 +37,10 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# credentials and keys (sensitive data)
+CREDENTIALS.md
+server/YANDEX_KEYS.md
+*.pem
+*.key
+
 app-example

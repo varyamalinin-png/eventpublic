@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["nodejs_18", "npm-9_x"]
+
+[phases.install]
+cmds = ["npm install --legacy-peer-deps"]
+
+[phases.build]
+cmds = ["rm -rf dist", "npm run prisma:generate", "npm run build"]
+
+[variables]
+NPM_CONFIG_LEGACY_PEER_DEPS = "true"

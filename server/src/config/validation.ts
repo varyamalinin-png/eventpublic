@@ -1,0 +1,35 @@
+import * as Joi from 'joi';
+
+export const validationSchema = Joi.object({
+  NODE_ENV: Joi.string().valid('development', 'test', 'production').default('development'),
+  PORT: Joi.number().default(4000),
+  DATABASE_URL: Joi.string().uri().required(),
+  REDIS_URL: Joi.string().uri(),
+  JWT_ACCESS_SECRET: Joi.string().min(16).required(),
+  JWT_REFRESH_SECRET: Joi.string().min(16).required(),
+  JWT_ACCESS_TTL: Joi.string().default('15m'),
+  JWT_REFRESH_TTL: Joi.string().default('7d'),
+  // Yandex Cloud Email API настройки (единственный способ отправки email)
+  // Используем статический ключ доступа (AWS Access Key) вместо IAM токена
+  YANDEX_CLOUD_ACCESS_KEY_ID: Joi.string().optional(),
+  YANDEX_CLOUD_SECRET_ACCESS_KEY: Joi.string().optional(),
+  YANDEX_CLOUD_API_ENDPOINT: Joi.string().uri().optional(),
+  YANDEX_CLOUD_FROM_EMAIL: Joi.string().email().optional(),
+  EMAIL_VERIFICATION_REDIRECT_URL: Joi.string().uri().optional(),
+  PASSWORD_RESET_REDIRECT_URL: Joi.string().uri().optional(),
+  GOOGLE_CLIENT_ID: Joi.string().optional(),
+  GOOGLE_CLIENT_SECRET: Joi.string().optional(),
+  APP_BACKEND_BASE_URL: Joi.string().uri().optional(),
+  APP_FRONTEND_BASE_URL: Joi.string().uri().optional(),
+  APP_URL: Joi.string().uri().optional(),
+  STORAGE_ENDPOINT: Joi.string().optional(),
+  STORAGE_BUCKET: Joi.string().optional(),
+  STORAGE_ACCESS_KEY: Joi.string().optional(),
+  STORAGE_SECRET_KEY: Joi.string().optional(),
+  STORAGE_REGION: Joi.string().optional(),
+  STORAGE_PUBLIC_BASE_URL: Joi.string().optional(),
+  STORAGE_DRIVER: Joi.string().valid('s3').optional(),
+  STORAGE_FORCE_PATH_STYLE: Joi.string().valid('true', 'false').optional(),
+  STORAGE_MAX_FILE_SIZE_MB: Joi.number().integer().min(1).max(50).optional(),
+  CORS_ORIGIN: Joi.string().optional(),
+});
