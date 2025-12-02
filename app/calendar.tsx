@@ -1493,6 +1493,7 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 25,
     overflow: 'hidden',
+    backgroundColor: '#333',
   },
   dayNumberBadgeButton: {
     position: 'absolute',
