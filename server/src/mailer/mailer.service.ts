@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as https from 'https';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 
 @Injectable()
 export class MailerService {
@@ -10,8 +10,7 @@ export class MailerService {
   private readonly verificationRedirectUrl: string;
   private readonly resetRedirectUrl: string;
   private readonly yandexCloudEnabled: boolean;
-  private readonly yandexCloudIamToken?: string;
-  private readonly yandexCloudApiEndpoint: string;
+  private readonly sesClient?: SESv2Client;
   private readonly yandexCloudFromEmail?: string;
 
   constructor(private readonly configService: ConfigService) {
@@ -27,14 +26,25 @@ export class MailerService {
       this.configService.get<string>('email.passwordResetRedirectUrl') ??
       'https://example.com/reset-password';
 
-    // Проверяем Yandex Cloud Email API
-    const yandexCloudIamToken = this.configService.get<string>('email.yandexCloudIamToken');
+    // Проверяем Yandex Cloud Email API (используем статический ключ доступа)
+    const yandexCloudAccessKeyId = this.configService.get<string>('email.yandexCloudAccessKeyId');
+    const yandexCloudSecretAccessKey = this.configService.get<string>('email.yandexCloudSecretAccessKey');
     const yandexCloudFromEmail = this.configService.get<string>('email.yandexCloudFromEmail');
-    this.yandexCloudApiEndpoint = this.configService.get<string>('email.yandexCloudApiEndpoint') || 'https://mail-api.cloud.yandex.net';
+    const yandexCloudApiEndpoint = this.configService.get<string>('email.yandexCloudApiEndpoint') || 'https://postbox.cloud.yandex.net';
     
-    if (yandexCloudIamToken && yandexCloudFromEmail) {
-      this.yandexCloudIamToken = yandexCloudIamToken;
+    if (yandexCloudAccessKeyId && yandexCloudSecretAccessKey && yandexCloudFromEmail) {
       this.yandexCloudFromEmail = yandexCloudFromEmail;
+      
+      // Создаем AWS SESv2 клиент с кастомным endpoint для Yandex Cloud Postbox
+      this.sesClient = new SESv2Client({
+        region: 'ru-central1',
+        endpoint: yandexCloudApiEndpoint,
+        credentials: {
+          accessKeyId: yandexCloudAccessKeyId,
+          secretAccessKey: yandexCloudSecretAccessKey,
+        },
+      });
+      
       this.yandexCloudEnabled = true;
       this.logger.log(`✅ Yandex Cloud Email API enabled (from: ${yandexCloudFromEmail})`);
     } else {
@@ -48,130 +58,47 @@ export class MailerService {
   }
 
   private async sendViaYandexCloud(email: string, subject: string, html: string, text: string): Promise<void> {
-    if (!this.yandexCloudEnabled || !this.yandexCloudIamToken || !this.yandexCloudFromEmail) {
+    if (!this.yandexCloudEnabled || !this.sesClient || !this.yandexCloudFromEmail) {
       throw new Error('Yandex Cloud Email API is not configured');
     }
 
-    // Используем правильный endpoint postbox.cloud.yandex.net согласно документации
-    // Если в конфиге указан mail-api, заменяем на postbox
-    let endpoint = this.yandexCloudApiEndpoint;
-    if (endpoint.includes('mail-api.cloud.yandex.net')) {
-      endpoint = endpoint.replace('mail-api.cloud.yandex.net', 'postbox.cloud.yandex.net');
-      this.logger.log(`[MailerService] ⚠️ Replacing mail-api.cloud.yandex.net with postbox.cloud.yandex.net`);
-    }
-    const yandexCloudUrl = `${endpoint}/v2/email/outbound-emails`;
-    const url = new URL(yandexCloudUrl);
-
-    const requestBody = {
-      FromEmailAddress: this.yandexCloudFromEmail,
-      Destination: {
-        ToAddresses: [email],
-      },
-      Content: {
-        Simple: {
-          Subject: {
-            Data: subject,
-            Charset: 'UTF-8',
-          },
-          Body: {
-            Text: {
-              Data: text,
-              Charset: 'UTF-8',
-            },
-            Html: {
-              Data: html,
-              Charset: 'UTF-8',
-            },
-          },
-        },
-      },
-    };
-
-    this.logger.log(`[MailerService] ✅ Using Yandex Cloud Email API to send email to ${email}`);
-    this.logger.log(`[MailerService] URL: ${yandexCloudUrl}`);
+    this.logger.log(`[MailerService] ✅ Using Yandex Cloud Email API (AWS SDK) to send email to ${email}`);
     this.logger.log(`[MailerService] From: ${this.yandexCloudFromEmail}, To: ${email}`);
 
-    return new Promise((resolve, reject) => {
-      const postData = JSON.stringify(requestBody);
-      
-      const options = {
-        hostname: url.hostname,
-        port: url.port || 443,
-        path: url.pathname,
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.yandexCloudIamToken}`,
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(postData),
+    try {
+      const command = new SendEmailCommand({
+        FromEmailAddress: this.yandexCloudFromEmail,
+        Destination: {
+          ToAddresses: [email],
         },
-        // Временно отключаем проверку SSL сертификата для mail-api.cloud.yandex.net
-        // так как сертификат выдан для *.api.cloud.yandex.net, но endpoint правильный
-        rejectUnauthorized: false,
-        servername: url.hostname,
-        timeout: 30000,
-      };
-
-      const req = https.request(options, (res) => {
-        let data = '';
-
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-
-        res.on('end', () => {
-          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-            try {
-              const result = JSON.parse(data);
-              this.logger.log(`✅ Yandex Cloud email sent. Message ID: ${result.MessageId || 'N/A'}`);
-              resolve();
-            } catch (parseError) {
-              this.logger.error(`[MailerService] ❌ Failed to parse response: ${data}`);
-              reject(new Error(`Failed to parse Yandex Cloud API response: ${data}`));
-            }
-          } else {
-            let errorMessage = `Yandex Cloud API error: ${res.statusCode} ${res.statusMessage || 'Unknown'}`;
-      
-      try {
-              const errorJson = JSON.parse(data);
-              errorMessage += ` - ${errorJson.message || errorJson.Code || data}`;
-      } catch {
-              errorMessage += ` - ${data}`;
-            }
-            
-            this.logger.error(`[MailerService] ❌ Yandex Cloud error: ${errorMessage}`);
-            reject(new Error(errorMessage));
-      }
-        });
+        Content: {
+          Simple: {
+            Subject: {
+              Data: subject,
+              Charset: 'UTF-8',
+            },
+            Body: {
+              Text: {
+                Data: text,
+                Charset: 'UTF-8',
+              },
+              Html: {
+                Data: html,
+                Charset: 'UTF-8',
+              },
+            },
+          },
+        },
       });
 
-      req.on('error', (error: any) => {
-        this.logger.error(`[MailerService] ❌ Yandex Cloud network error: ${error.message}`);
-        this.logger.error(`[MailerService] Error code: ${error.code}`);
-        this.logger.error(`[MailerService] Error details:`, error);
-        
-        // Детальная диагностика DNS ошибок
-        if (error.code === 'ENOTFOUND' || error.message?.includes('ENOTFOUND')) {
-          const detailedError = `DNS resolution failed for ${url.hostname}. Possible solutions:
-1. Check DNS configuration on the server
-2. Add entry to /etc/hosts if DNS cannot resolve the domain
-3. Contact Yandex Cloud support about Email API endpoint`;
-          this.logger.error(`[MailerService] ${detailedError}`);
-          reject(new Error(`DNS resolution failed: Cannot resolve ${url.hostname}. Please check DNS configuration or contact support.`));
-        } else {
-          reject(new Error(`Network error: Unable to connect to Yandex Cloud API. ${error.message}`));
-        }
-      });
-
-      req.on('timeout', () => {
-        req.destroy();
-        const timeoutError = new Error('Yandex Cloud API request timeout');
-        this.logger.error(`[MailerService] ❌ Yandex Cloud error: ${timeoutError.message}`);
-        reject(timeoutError);
-      });
-
-      req.write(postData);
-      req.end();
-    });
+      const response = await this.sesClient.send(command);
+      this.logger.log(`✅ Yandex Cloud email sent. Message ID: ${response.MessageId || 'N/A'}`);
+    } catch (error: any) {
+      const errorMessage = error.message || 'Unknown error';
+      this.logger.error(`[MailerService] ❌ Yandex Cloud error: ${errorMessage}`);
+      this.logger.error(`[MailerService] Error details:`, error);
+      throw new Error(`Yandex Cloud API error: ${errorMessage}`);
+    }
   }
 
   async sendVerificationEmail(email: string, token: string) {

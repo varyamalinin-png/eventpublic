@@ -10,7 +10,9 @@ export const validationSchema = Joi.object({
   JWT_ACCESS_TTL: Joi.string().default('15m'),
   JWT_REFRESH_TTL: Joi.string().default('7d'),
   // Yandex Cloud Email API настройки (единственный способ отправки email)
-  YANDEX_IAM_TOKEN: Joi.string().optional(),
+  // Используем статический ключ доступа (AWS Access Key) вместо IAM токена
+  YANDEX_CLOUD_ACCESS_KEY_ID: Joi.string().optional(),
+  YANDEX_CLOUD_SECRET_ACCESS_KEY: Joi.string().optional(),
   YANDEX_CLOUD_API_ENDPOINT: Joi.string().uri().optional(),
   YANDEX_CLOUD_FROM_EMAIL: Joi.string().email().optional(),
   EMAIL_VERIFICATION_REDIRECT_URL: Joi.string().uri().optional(),

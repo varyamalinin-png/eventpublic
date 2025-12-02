@@ -15,7 +15,9 @@ export default () => ({
   },
   email: {
     // Yandex Cloud Email API настройки (единственный способ отправки email)
-    yandexCloudIamToken: process.env.YANDEX_IAM_TOKEN,
+    // Используем статический ключ доступа (AWS Access Key) вместо IAM токена
+    yandexCloudAccessKeyId: process.env.YANDEX_CLOUD_ACCESS_KEY_ID,
+    yandexCloudSecretAccessKey: process.env.YANDEX_CLOUD_SECRET_ACCESS_KEY,
     yandexCloudApiEndpoint: process.env.YANDEX_CLOUD_API_ENDPOINT || 'https://postbox.cloud.yandex.net',
     yandexCloudFromEmail: process.env.YANDEX_CLOUD_FROM_EMAIL,
     fromEmail: process.env.YANDEX_CLOUD_FROM_EMAIL || 'noreply@iventapp.ru',
