@@ -921,12 +921,16 @@ export default function CalendarScreen() {
 
                   // Preview (GO) — показать подтверждение
                   // Показываем кнопку если: это preview событие с needsConfirmation
-                  // И (нет статуса участия ИЛИ это приглашение - invited)
+                  // И (нет статуса участия ИЛИ это приглашение - invited ИЛИ это waiting - но еще не принято)
                   const isPreviewWithButton = (event as any).needsConfirmation === true || (event as any).isPreview === true;
                   const hasNoStatus = !participationStatus;
                   const isInvited = relationship === 'invited';
+                  const isWaiting = relationship === 'waiting';
                   const hasInviteId = inviteId && participationStatus !== 'accepted';
-                  const shouldShowPreviewButton = isPreviewWithButton && (hasNoStatus || hasInviteId || isInvited);
+                  // Показываем кнопку если это preview событие И (нет статуса ИЛИ есть приглашение ИЛИ это waiting - но еще не принято)
+                  // НО НЕ показываем, если пользователь уже является участником
+                  const isAlreadyMember = currentUserId ? isUserEventMember(event, currentUserId) : false;
+                  const shouldShowPreviewButton = isPreviewWithButton && !isAlreadyMember && (hasNoStatus || hasInviteId || isInvited || isWaiting);
                   
                   if (shouldShowPreviewButton) {
                     return (
@@ -935,12 +939,26 @@ export default function CalendarScreen() {
                         <TouchableOpacity
                           onPress={() => router.push(`/event-profile/${event.id}`)}
                         >
-                          <Text style={styles.eventTitle}>{event.title}</Text>
+                          <View style={styles.eventItemContent}>
+                            {getEventPhoto(event.id) && (
+                              <Image
+                                source={{ uri: getEventPhoto(event.id) || 'https://via.placeholder.com/50' }}
+                                style={styles.eventPhotoCircle}
+                                onError={(e) => {
+                                  logger.debug('Error loading event photo:', e.nativeEvent.error);
+                                }}
+                              />
+                            )}
+                            <View style={styles.eventTextContainer}>
+                              <Text style={styles.eventTitle}>{event.title}</Text>
+                              <Text style={styles.eventLocation}>{event.location}</Text>
+                            </View>
+                          </View>
                         </TouchableOpacity>
-                        <Text style={styles.eventLocation}>{event.location}</Text>
                         {/* Кнопка подтверждения внизу */}
                         <TouchableOpacity
                           style={styles.confirmButton}
+                          activeOpacity={0.7}
                           onPress={async () => {
                             try {
                               // Находим приглашение для этого события
@@ -1050,14 +1068,22 @@ export default function CalendarScreen() {
                   // Waiting — пользователь отправил запрос на участие (type: 'join')
                   // Показываем с оранжевым значком часов и фото события
                   if (relationship === 'waiting') {
+                    const photoUrl = getEventPhoto(event.id);
                     return (
                       <View key={eventIndex} style={styles.eventItem}>
                         <View style={styles.eventItemContent}>
-                          {getEventPhoto(event.id) && (
+                          {photoUrl ? (
                             <Image
-                              source={{ uri: getEventPhoto(event.id) || 'https://via.placeholder.com/50' }}
+                              source={{ uri: photoUrl }}
                               style={styles.eventPhotoCircle}
+                              onError={(e) => {
+                                logger.debug('Error loading event photo:', e.nativeEvent.error);
+                              }}
                             />
+                          ) : (
+                            <View style={[styles.eventPhotoCircle, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
+                              <Text style={{ color: '#fff', fontSize: 20 }}>📅</Text>
+                            </View>
                           )}
                           <View style={styles.eventTextContainer}>
                             <TouchableOpacity
@@ -1084,6 +1110,7 @@ export default function CalendarScreen() {
                   }
 
                   // Нормальные события
+                  const photoUrl = getEventPhoto(event.id);
                   return (
                     <TouchableOpacity
                       key={eventIndex}
@@ -1093,11 +1120,18 @@ export default function CalendarScreen() {
                       }}
                     >
                       <View style={styles.eventItemContent}>
-                        {getEventPhoto(event.id) && (
+                        {photoUrl ? (
                           <Image
-                            source={{ uri: getEventPhoto(event.id) || 'https://via.placeholder.com/50' }}
+                            source={{ uri: photoUrl }}
                             style={styles.eventPhotoCircle}
+                            onError={(e) => {
+                              logger.debug('Error loading event photo:', e.nativeEvent.error);
+                            }}
                           />
+                        ) : (
+                          <View style={[styles.eventPhotoCircle, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
+                            <Text style={{ color: '#fff', fontSize: 20 }}>📅</Text>
+                          </View>
                         )}
                         <View style={styles.eventTextContainer}>
                           <Text 
@@ -1459,6 +1493,7 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 25,
     overflow: 'hidden',
+    backgroundColor: '#333',
   },
   dayNumberBadgeButton: {
     position: 'absolute',
