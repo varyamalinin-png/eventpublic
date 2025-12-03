@@ -21,6 +21,7 @@ export interface StoredAccount {
   username: string | null;
   name: string | null;
   avatarUrl: string | null;
+  emailVerified?: boolean; // Статус подтверждения email
   accessToken: string;
   refreshToken: string;
   lastUsedAt: string;
@@ -292,6 +293,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           username: accountUser.username ?? existing?.username ?? null,
           name: accountUser.name ?? existing?.name ?? null,
           avatarUrl: accountUser.avatarUrl ?? existing?.avatarUrl ?? null,
+          emailVerified: accountUser.emailVerified ?? existing?.emailVerified ?? false, // Сохраняем статус верификации
           accessToken: tokens.accessToken,
           refreshToken: newRefreshToken,
           lastUsedAt: new Date().toISOString(),
@@ -656,6 +658,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               username: targetAccount.username,
               name: targetAccount.name,
               avatarUrl: targetAccount.avatarUrl,
+              emailVerified: targetAccount.emailVerified ?? false, // Восстанавливаем статус верификации из кэша
             });
           } else if (error?.status === 401 && targetAccount.refreshToken && targetAccount.refreshToken.trim() !== '') {
             // Пытаемся обновить токен, но если это тоже невалидный refresh token, handleAccountAuthFailure обработает это
