@@ -90,25 +90,262 @@ export class AuthController {
     if (!token) {
       return res.status(400).send('Verification token is required');
     }
-    const redirectBase =
-      this.configService.get<string>('email.verificationRedirectUrl') ??
-      this.configService.get<string>('app.backendBaseUrl');
     try {
       await this.authService.verifyEmailToken(token);
-      if (redirectBase) {
-        const url = new URL(redirectBase);
-        url.searchParams.set('status', 'success');
-        return res.redirect(url.toString());
-      }
-      return res.send('Email verified successfully. You can close this window.');
+      // После успешной верификации показываем страницу успеха
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Email Verified</title>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              min-height: 100vh;
+              margin: 0;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: #333;
+            }
+            .container {
+              background: white;
+              padding: 40px;
+              border-radius: 10px;
+              box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+              text-align: center;
+              max-width: 500px;
+            }
+            h1 { color: #4CAF50; margin-bottom: 20px; }
+            p { color: #666; line-height: 1.6; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>✅ Email успешно подтверждён!</h1>
+            <p>Ваш email адрес был успешно подтверждён. Теперь вы можете закрыть это окно и вернуться в приложение.</p>
+          </div>
+        </body>
+        </html>
+      `);
     } catch (error) {
-      if (redirectBase) {
-        const url = new URL(redirectBase);
-        url.searchParams.set('status', 'error');
-        return res.redirect(url.toString());
-      }
-      return res.status(400).send('Verification link is invalid or expired.');
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Verification Failed</title>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              min-height: 100vh;
+              margin: 0;
+              background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+              color: #333;
+            }
+            .container {
+              background: white;
+              padding: 40px;
+              border-radius: 10px;
+              box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+              text-align: center;
+              max-width: 500px;
+            }
+            h1 { color: #f5576c; margin-bottom: 20px; }
+            p { color: #666; line-height: 1.6; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>❌ Ошибка подтверждения</h1>
+            <p>Ссылка для подтверждения недействительна или истекла. Пожалуйста, запросите новую ссылку в приложении.</p>
+          </div>
+        </body>
+        </html>
+      `);
     }
+  }
+
+  @Get('verify')
+  async verifyRedirect(@Query('status') status: string, @Query('token') token: string, @Res() res: Response) {
+    // Обработка редиректа после верификации email
+    // Если есть токен, обрабатываем его
+    if (token) {
+      try {
+        await this.authService.verifyEmailToken(token);
+        // После успешной верификации редиректим на страницу успеха
+        return res.send(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Email Verified</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                margin: 0;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: #333;
+              }
+              .container {
+                background: white;
+                padding: 40px;
+                border-radius: 10px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                text-align: center;
+                max-width: 500px;
+              }
+              h1 { color: #4CAF50; margin-bottom: 20px; }
+              p { color: #666; line-height: 1.6; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>✅ Email успешно подтверждён!</h1>
+              <p>Ваш email адрес был успешно подтверждён. Теперь вы можете закрыть это окно и вернуться в приложение.</p>
+            </div>
+          </body>
+          </html>
+        `);
+      } catch (error) {
+        return res.status(400).send(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Verification Failed</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                margin: 0;
+                background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+                color: #333;
+              }
+              .container {
+                background: white;
+                padding: 40px;
+                border-radius: 10px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                text-align: center;
+                max-width: 500px;
+              }
+              h1 { color: #f5576c; margin-bottom: 20px; }
+              p { color: #666; line-height: 1.6; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>❌ Ошибка подтверждения</h1>
+              <p>Ссылка для подтверждения недействительна или истекла. Пожалуйста, запросите новую ссылку в приложении.</p>
+            </div>
+          </body>
+          </html>
+        `);
+      }
+    }
+    
+    // Если есть только status, показываем соответствующее сообщение
+    if (status === 'success') {
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Email Verified</title>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              min-height: 100vh;
+              margin: 0;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: #333;
+            }
+            .container {
+              background: white;
+              padding: 40px;
+              border-radius: 10px;
+              box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+              text-align: center;
+              max-width: 500px;
+            }
+            h1 { color: #4CAF50; margin-bottom: 20px; }
+            p { color: #666; line-height: 1.6; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>✅ Email успешно подтверждён!</h1>
+            <p>Ваш email адрес был успешно подтверждён. Теперь вы можете закрыть это окно и вернуться в приложение.</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+    
+    if (status === 'error') {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Verification Failed</title>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              min-height: 100vh;
+              margin: 0;
+              background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+              color: #333;
+            }
+            .container {
+              background: white;
+              padding: 40px;
+              border-radius: 10px;
+              box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+              text-align: center;
+              max-width: 500px;
+            }
+            h1 { color: #f5576c; margin-bottom: 20px; }
+            p { color: #666; line-height: 1.6; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>❌ Ошибка подтверждения</h1>
+            <p>Ссылка для подтверждения недействительна или истекла. Пожалуйста, запросите новую ссылку в приложении.</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+    
+    // Если нет ни token, ни status, возвращаем 404
+    return res.status(404).send('Not Found');
   }
 
   @Post('request-password-reset')
