@@ -479,6 +479,73 @@ export function EventsProvider({ children }: EventsProviderProps) {
     setEvents(prev => prev.map(event => event.id === id ? { ...event, ...updates } : event));
   }, [setEvents]);
 
+  // Используем refs для переменных, которые объявляются позже, но используются в useEventRequests
+  const setEventProfilesRef = useRef<React.Dispatch<React.SetStateAction<EventProfile[]>> | null>(null);
+  const syncEventsFromServerRef = useRef<(() => Promise<void>) | null>(null);
+  const createEventProfileRef = useRef<((eventId: string) => Promise<void>) | null>(null);
+  const isUserEventMemberRef = useRef<((event: Event, userId: string) => boolean) | null>(null);
+  const isEventPastRef = useRef<((event: Event) => boolean) | null>(null);
+  const eventProfilesRef = useRef<EventProfile[]>([]);
+  const knownUserIdsRef = useRef<Set<string>>(new Set());
+  const isUserAttendeeRef = useRef<((event: Event, userId: string) => boolean) | null>(null);
+  const removeSavedMemoryPostRef = useRef<((eventId: string, postId: string) => void) | null>(null);
+  const getEventParticipantsRef = useRef<((eventId: string) => string[]) | null>(null);
+
+  // Временные функции-обертки
+  const setEventProfilesWrapper = useCallback((value: EventProfile[] | ((prev: EventProfile[]) => EventProfile[])) => {
+    if (setEventProfilesRef.current) {
+      setEventProfilesRef.current(value);
+    }
+  }, []);
+
+  const syncEventsFromServerWrapper = useCallback(async () => {
+    if (syncEventsFromServerRef.current) {
+      return syncEventsFromServerRef.current();
+    }
+    return Promise.resolve();
+  }, []);
+
+  const createEventProfileWrapper = useCallback(async (eventId: string) => {
+    if (createEventProfileRef.current) {
+      return createEventProfileRef.current(eventId);
+    }
+    return Promise.resolve();
+  }, []);
+
+  const isUserEventMemberWrapper = useCallback((event: Event, userId: string): boolean => {
+    if (isUserEventMemberRef.current) {
+      return isUserEventMemberRef.current(event, userId);
+    }
+    return false;
+  }, []);
+
+  const isEventPastWrapper = useCallback((event: Event): boolean => {
+    if (isEventPastRef.current) {
+      return isEventPastRef.current(event);
+    }
+    return false;
+  }, []);
+
+  const isUserAttendeeWrapper = useCallback((event: Event, userId: string): boolean => {
+    if (isUserAttendeeRef.current) {
+      return isUserAttendeeRef.current(event, userId);
+    }
+    return false;
+  }, []);
+
+  const removeSavedMemoryPostWrapper = useCallback((eventId: string, postId: string) => {
+    if (removeSavedMemoryPostRef.current) {
+      removeSavedMemoryPostRef.current(eventId, postId);
+    }
+  }, []);
+
+  const getEventParticipantsWrapper = useCallback((eventId: string): string[] => {
+    if (getEventParticipantsRef.current) {
+      return getEventParticipantsRef.current(eventId);
+    }
+    return [];
+  }, []);
+
   // getUserData должен быть определен ПЕРЕД вызовом useEventRequests
   const getUserData = useCallback((userId: string): UserProfile => {
     const resolvedId = resolveUserId(userId);
@@ -562,20 +629,20 @@ export function EventsProvider({ children }: EventsProviderProps) {
     applyServerUserDataToState,
     events,
     setEvents,
-    setEventProfiles,
+    setEventProfiles: setEventProfilesWrapper,
     setChats: setChatsWrapper,
     updateEvent: updateEventWrapper,
-    syncEventsFromServer,
+    syncEventsFromServer: syncEventsFromServerWrapper,
     syncChatsFromServer: syncChatsFromServerWrapper,
-    createEventProfile,
+    createEventProfile: createEventProfileWrapper,
     addParticipantToChat: addParticipantToChatWrapper,
     createEventChatWithParticipants: createEventChatWithParticipantsWrapper,
     getUserData,
-    isUserEventMember,
-    isEventPast,
+    isUserEventMember: isUserEventMemberWrapper,
+    isEventPast: isEventPastWrapper,
     resolveUserId,
     chats: chatsRef.current,
-    eventProfiles,
+    eventProfiles: eventProfilesRef.current,
   });
 
   // Используем хук для работы с чатами
@@ -601,7 +668,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     applyServerUserDataToState,
     events,
     eventRequests,
-    eventProfiles,
+    eventProfiles: eventProfilesRef.current, // Используем ref, так как eventProfiles объявлен позже
     resolveRequestUserId,
     getUserData,
   });
@@ -645,6 +712,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     const cleanUsername = username.startsWith('@') ? username.slice(1).toLowerCase() : username.toLowerCase();
     
     // Сначала проверяем локальный кэш
+    const knownUserIds = knownUserIdsRef.current;
     for (const userId of knownUserIds) {
       const userData = getUserData(userId);
       if (userData.username.toLowerCase() === cleanUsername) {
@@ -676,13 +744,14 @@ export function EventsProvider({ children }: EventsProviderProps) {
     }
     
     return null;
-  }, [accessToken, knownUserIds, getUserData, applyServerUserDataToState]);
+  }, [accessToken, getUserData, applyServerUserDataToState]);
 
   // Проверка доступности username (не используется ли уже)
   const isUsernameAvailable = useCallback(async (username: string): Promise<boolean> => {
     const cleanUsername = username.startsWith('@') ? username.slice(1).toLowerCase() : username.toLowerCase();
     
     // Проверяем локально
+    const knownUserIds = knownUserIdsRef.current;
     for (const userId of knownUserIds) {
       const userData = getUserData(userId);
       if (userData.username.toLowerCase() === cleanUsername) {
@@ -707,7 +776,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     }
     
     return true;
-  }, [accessToken, knownUserIds, getUserData]);
+  }, [accessToken, getUserData]);
 
   // Функция для детерминированной генерации значений на основе ID
   const generateDeterministicStats = (organizerId: string) => {
@@ -760,14 +829,14 @@ export function EventsProvider({ children }: EventsProviderProps) {
 
   const getOrganizerStats = useCallback((organizerId: string) => {
     // Получаем все события где пользователь является членом (организатор или участник)
-    const allUserEvents = events.filter(event => isUserEventMember(event, organizerId));
+    const allUserEvents = events.filter(event => isUserEventMemberWrapper(event, organizerId));
     
     // Получаем события где пользователь организатор
     const organizedEvents = events.filter(event => event.organizerId === organizerId);
     
     // Получаем события где пользователь участник (но не организатор)
     const participatedEvents = events.filter(event => 
-      isUserAttendee(event, organizerId)
+      isUserAttendeeWrapper(event, organizerId)
     );
 
     // Получаем реальное количество друзей из userFriendsMap (единый источник истины)
@@ -800,7 +869,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
       complaints: complaintsCount,
       friends: friendsCount,
     };
-  }, [events, isUserEventMember, isUserAttendee, userFriendsMap, accessToken, loadComplaintsCount]);
+  }, [events, isUserEventMemberWrapper, isUserAttendeeWrapper, userFriendsMap, accessToken, loadComplaintsCount]);
 
   const getFriendsList = (): User[] => {
     if (!currentUserId) {
@@ -924,9 +993,9 @@ export function EventsProvider({ children }: EventsProviderProps) {
     currentUserId,
     events,
     setEvents,
-    isEventPast,
+    isEventPast: isEventPastWrapper,
     normalizeMediaUrl,
-    removeSavedMemoryPost,
+    removeSavedMemoryPost: removeSavedMemoryPostWrapper,
   });
 
   // Функции профилей событий теперь находятся в useEventProfiles хуке
@@ -1093,11 +1162,11 @@ export function EventsProvider({ children }: EventsProviderProps) {
     setEventRequests,
     setChats,
     mapServerEventToClient,
-    isEventPast,
+    isEventPast: isEventPastWrapper,
     fetchEventProfile,
     refreshPendingJoinRequests,
-    syncEventsFromServer,
-    getEventParticipants,
+    syncEventsFromServer: syncEventsFromServerWrapper,
+    getEventParticipants: getEventParticipantsWrapper,
     events,
     eventProfiles,
     language,
@@ -1207,7 +1276,10 @@ export function EventsProvider({ children }: EventsProviderProps) {
     Object.values(userFriendsMap).forEach(list => list.forEach(id => ids.add(id)));
     if (currentUserId) ids.add(currentUserId);
     if (authUser?.id) ids.add(authUser.id);
-    return Array.from(ids);
+    const result = Array.from(ids);
+    // Обновляем ref для использования в других функциях
+    knownUserIdsRef.current = new Set(result);
+    return result;
   }, [events, eventProfiles, eventRequests, userDataUpdates, friends, userFriendsMap, currentUserId, authUser?.id, serverUserData]);
 
   // ========== НОВАЯ ДЕКЛАРАТИВНАЯ СИСТЕМА СОСТОЯНИЙ СОБЫТИЙ ==========
