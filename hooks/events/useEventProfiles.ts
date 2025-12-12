@@ -22,11 +22,12 @@ export interface UseEventProfilesReturn {
   getEventProfile: (eventId: string) => EventProfile | null;
   fetchEventProfile: (eventId: string) => Promise<EventProfile | null>;
   createEventProfile: (eventId: string) => Promise<void>;
-  addEventProfilePost: (eventId: string, post: Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>) => Promise<void>;
+  addEventProfilePost: (eventId: string, post: Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>) => Promise<EventProfilePost | null>;
   updateEventProfile: (eventId: string, updates: Partial<EventProfile>) => Promise<void>;
   updateEventProfilePost: (eventId: string, postId: string, updates: Partial<EventProfilePost>) => Promise<void>;
   deleteEventProfilePost: (eventId: string, postId: string) => Promise<void>;
   canEditEventProfile: (eventId: string, userId: string) => boolean;
+  addPostComment: (eventId: string, postId: string, comment: Omit<import('../../types').PostComment, 'id' | 'postId' | 'createdAt'>) => Promise<void>;
 }
 
 export const useEventProfiles = ({
@@ -84,7 +85,7 @@ export const useEventProfiles = ({
         const mappedProfile: EventProfile = {
           id: response.id || `profile-${eventId}`,
           eventId,
-          name: response.name || event?.title || response.event?.name || '',
+          name: response.name || event?.title || (typeof response.event?.name === 'string' ? response.event.name : '') || '',
           description: response.description || event?.description || response.event?.description || '',
           date: response.date || event?.date || response.event?.date || '',
           time: response.time || event?.time || response.event?.time || '',
@@ -95,13 +96,23 @@ export const useEventProfiles = ({
           }).filter(Boolean) as string[],
           organizerId: event?.organizerId || response.organizerId || response.event?.organizerId || '',
           isCompleted: response.isCompleted || false,
-          hiddenParameters: (response.hiddenParameters || {}) as Record<string, unknown>,
+          hiddenParameters: (response.hiddenParameters || {}) as Record<string, boolean>,
           posts: (response.posts || []).map((post: ServerEventProfilePost) => ({
             id: post.id,
             eventId,
-            authorId: post.authorId || post.author?.id,
+            authorId: post.authorId || post.author?.id || '',
             content: post.content,
             photoUrl: normalizeMediaUrl(post.photoUrl),
+            photoUrls: Array.isArray(post.photoUrls) ? post.photoUrls.map((url: any) => normalizeMediaUrl(url)) : undefined,
+            captions: Array.isArray(post.captions) ? post.captions : undefined,
+            caption: post.caption || (Array.isArray(post.captions) && post.captions.length > 0 ? post.captions[0] : undefined),
+            comments: Array.isArray((post as any).comments) ? (post as any).comments.map((comment: any) => ({
+              id: comment.id,
+              postId: comment.postId || post.id,
+              authorId: comment.authorId || comment.author?.id || '',
+              content: comment.content || '',
+              createdAt: comment.createdAt ? new Date(comment.createdAt) : new Date(),
+            })) : undefined,
             createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
           })),
           createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
@@ -230,11 +241,11 @@ export const useEventProfiles = ({
           }).filter(Boolean) as string[],
           organizerId: event.organizerId,
           isCompleted: response.isCompleted || false,
-          hiddenParameters: (response.hiddenParameters || {}) as Record<string, unknown>,
+          hiddenParameters: (response.hiddenParameters || {}) as Record<string, boolean>,
           posts: (response.posts || []).map((post: ServerEventProfilePost) => ({
             id: post.id,
             eventId,
-            authorId: post.authorId || post.author?.id,
+            authorId: post.authorId || post.author?.id || '',
             content: post.content,
             photoUrl: post.photoUrl,
             createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
@@ -340,6 +351,15 @@ export const useEventProfiles = ({
         response = await uploadResponse.json() as ServerEventProfilePost;
       } else {
         // Если photoUrl - уже загруженный URL или нет фото, отправляем через JSON
+        logger.debug('Отправляем запрос на создание поста с каруселью:', {
+          content: post.content,
+          photoUrl: post.photoUrl,
+          photoUrls: post.photoUrls,
+          photoUrlsCount: Array.isArray(post.photoUrls) ? post.photoUrls.length : 0,
+          captions: post.captions,
+          captionsCount: Array.isArray(post.captions) ? post.captions.length : 0,
+        });
+        
         response = await apiRequest(
           `/events/${eventId}/profile/posts`,
           {
@@ -347,28 +367,75 @@ export const useEventProfiles = ({
             body: JSON.stringify({
               content: post.content,
               photoUrl: post.photoUrl,
+              photoUrls: post.photoUrls,
+              captions: post.captions,
             }),
           },
           actualToken,
         ) as ServerEventProfilePost | null;
+        
+        logger.debug('Ответ от сервера:', {
+          hasResponse: !!response,
+          responseType: typeof response,
+          responseId: response?.id,
+          responsePhotoUrls: response?.photoUrls,
+          responsePhotoUrlsType: typeof response?.photoUrls,
+          responsePhotoUrlsIsArray: Array.isArray(response?.photoUrls),
+          fullResponse: JSON.stringify(response, null, 2),
+        });
+      }
+
+      if (!response) {
+        logger.error('❌ Сервер не вернул ответ при создании поста');
+        return null;
       }
 
       if (response) {
+        logger.debug('Создан новый пост:', {
+          id: response.id,
+          hasPhotoUrl: !!response.photoUrl,
+          hasPhotoUrls: !!response.photoUrls,
+          photoUrlsType: typeof response.photoUrls,
+          photoUrlsValue: response.photoUrls,
+          photoUrlsLength: Array.isArray(response.photoUrls) ? response.photoUrls.length : 0,
+        });
+        
         const newPost: EventProfilePost = {
           id: response.id,
           eventId,
-          authorId: response.authorId || response.author?.id || currentUserId,
+          authorId: response.authorId || response.author?.id || currentUserId || '',
           content: response.content,
           photoUrl: normalizeMediaUrl(response.photoUrl),
+          photoUrls: Array.isArray(response.photoUrls) ? response.photoUrls.map((url: any) => normalizeMediaUrl(url)) : undefined,
+          captions: Array.isArray(response.captions) ? response.captions : undefined,
+          caption: response.caption || (Array.isArray(response.captions) && response.captions.length > 0 ? response.captions[0] : undefined),
+          comments: Array.isArray((response as any).comments) ? (response as any).comments.map((comment: any) => ({
+            id: comment.id,
+            postId: comment.postId || response.id,
+            authorId: comment.authorId || comment.author?.id || '',
+            content: comment.content || '',
+            createdAt: comment.createdAt ? new Date(comment.createdAt) : new Date(),
+          })) : undefined,
           createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
         };
+        
+        logger.debug('Создан EventProfilePost:', {
+          id: newPost.id,
+          hasPhotoUrl: !!newPost.photoUrl,
+          hasPhotoUrls: !!newPost.photoUrls,
+          photoUrlsLength: Array.isArray(newPost.photoUrls) ? newPost.photoUrls.length : 0,
+        });
 
         setEventProfiles(prev => prev.map(profile => 
           profile.eventId === eventId 
             ? { ...profile, posts: [newPost, ...profile.posts] }
             : profile
         ));
+        
+        return newPost;
       }
+      
+      return null;
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 404) {
@@ -398,7 +465,7 @@ export const useEventProfiles = ({
               const uploadResponse = await fetch(`${API_BASE_URL}/events/${eventId}/profile/posts`, {
                 method: 'POST',
                 headers: {
-                  'Authorization': `Bearer ${accessToken}`,
+                  'Authorization': `Bearer ${actualToken}`,
                   // НЕ устанавливаем Content-Type - React Native сделает это автоматически для FormData
                 },
                 body: formData,
@@ -424,9 +491,11 @@ export const useEventProfiles = ({
                   body: JSON.stringify({
                     content: post.content,
                     photoUrl: post.photoUrl,
+                    photoUrls: post.photoUrls,
+                    captions: post.captions,
                   }),
                 },
-                accessToken,
+                actualToken,
               );
             }
             
@@ -435,9 +504,19 @@ export const useEventProfiles = ({
               const newPost: EventProfilePost = {
                 id: response.id,
                 eventId,
-                authorId: response.authorId || response.author?.id || currentUserId,
+                authorId: response.authorId || response.author?.id || currentUserId || '',
                 content: response.content,
-                photoUrl: response.photoUrl,
+                photoUrl: normalizeMediaUrl(response.photoUrl),
+                photoUrls: Array.isArray(response.photoUrls) ? response.photoUrls.map((url: any) => normalizeMediaUrl(url)) : undefined,
+                captions: Array.isArray(response.captions) ? response.captions : undefined,
+                caption: response.caption || (Array.isArray(response.captions) && response.captions.length > 0 ? response.captions[0] : undefined),
+                comments: Array.isArray((response as any).comments) ? (response as any).comments.map((comment: any) => ({
+                  id: comment.id,
+                  postId: comment.postId || response.id,
+                  authorId: comment.authorId || comment.author?.id || '',
+                  content: comment.content || '',
+                  createdAt: comment.createdAt ? new Date(comment.createdAt) : new Date(),
+                })) : undefined,
                 createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
               };
               setEventProfiles(prev => prev.map(profile => 
@@ -445,18 +524,23 @@ export const useEventProfiles = ({
                   ? { ...profile, posts: [newPost, ...profile.posts] }
                   : profile
               ));
+              return newPost;
             }
+            return null;
           } catch (retryError) {
             logger.error('Failed to add event profile post after profile creation', retryError);
+            return null;
           }
         } else {
           logger.error('Failed to add event profile post', error.status, error.message);
+          return null;
         }
       } else {
         logger.error('Failed to add event profile post', error);
+        return null;
       }
     }
-  }, [eventProfiles, createEventProfile, normalizeMediaUrl]);
+  }, [eventProfiles, createEventProfile, normalizeMediaUrl, currentUserId]);
 
   const updateEventProfile = useCallback(async (eventId: string, updates: Partial<EventProfile>) => {
     const actualToken = currentAccessTokenRef.current;
@@ -494,18 +578,18 @@ export const useEventProfiles = ({
           id: response.id || `profile-${eventId}`,
           eventId,
           name: response.name || updates.name || '',
-          description: response.description ?? updates.description,
+          description: (response.description ?? updates.description) || '',
           date: response.date || updates.date || '',
           time: response.time || updates.time || '',
-          location: response.location ?? updates.location,
+          location: (response.location ?? updates.location) || '',
           participants: (response.participants || []).map((p: any) => p.userId || p.user?.id).filter(Boolean),
           organizerId: updates.organizerId || '',
           isCompleted: response.isCompleted ?? updates.isCompleted ?? false,
-          hiddenParameters: response.hiddenParameters || updates.hiddenParameters || {},
+          hiddenParameters: (response.hiddenParameters || updates.hiddenParameters || {}) as Record<string, boolean>,
           posts: (response.posts || []).map((post: any) => ({
             id: post.id,
             eventId,
-            authorId: post.authorId || post.author?.id,
+            authorId: post.authorId || post.author?.id || '',
             content: post.content,
             photoUrl: normalizeMediaUrl(post.photoUrl),
             createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
@@ -538,17 +622,17 @@ export const useEventProfiles = ({
                 id: response.id || `profile-${eventId}`,
                 eventId,
                 name: response.name || updates.name || '',
-                description: response.description ?? updates.description,
+                description: (response.description ?? updates.description) || '',
                 date: response.date || updates.date || '',
                 time: response.time || updates.time || '',
-                location: response.location ?? updates.location,
+                location: (response.location ?? updates.location) || '',
                 participants: (response.participants || []).map((p: any) => p.userId || p.user?.id).filter(Boolean),
                 organizerId: updates.organizerId || '',
                 isCompleted: response.isCompleted ?? updates.isCompleted ?? false,
                 posts: (response.posts || []).map((post: any) => ({
                   id: post.id,
                   eventId,
-                  authorId: post.authorId || post.author?.id,
+                  authorId: post.authorId || post.author?.id || '',
                   content: post.content,
                   photoUrl: normalizeMediaUrl(post.photoUrl),
                   createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
@@ -728,6 +812,57 @@ export const useEventProfiles = ({
     return true;
   }, [events, eventProfiles, isEventPast]);
 
+  const addPostComment = useCallback(async (eventId: string, postId: string, comment: Omit<import('../../types').PostComment, 'id' | 'postId' | 'createdAt'>) => {
+    const actualToken = currentAccessTokenRef.current;
+    const actualUserId = currentUserIdRef.current;
+    if (!actualToken || !actualUserId) {
+      logger.warn('Cannot add comment: no access');
+      return;
+    }
+
+    try {
+      const response = await apiRequest(
+        `/events/${eventId}/profile/posts/${postId}/comments`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            content: comment.content,
+          }),
+        },
+        actualToken,
+      ) as any;
+
+      if (response) {
+        const newComment: import('../../types').PostComment = {
+          id: response.id,
+          postId,
+          authorId: response.authorId || response.author?.id || actualUserId || '',
+          content: response.content || '',
+          createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
+        };
+
+        setEventProfiles(prev => prev.map(profile => 
+          profile.eventId === eventId 
+            ? {
+                ...profile,
+                posts: profile.posts.map(post =>
+                  post.id === postId
+                    ? {
+                        ...post,
+                        comments: [...(post.comments || []), newComment],
+                      }
+                    : post
+                ),
+              }
+            : profile
+        ));
+      }
+    } catch (error) {
+      logger.error('Failed to add post comment', error);
+      throw error;
+    }
+  }, [setEventProfiles]);
+
   return {
     eventProfiles,
     setEventProfiles,
@@ -739,6 +874,7 @@ export const useEventProfiles = ({
     updateEventProfilePost,
     deleteEventProfilePost,
     canEditEventProfile,
+    addPostComment,
   };
 };
 

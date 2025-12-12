@@ -235,4 +235,64 @@ export class ChatsService {
 
     return chat;
   }
+
+  async deleteChat(userId: string, chatId: string, leaveEvent: boolean = false) {
+    const chat = await this.prisma.chat.findUnique({
+      where: { id: chatId },
+      include: {
+        participants: true,
+        event: true,
+      },
+    });
+
+    if (!chat) {
+      throw new ForbiddenException('Chat not found');
+    }
+
+    // Проверяем, что пользователь является участником чата
+    const participant = await this.prisma.chatParticipant.findUnique({
+      where: { chatId_userId: { chatId, userId } },
+    });
+
+    if (!participant) {
+      throw new ForbiddenException('You are not a participant of this chat');
+    }
+
+    // Если это чат события и leaveEvent=true, выходим из события
+    if (chat.type === 'EVENT' && chat.eventId && leaveEvent) {
+      // Импортируем EventsService для выхода из события
+      // Для этого нужно использовать dependency injection или вызвать через другой сервис
+      // Пока оставляем логику выхода из события на клиенте
+    }
+
+    // Удаляем участника из чата
+    await this.prisma.chatParticipant.delete({
+      where: { chatId_userId: { chatId, userId } },
+    });
+
+    // Проверяем, остались ли участники в чате
+    const remainingParticipants = await this.prisma.chatParticipant.findMany({
+      where: { chatId },
+    });
+
+    // Если участников не осталось - удаляем чат полностью
+    if (remainingParticipants.length === 0) {
+      await this.prisma.$transaction(async (tx) => {
+        // Удаляем все сообщения
+        await tx.message.deleteMany({ where: { chatId } });
+        // Удаляем все связи с папками
+        await tx.folderChat.deleteMany({ where: { chatId } });
+        // Удаляем ключ личного чата, если есть
+        await tx.personalChatKey.deleteMany({ where: { chatId } });
+        // Удаляем чат
+        await tx.chat.delete({ where: { id: chatId } });
+      });
+    }
+
+    // Отправляем WebSocket событие об обновлении чатов
+    const allParticipantIds = chat.participants.map(p => p.userId);
+    this.websocketService.emitToUsers(allParticipantIds, 'chats:update', {});
+
+    return { success: true, chatDeleted: remainingParticipants.length === 0 };
+  }
 }

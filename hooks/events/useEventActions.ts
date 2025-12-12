@@ -1,6 +1,7 @@
 import { useCallback, useRef, useEffect } from 'react';
 import { apiRequest, ApiError, API_BASE_URL } from '../../services/api';
-import type { Event, CreateEventInput, EventProfile, EventRequest, Chat } from '../../types';
+import type { Event, EventProfile, EventRequest, Chat } from '../../types';
+import type { CreateEventInput } from '../../context/EventsContext';
 import type { ServerUser, ServerEvent } from '../../types/api';
 import { createLogger } from '../../utils/logger';
 
@@ -408,6 +409,7 @@ export function useEventActions({
             tags: response.customTags || [],
             isRecurring: response.isRecurring || false,
             invitedUsers: input.invitedUsers,
+            createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
           };
           setEvents(prev => [mapped, ...prev.filter(event => event.id !== mapped.id)]);
           return mapped;

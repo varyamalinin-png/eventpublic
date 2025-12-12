@@ -193,6 +193,17 @@ export interface ServerEventProfilePost {
   author?: ServerUser;
   content?: string;
   photoUrl?: string;
+  photoUrls?: string[];
+  captions?: string[];
+  caption?: string;
+  comments?: Array<{
+    id: string;
+    postId: string;
+    authorId: string;
+    author?: ServerUser;
+    content: string;
+    createdAt?: string;
+  }>;
   createdAt?: string;
   [key: string]: unknown;
 }

@@ -16,7 +16,6 @@ function AuthenticatedStack() {
       <Stack.Screen name="calendar" />
       <Stack.Screen name="map" />
       <Stack.Screen name="profile/[id]" />
-      <Stack.Screen name="event/[id]" />
       <Stack.Screen name="friends-list" />
       <Stack.Screen name="friends-list/[id]" />
       <Stack.Screen name="event-profile/[id]" />

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Patch, UseGuards, Delete, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Patch, UseGuards, Delete, UseInterceptors, UploadedFile, ValidationPipe } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { createLogger } from '../shared/utils/logger';
 import { memoryStorage } from 'multer';
@@ -96,7 +96,7 @@ export class EventProfilesController {
   )
   async addPost(
     @Param('eventId') eventId: string,
-    @Body() dto: CreateEventProfilePostDto,
+    @Body(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: false, transform: true })) dto: CreateEventProfilePostDto,
     @UploadedFile() file: Express.Multer.File | undefined,
     @RequestUser('userId') userId: string,
   ) {
@@ -104,9 +104,13 @@ export class EventProfilesController {
       logger.info(`📤 POST add post for eventId: ${eventId}, userId: ${userId}`);
       logger.debug(`DTO: ${JSON.stringify(dto, null, 2)}`);
       logger.debug(`File received: ${file ? `yes (${file.mimetype}, ${file.size} bytes)` : 'no'}`);
+      logger.debug(`photoUrls in DTO: ${dto.photoUrls ? JSON.stringify(dto.photoUrls) : 'none'}`);
+      logger.debug(`captions in DTO: ${dto.captions ? JSON.stringify(dto.captions) : 'none'}`);
       
       // Если пришел файл, загружаем в сторедж и подставляем публичный URL
-      if (file && file.buffer && file.mimetype) {
+      // ВАЖНО: если есть photoUrls в DTO, это значит что файлы уже загружены и мы создаем финальный пост с каруселью
+      // В этом случае НЕ перезаписываем photoUrl из файла
+      if (file && file.buffer && file.mimetype && !dto.photoUrls) {
         logger.info(`📤 Uploading file to storage...`);
         const publicUrl = await this.storageService.uploadEventMedia(userId, {
           buffer: file.buffer,
@@ -119,6 +123,8 @@ export class EventProfilesController {
         if (!dto.content) {
           dto.content = publicUrl;
         }
+      } else if (file && dto.photoUrls) {
+        logger.warn(`⚠️ File received but photoUrls already in DTO - ignoring file (this is for carousel final post)`);
       }
       
       const result = await this.eventProfilesService.addPost(eventId, userId, dto);
@@ -126,6 +132,25 @@ export class EventProfilesController {
       return result;
     } catch (error) {
       logger.error(`Error adding post: ${error?.message}`, error?.stack);
+      throw error;
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('posts/:postId/comments')
+  async addComment(
+    @Param('eventId') eventId: string,
+    @Param('postId') postId: string,
+    @Body() dto: { content: string },
+    @RequestUser('userId') userId: string,
+  ) {
+    try {
+      logger.info(`📤 POST add comment for postId: ${postId}, userId: ${userId}`);
+      const result = await this.eventProfilesService.addComment(eventId, postId, userId, dto.content);
+      logger.info(`Comment added successfully: ${result?.id}`);
+      return result;
+    } catch (error) {
+      logger.error(`Error adding comment: ${error?.message}`, error?.stack);
       throw error;
     }
   }

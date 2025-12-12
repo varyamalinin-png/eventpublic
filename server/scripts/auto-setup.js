@@ -36,7 +36,7 @@ async function autoSetup() {
     if (smtpHost && smtpPort && smtpUser && smtpPassword) {
       console.log('   ✅ SMTP настроен правильно');
     } else {
-      console.log('   ⚠️ SMTP не настроен. Настройте переменные окружения в Railway.');
+      console.log('   ⚠️ SMTP не настроен. Настройте переменные окружения на Yandex Cloud VM.');
     }
     
     console.log('\n✅ НАСТРОЙКА ЗАВЕРШЕНА\n');

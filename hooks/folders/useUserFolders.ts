@@ -223,6 +223,9 @@ export const useUserFolders = ({
       return;
     }
 
+    const actualToken = currentAccessTokenRef.current;
+    if (!actualToken) return;
+    
     try {
       await apiRequest(
         `/user-folders/${folderId}`,

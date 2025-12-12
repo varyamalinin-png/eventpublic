@@ -41,6 +41,7 @@ enum NotificationType {
   EVENT_PARTICIPANT_JOINED
   EVENT_PARTICIPANT_LEFT
   EVENT_POST_ADDED
+  EVENT_ORGANIZER_TRANSFERRED
 }
 
 enum ComplaintType {
@@ -96,6 +97,7 @@ model User {
   eventProfilePosts        EventProfilePost[]        @relation("EventProfilePostAuthor")
   eventProfileParticipants EventProfileParticipant[] @relation("EventProfileParticipant")
   eventParticipations      UserEventParticipation[]  @relation("UserEventParticipation")
+  postComments             PostComment[]             @relation("PostCommentAuthor")
   notifications            Notification[]
   refreshTokens            RefreshToken[]
   emailVerificationTokens  EmailVerificationToken[]
@@ -124,6 +126,8 @@ model Event {
   recurringDays        Int[] // Для weekly: дни недели (0-6)
   recurringDayOfMonth  Int? // Для monthly: день месяца (1-31)
   recurringCustomDates DateTime[] // Для custom: выбранные даты
+  // Поле для массового события
+  isMassEvent          Boolean    @default(false)
   // Метки (теги)
   autoTags             String[]   @default([]) // Системные метки: 'women_only', 'age_18_plus', 'starting_soon', 'recurring'
   customTags           String[]   @default([]) // Пользовательские метки
@@ -206,12 +210,29 @@ model EventProfilePost {
   profileId String
   authorId  String
   content   String?
-  photoUrl  String?
+  photoUrl  String?  // Для обратной совместимости
+  photoUrls Json?    // Массив URL для карусели
+  captions  Json?    // Массив описаний для каждого фото
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   profile EventProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
   author  User         @relation("EventProfilePostAuthor", fields: [authorId], references: [id])
+  comments PostComment[]
+}
+
+model PostComment {
+  id        String   @id @default(uuid())
+  postId    String
+  authorId  String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  post   EventProfilePost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User             @relation("PostCommentAuthor", fields: [authorId], references: [id])
+
+  @@index([postId])
 }
 
 model EventProfileParticipant {

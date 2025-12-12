@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsUrl, MaxLength, IsBoolean, IsDateString, IsIn } from 'class-validator';
+import { IsOptional, IsString, IsUrl, MaxLength, MinLength, Matches, IsBoolean, IsDateString, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class UpdateUserDto {
@@ -10,6 +10,10 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   @MaxLength(32)
+  @MinLength(3, { message: 'Username must be at least 3 characters' })
+  @Matches(/^[a-zA-Z0-9_\.]+$/, {
+    message: 'Username may contain letters, numbers, underscores and dots',
+  })
   username?: string;
 
   @IsOptional()

@@ -96,6 +96,11 @@ export class CreateEventDto {
   @IsDateString({}, { each: true })
   recurringCustomDates?: string[]; // Для custom: выбранные даты
 
+  // Поле для массового события
+  @IsOptional()
+  @IsBoolean()
+  isMassEvent?: boolean;
+
   // Метки (теги)
   @IsOptional()
   @IsArray()

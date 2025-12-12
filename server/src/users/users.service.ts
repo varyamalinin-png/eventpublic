@@ -32,6 +32,7 @@ export class UsersService {
         avatarUrl: true,
         settings: true,
         googleId: true,
+        role: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -64,6 +65,7 @@ export class UsersService {
         avatarUrl: true,
         settings: true,
         googleId: true,
+        role: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -99,6 +101,7 @@ export class UsersService {
           settings: true,
           googleId: true,
           accountType: true,
+          role: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -114,6 +117,15 @@ export class UsersService {
   async updateProfile(id: string, data: UpdateUserDto) {
     try {
       const updateData: any = { ...data };
+      
+      // КРИТИЧЕСКИ ВАЖНО: Защита от установки username в пустую строку или "user"
+      // Если username передан, но он пустой или равен "user", не обновляем его
+      if ('username' in updateData) {
+        if (!updateData.username || updateData.username.trim() === '' || updateData.username === 'user') {
+          delete updateData.username; // Не обновляем username, если он пустой или "user"
+        }
+      }
+      
       // Преобразуем dateOfBirth из строки в Date, если она есть
       if (updateData.dateOfBirth && typeof updateData.dateOfBirth === 'string') {
         updateData.dateOfBirth = new Date(updateData.dateOfBirth);
@@ -136,6 +148,7 @@ export class UsersService {
           avatarUrl: true,
           settings: true,
           googleId: true,
+          role: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -167,6 +180,7 @@ export class UsersService {
         avatarUrl: true,
         settings: true,
         googleId: true,
+        role: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -308,6 +322,7 @@ export class UsersService {
         avatarUrl: true,
         settings: true,
         googleId: true,
+        role: true,
         createdAt: true,
         updatedAt: true,
       },

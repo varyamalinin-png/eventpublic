@@ -37,10 +37,15 @@ export class ApiError extends Error {
 
 async function parseResponse(response: Response) {
   const text = await response.text();
-  if (!text) return null;
+  if (!text) {
+    console.log(`[API] Empty response body for ${response.url}`);
+    return null;
+  }
   try {
-    return JSON.parse(text);
-  } catch {
+    const parsed = JSON.parse(text);
+    return parsed;
+  } catch (e) {
+    console.log(`[API] Failed to parse JSON response:`, e, text);
     return text;
   }
 }
@@ -81,6 +86,19 @@ export async function apiRequest(
     if (!response.ok) {
       const message = typeof body === 'string' ? body : body?.message || 'API error';
       throw new ApiError(message, response.status, body);
+    }
+
+    // Логируем ответ для отладки
+    if (path.includes('/profile/posts') && response.status === 201) {
+      console.log(`[API] Response body for POST /profile/posts:`, {
+        hasBody: !!body,
+        bodyType: typeof body,
+        bodyKeys: body && typeof body === 'object' ? Object.keys(body) : null,
+        bodyId: body?.id,
+        bodyPhotoUrls: body?.photoUrls,
+        bodyPhotoUrlsType: typeof body?.photoUrls,
+        bodyPhotoUrlsIsArray: Array.isArray(body?.photoUrls),
+      });
     }
 
     return body;

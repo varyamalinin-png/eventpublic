@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ChatsService } from './chats.service';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { RequestUser } from '../shared/decorators/request-user.decorator';
@@ -43,5 +43,14 @@ export class ChatsController {
     @Body() body: { otherUserId: string },
   ) {
     return this.chatsService.createPersonalChat(userId, body.otherUserId);
+  }
+
+  @Delete(':chatId')
+  async deleteChat(
+    @RequestUser('userId') userId: string,
+    @Param('chatId') chatId: string,
+    @Body() body?: { leaveEvent?: boolean },
+  ) {
+    return this.chatsService.deleteChat(userId, chatId, body?.leaveEvent || false);
   }
 }

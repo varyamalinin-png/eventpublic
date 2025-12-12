@@ -9,8 +9,8 @@ const logger = createLogger('Chats');
 // Утилиты для маппинга данных с сервера
 export const mapServerMessageToClient = (message: ServerChatMessage): ChatMessage => ({
   id: message.id,
-  chatId: message.chatId,
-  fromUserId: message.senderId ?? message.fromUserId,
+  chatId: message.chatId || '',
+  fromUserId: message.senderId ?? message.fromUserId ?? '',
   text: message.content ?? undefined,
   eventId: message.eventId ?? undefined,
   createdAt: message.createdAt ? new Date(message.createdAt) : new Date(),
@@ -358,6 +358,10 @@ export function useChats({
         });
 
         return mappedChat.id;
+      } else {
+        // Если ответ пустой, создаем локальный ID
+        const localId = `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        return localId;
       }
     } catch (error) {
       logger.warn('Failed to create personal chat on server, creating locally', error);

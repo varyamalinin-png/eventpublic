@@ -1,6 +1,6 @@
 import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, Modal, ScrollView, Alert, InteractionManager, TextInput } from 'react-native';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Link, useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -80,6 +80,7 @@ export default function EventCard({
     getUserData, 
     sendEventRequest, 
     getEventParticipants,
+    getEventProfile,
     isUserEventMember,
     isEventPast,
     getEventPhotoForUser,
@@ -106,6 +107,16 @@ export default function EventCard({
     rejectInvitation,
     updateEventProfile
   } = useEvents();
+  
+  // Получаем событие из контекста
+  const event = useMemo(() => events.find(e => e.id === id), [events, id]);
+  
+  // Загружаем из профиля события при монтировании
+  const eventProfile = useMemo(() => {
+    const foundEvent = events.find(e => e.id === id);
+    return foundEvent ? getEventProfile(id) : null;
+  }, [events, id, getEventProfile]);
+  
   const [showParticipants, setShowParticipants] = useState(false);
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
   const [showEventActionsModal, setShowEventActionsModal] = useState(false);
@@ -117,9 +128,6 @@ export default function EventCard({
   const [showImageModal, setShowImageModal] = useState(false);
   // Состояние для режима редактирования видимости параметров (только для прошедших событий в меморис)
   const [isEditingParameterVisibility, setIsEditingParameterVisibility] = useState(false);
-  // Состояние для скрытых параметров (ключ - название параметра, значение - скрыт ли)
-  // Загружаем из профиля события при монтировании
-  const eventProfile = event ? getEventProfile(id) : null;
   const [hiddenParameters, setHiddenParameters] = useState<Record<string, boolean>>(
     (eventProfile as any)?.hiddenParameters || {}
   );
@@ -135,20 +143,19 @@ export default function EventCard({
   const [showSwipeButtons, setShowSwipeButtons] = useState(false);
   const swipeX = useRef(0); // Отслеживаем текущее значение свайпа
   
-  const event = useEvents().events.find(e => e.id === id);
   const { t, language } = useLanguage();
   
   // Отладочная информация для тегов
   const allTags = tags && tags.length > 0 ? tags : (event?.tags && event.tags.length > 0 ? event.tags : []);
-  if (allTags.length > 0 && __DEV__) {
+  if (allTags.length > 0 && (typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production')) {
     logger.debug(`Tags for event ${id}:`, { allTags, tagsProp: tags, eventTags: event?.tags });
   }
   
   // Используем новую функцию getUserRelationship для определения отношений
-  const relationship = event ? getUserRelationship(event, currentUserId) : 'non_member';
-  const userRole = event ? getUserRequestStatus(event, currentUserId) : 'not_requested';
+  const relationship = event && currentUserId ? getUserRelationship(event, currentUserId) : 'non_member';
+  const userRole = event && currentUserId ? getUserRequestStatus(event, currentUserId) : 'not_requested';
   const isOrganizer = relationship === 'organizer';
-  const isMember = event ? isUserEventMember(event, currentUserId) : false;
+  const isMember = event && currentUserId ? isUserEventMember(event, currentUserId) : false;
   const eventParticipants = event ? getEventParticipants(id) : [];
   const participantsCount = eventParticipants.length;
   
@@ -747,7 +754,7 @@ export default function EventCard({
       
       logger.debug('Галерея вернула результат:', { hasResult: !!result, canceled: result?.canceled });
 
-      if (!result.canceled && result.assets && result.assets[0]) {
+      if (result && !result.canceled && result.assets && result.assets[0] && currentUserId) {
         logger.debug('Сохраняем фото:', result.assets[0].uri);
         setPersonalEventPhoto(id, currentUserId, result.assets[0].uri);
         Alert.alert('Успешно', 'Фото события изменено');
@@ -822,7 +829,9 @@ export default function EventCard({
         
       case 'cancel_request':
         // Отмена запроса
-        cancelEventRequest(id, currentUserId);
+        if (currentUserId) {
+          cancelEventRequest(id, currentUserId);
+        }
         // Возвращаем карточку на место
         setShowSwipeButtons(false);
         Animated.spring(translateX, {
@@ -833,7 +842,9 @@ export default function EventCard({
         
       case 'cancel_participation':
         // Отмена участия
-        cancelEventParticipation(id, currentUserId);
+        if (currentUserId) {
+          cancelEventParticipation(id, currentUserId);
+        }
         setShowSwipeButtons(false);
         Animated.spring(translateX, {
           toValue: 0,
@@ -887,7 +898,9 @@ export default function EventCard({
     
     switch (swipeButtons.secondary.type) {
       case 'cancel_request':
-        cancelEventRequest(id, currentUserId);
+        if (currentUserId) {
+          cancelEventRequest(id, currentUserId);
+        }
         setShowSwipeButtons(false);
         Animated.spring(translateX, {
           toValue: 0,
@@ -896,7 +909,9 @@ export default function EventCard({
         break;
         
       case 'cancel_participation':
-        cancelEventParticipation(id, currentUserId);
+        if (currentUserId) {
+          cancelEventParticipation(id, currentUserId);
+        }
         setShowSwipeButtons(false);
         Animated.spring(translateX, {
           toValue: 0,
@@ -957,14 +972,18 @@ export default function EventCard({
     }
     if (organizerId !== currentUserId) {
       // Если пользователь не организатор - отправляем заявку
-      sendEventRequest(id, currentUserId);
+      if (currentUserId) {
+        sendEventRequest(id, currentUserId);
+      }
       setIsJoined(true);
     } else {
       // Если пользователь организатор - добавляем в событие напрямую
-      updateEvent(id, {
-        participants: participants + 1,
-        participantsList: [...participantsList, getUserData(currentUserId).avatar],
-      });
+      if (currentUserId) {
+        updateEvent(id, {
+          participants: participants + 1,
+          participantsList: [...participantsList, getUserData(currentUserId)?.avatar || ''],
+        });
+      }
       setIsJoined(true);
     }
     
@@ -1059,7 +1078,7 @@ export default function EventCard({
                   onError={(error) => {
                     // Silently handle image loading errors - fallback background will be shown
                     // Only log in development if needed
-                    if (__DEV__) {
+                    if (typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production') {
                       const errorMsg = error?.nativeEvent?.error || 'Unknown error';
                       logger.warn('Error loading mini photo', { error: errorMsg, url: miniPhoto });
                     }
@@ -1209,7 +1228,7 @@ export default function EventCard({
                     <TouchableOpacity 
                       style={[
                         styles.mediaContainerHorizontal,
-                        { height: photoHeightPercent }
+                        { height: photoHeightPercent as any }
                       ]}
                       onPress={() => {
                         const originalUrl = originalMediaUrl || event?.originalMediaUrl || displayMediaUrl;
@@ -1654,11 +1673,15 @@ export default function EventCard({
                       setShowEventActionsModal(false);
                     } else if (action.id === 'cancel_request') {
                       // Отмена запроса (waiting → non_member)
-                      cancelEventRequest(id, currentUserId);
+                      if (currentUserId) {
+                        cancelEventRequest(id, currentUserId);
+                      }
                       setShowEventActionsModal(false);
                     } else if (action.id === 'cancel_participation') {
                       // Отмена участия (accepted → non_member)
-                      cancelEventParticipation(id, currentUserId);
+                      if (currentUserId) {
+                        cancelEventParticipation(id, currentUserId);
+                      }
                       setShowEventActionsModal(false);
                     } else if (action.id === 'cancel_event') {
                       // Отмена события (organizer, ≤2 участников)
@@ -1806,7 +1829,7 @@ export default function EventCard({
             <ScrollView style={styles.shareModalScrollView}>
               {/* Чаты */}
               <Text style={styles.shareModalSectionTitle}>Чаты</Text>
-              {getChatsForUser(currentUserId)
+              {(currentUserId ? getChatsForUser(currentUserId) : [])
                 .filter(chat => 
                   chat.name.toLowerCase().includes(shareSearchQuery.toLowerCase())
                 )
@@ -1858,9 +1881,9 @@ export default function EventCard({
                 )
                 .map(friend => {
                   // Находим существующий личный чат
-                  const existingChat = getChatsForUser(currentUserId).find(
+                  const existingChat = currentUserId ? getChatsForUser(currentUserId).find(
                     chat => chat.type === 'personal' && chat.participants.includes(friend.id)
-                  );
+                  ) : undefined;
                   const chatId = existingChat ? existingChat.id : null;
                   // Используем friend.id как ключ для отслеживания выбранных друзей
                   const friendKey = `friend_${friend.id}`;
@@ -1949,7 +1972,6 @@ export default function EventCard({
               <Text style={styles.shareModalTitle}>{t.events.selectDate || 'Выберите дату'}</Text>
               <TouchableOpacity
                 onPress={() => setShowRecurringDatesModal(false)}
-                style={styles.shareModalCloseButton}
               >
                 <Text style={styles.shareModalCloseButton}>✕</Text>
               </TouchableOpacity>
@@ -1990,8 +2012,10 @@ export default function EventCard({
                                   return;
                                 }
                                 try {
-                                  await sendEventRequest(id, currentUserId);
-                                  Alert.alert(t.common.success || 'Успешно', t.events.requestSent || 'Запрос отправлен');
+                                  if (currentUserId) {
+                                    await sendEventRequest(id, currentUserId);
+                                    Alert.alert(t.common.success || 'Успешно', t.events.requestSent || 'Запрос отправлен');
+                                  }
                                 } catch (error) {
                                   logger.error('Failed to send event request', error);
                                   Alert.alert(t.common.error || 'Ошибка', t.events.failedToSendRequest || 'Не удалось отправить запрос');
@@ -2023,7 +2047,9 @@ export default function EventCard({
                                 // Отправляем запросы на все будущие даты
                                 for (const dateItem of futureDates) {
                                   try {
-                                    await sendEventRequest(id, currentUserId);
+                                    if (currentUserId) {
+                                      await sendEventRequest(id, currentUserId);
+                                    }
                                   } catch (error) {
                                     logger.warn(`Failed to send request for date ${dateItem.date}`, error);
                                   }
@@ -2045,7 +2071,7 @@ export default function EventCard({
                     )}
                     
                     {/* Прошедшие даты (опционально, для информации) */}
-                    {pastDates.length > 0 && __DEV__ && (
+                    {pastDates.length > 0 && (typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production') && (
                       <>
                         <Text style={[styles.recurringDatesSectionTitle, { opacity: 0.5, marginTop: 20 }]}>
                           {t.events.pastDates || 'Прошедшие даты'} ({pastDates.length})

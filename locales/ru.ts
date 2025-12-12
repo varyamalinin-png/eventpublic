@@ -200,6 +200,7 @@ export const ru = {
       savedMemories: 'Сохраненные меморис',
       noSaved: 'Нет сохраненных',
       eventsCount: 'событий',
+      memoriesCount: 'меморис',
     },
 
     languageRegion: {
@@ -343,6 +344,7 @@ export const ru = {
     changeVisibility: 'Изменить видимость',
     cancelEvent: 'Отменить событие',
     cancelParticipation: 'Отменить участие',
+    transferOrganizerRole: 'Передать роль организатора',
     viewRequests: 'Перейти в "Исходящие"',
     cancelRequest: 'Отменить запрос',
     invite: 'Пригласить',
@@ -367,6 +369,16 @@ export const ru = {
     deleteEvent: 'Удалить',
     deleteEventConfirm: 'Вы уверены, что хотите удалить это событие?',
     eventDeleted: 'Событие удалено',
+    deleteError: 'Не удалось удалить событие',
+    selectDate: 'Выберите дату',
+    upcomingDates: 'Предстоящие даты',
+    requestSent: 'Запрос отправлен',
+    failedToSendRequest: 'Не удалось отправить запрос',
+    requestPending: 'Запрос отправлен',
+    allRequestsSent: 'Запросы на все даты отправлены',
+    failedToSendRequests: 'Не удалось отправить запросы',
+    scheduleAllDates: 'Запланировать все даты',
+    pastDates: 'Прошедшие даты',
   },
 
   // Create Event
@@ -434,6 +446,7 @@ export const ru = {
     exampleLocation: 'Например: Центральный парк',
     examplePrice: 'Например: 500 руб или Бесплатно',
     inviteSection: 'Пригласить',
+    invite: 'Пригласить',
     participantsSection: 'Участники',
     mediaSection: 'Медиа',
     defaultEventTitle: 'Название события',
@@ -484,22 +497,6 @@ export const ru = {
         personal: 'Личные',
         all: 'Все',
       },
-
-  // Explore
-  explore: {
-    createFolder: 'Создать папку',
-    filterLabelParticipants: 'Участники:',
-  },
-
-  // Request Item
-  requestItem: {
-    sentFriendRequest: 'отправили заявку в друзья к',
-    sentJoinRequest: 'отправили заявку на участие в событии',
-    sentInvite: 'пригласили',
-    toEvent: 'на',
-    wantsToBeFriend: 'хочет быть вашим другом',
-    invitedYouToEvent: 'пригласил(а) вас на событие',
-  },
 
   // Participants Modal
   participantsModal: {

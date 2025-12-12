@@ -200,6 +200,7 @@ export const en = {
       savedMemories: 'Saved memories',
       noSaved: 'No saved events',
       eventsCount: 'events',
+      memoriesCount: 'memories',
     },
 
     languageRegion: {
@@ -343,6 +344,7 @@ export const en = {
     changeVisibility: 'Change visibility',
     cancelEvent: 'Cancel event',
     cancelParticipation: 'Cancel participation',
+    transferOrganizerRole: 'Transfer organizer role',
     viewRequests: 'Go to "Outgoing"',
     cancelRequest: 'Cancel request',
     invite: 'Invite',
@@ -367,6 +369,16 @@ export const en = {
     deleteEvent: 'Delete',
     deleteEventConfirm: 'Are you sure you want to delete this event?',
     eventDeleted: 'Event deleted',
+    deleteError: 'Failed to delete event',
+    selectDate: 'Select date',
+    upcomingDates: 'Upcoming dates',
+    requestSent: 'Request sent',
+    failedToSendRequest: 'Failed to send request',
+    requestPending: 'Request sent',
+    allRequestsSent: 'All date requests sent',
+    failedToSendRequests: 'Failed to send requests',
+    scheduleAllDates: 'Schedule all dates',
+    pastDates: 'Past dates',
   },
 
   // Create Event
@@ -434,6 +446,7 @@ export const en = {
     exampleLocation: 'For example: Central Park',
     examplePrice: 'For example: 500 rub or Free',
     inviteSection: 'Invite',
+    invite: 'Invite',
     participantsSection: 'Participants',
     mediaSection: 'Media',
     defaultEventTitle: 'Event title',
@@ -484,12 +497,6 @@ export const en = {
         personal: 'Personal',
         all: 'All',
       },
-
-  // Explore
-  explore: {
-    createFolder: 'Create folder',
-    filterLabelParticipants: 'Participants:',
-  },
 
   // Request Item
   requestItem: {
@@ -552,21 +559,6 @@ export const en = {
     enterPostText: 'Enter post text',
   },
 
-  // Request Item
-  requestItem: {
-    sentFriendRequest: 'sent a friend request to',
-    sentJoinRequest: 'want to join',
-    sentInvite: 'invited',
-    toEvent: 'to',
-    wantsToBeFriend: 'wants to add you as a friend',
-    wantsToInviteYou: 'wants to invite you to',
-    wantsToJoin: 'wants to join',
-    invitedYouToEvent: 'invited you to the event',
-    user: 'User',
-    accepted: 'accepted',
-    rejected: 'rejected',
-    pending: 'pending',
-  },
 
   // Map
   map: {

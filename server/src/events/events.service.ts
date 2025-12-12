@@ -45,6 +45,7 @@ export class EventsService {
       recurringDays,
       recurringDayOfMonth,
       recurringCustomDates,
+      isMassEvent,
       customTags,
       ageRestriction,
       genderRestriction,
@@ -62,8 +63,8 @@ export class EventsService {
         : undefined;
 
       // Метки - фильтруем дубликаты автоматических тегов из пользовательских
-      // Автоматические теги: 'recurring', 'women_only', 'age_18_plus', 'starting_soon'
-      const autoTagsToFilter = ['recurring', 'women_only', 'age_18_plus', 'starting_soon', 'регулярное', 'women only', '18+'];
+      // Автоматические теги: 'recurring', 'women_only', 'age_18_plus', 'starting_soon', 'массовое'
+      const autoTagsToFilter = ['recurring', 'women_only', 'age_18_plus', 'starting_soon', 'массовое', 'регулярное', 'women only', '18+'];
       const filteredCustomTags = (customTags || []).filter(tag => {
         const normalizedTag = tag.toLowerCase().trim();
         return !autoTagsToFilter.some(autoTag => autoTag.toLowerCase().trim() === normalizedTag);
@@ -91,6 +92,8 @@ export class EventsService {
           recurringDays: recurringDays || [],
           recurringDayOfMonth: recurringDayOfMonth || null,
           recurringCustomDates: customDatesArray || [],
+          // Поле для массового события
+          isMassEvent: isMassEvent || false,
           // Метки
           customTags: filteredCustomTags,
           autoTags: [], // Будет заполнено автоматически
@@ -229,6 +232,8 @@ export class EventsService {
       console.log(`[EventsService] Event ${eventWithTags.id} tags:`, {
         autoTags: eventWithTags.autoTags,
         customTags: eventWithTags.customTags,
+        isMassEvent: eventWithTags.isMassEvent,
+        hasMassEventTag: eventWithTags.autoTags?.includes('массовое'),
       });
     }
 
@@ -360,6 +365,17 @@ export class EventsService {
       },
     });
 
+    // Логируем теги для отладки
+    if (event) {
+      const eventWithTags = event as any;
+      console.log(`[EventsService] findOne Event ${eventWithTags.id}:`, {
+        autoTags: eventWithTags.autoTags,
+        customTags: eventWithTags.customTags,
+        isMassEvent: eventWithTags.isMassEvent,
+        hasMassEventTag: eventWithTags.autoTags?.includes('массовое'),
+      });
+    }
+
     return event;
   }
 
@@ -379,6 +395,7 @@ export class EventsService {
       recurringDays,
       recurringDayOfMonth,
       recurringCustomDates,
+      isMassEvent,
       customTags,
       ageRestriction,
       genderRestriction,
@@ -422,6 +439,8 @@ export class EventsService {
         ...(recurringDays !== undefined ? { recurringDays } : {}),
         ...(recurringDayOfMonth !== undefined ? { recurringDayOfMonth } : {}),
         ...(customDatesArray !== undefined ? { recurringCustomDates: customDatesArray } : {}),
+        // Поле для массового события
+        ...(isMassEvent !== undefined ? { isMassEvent } : {}),
         // Метки
         ...(customTags !== undefined ? { customTags } : {}),
         // Дополнительные поля
@@ -431,6 +450,43 @@ export class EventsService {
         ...(mediaAspectRatio !== undefined ? { mediaAspectRatio } : {}),
         ...(targeting !== undefined ? { targeting } : {}),
       },
+      include: {
+        organizer: {
+          select: {
+            id: true,
+            name: true,
+            username: true,
+            avatarUrl: true,
+            bio: true,
+            age: true,
+            geoPosition: true,
+          },
+        },
+        memberships: {
+          where: { status: MembershipStatus.ACCEPTED },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                username: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+
+    // Обновляем автоматические теги после обновления события
+    // (особенно важно, если изменились isRecurring, isMassEvent, ageRestriction, genderRestriction)
+    console.log(`[EventsService] Calling updateAutoTags for updated event ${id}`);
+    await this.tagsService.updateAutoTags(id);
+
+    // Получаем обновленное событие с актуальными тегами после updateAutoTags
+    const finalEvent = await this.prisma.event.findUnique({
+      where: { id },
       include: {
         organizer: {
           select: {
@@ -489,11 +545,11 @@ export class EventsService {
 
     // Также отправляем всем пользователям (для обновления в лентах)
     this.websocketService.emitToAll('event:updated', {
-      ...updatedEvent,
+      ...(finalEvent || updatedEvent),
       changedFields,
     });
 
-    return updatedEvent;
+    return finalEvent || updatedEvent;
   }
 
   async remove(id: string, userId: string) {
@@ -572,37 +628,135 @@ export class EventsService {
 
     if (existing) {
       if (existing.status === MembershipStatus.REJECTED) {
+        // Если событие массовое - сразу ACCEPTED, иначе PENDING
+        const newStatus = (event as any).isMassEvent ? MembershipStatus.ACCEPTED : MembershipStatus.PENDING;
         return this.prisma.eventMembership.update({
           where: { id: existing.id },
-          data: { status: MembershipStatus.PENDING },
+          data: { status: newStatus },
         });
       }
       throw new BadRequestException('Already requested or member');
     }
+
+    // Если событие массовое - сразу ACCEPTED, иначе PENDING
+    const initialStatus = (event as any).isMassEvent ? MembershipStatus.ACCEPTED : MembershipStatus.PENDING;
 
     const membership = await this.prisma.eventMembership.create({
       data: {
         eventId,
         userId,
         role: EventRole.PARTICIPANT,
-        status: MembershipStatus.PENDING,
+        status: initialStatus,
       },
     });
 
-    // Отправляем WebSocket событие о создании нового запроса на участие
-    // Отправляем организатору события
-    this.websocketService.emitToUser(event.organizerId, 'event:request:new', {
-      eventId,
-      membershipId: membership.id,
-      userId,
-      type: 'request',
+    // Проверяем количество принятых участников ДО добавления нового (организатор не считается)
+    const acceptedCountBefore = await this.prisma.eventMembership.count({
+      where: {
+        eventId,
+        status: MembershipStatus.ACCEPTED,
+        userId: { not: event.organizerId }, // Исключаем организатора
+      },
     });
+
+    // Если событие массовое и участник сразу принят - создаем чат и отправляем уведомления
+    if ((event as any).isMassEvent && membership.status === MembershipStatus.ACCEPTED) {
+      // Если это первый участник (организатор не считается), создаем чат события автоматически
+      if (acceptedCountBefore === 0) {
+        try {
+          await this.chatsService.createEventChat(
+            event.organizerId,
+            eventId,
+            [event.organizerId, userId],
+          );
+          console.log(`[EventsService] Event chat created automatically for mass event ${eventId}`);
+        } catch (error) {
+          console.error(`[EventsService] Failed to create event chat for mass event:`, error);
+          // Не прерываем выполнение
+        }
+      } else {
+        // Если чат уже существует, добавляем нового участника
+        try {
+          const existingChat = await this.prisma.chat.findUnique({
+            where: { eventId },
+            include: { participants: true },
+          });
+
+          if (existingChat) {
+            const isParticipant = existingChat.participants.some(
+              p => p.userId === userId,
+            );
+            if (!isParticipant) {
+              await this.prisma.chatParticipant.create({
+                data: {
+                  chatId: existingChat.id,
+                  userId: userId,
+                },
+              });
+              console.log(`[EventsService] Added participant ${userId} to event chat (mass event)`);
+            }
+          } else {
+            // Если чат почему-то не существует, создаем его
+            await this.chatsService.createEventChat(
+              event.organizerId,
+              eventId,
+              [event.organizerId, userId],
+            );
+            console.log(`[EventsService] Event chat created for mass event ${eventId} (late creation)`);
+          }
+        } catch (error) {
+          console.error(`[EventsService] Failed to add participant to event chat (mass event):`, error);
+          // Не прерываем выполнение
+        }
+      }
+
+      // Для массовых событий - участник сразу принят, отправляем уведомление организатору
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, name: true, username: true, avatarUrl: true },
+      });
+      if (user) {
+        await this.notificationsService.createNotification({
+          userId: event.organizerId,
+          type: NotificationType.EVENT_PARTICIPANT_JOINED,
+          payload: {
+            eventId,
+            actorId: userId,
+            actorName: user.name || user.username,
+            eventTitle: event.title,
+            eventMediaUrl: event.mediaUrl || undefined,
+          },
+        });
+      }
+      
+      this.websocketService.emitToUser(event.organizerId, 'event:participant:joined', {
+        eventId,
+        membershipId: membership.id,
+        userId,
+        type: 'participation',
+      });
+      
+      // Отправляем уведомление участнику о принятии
+      this.websocketService.emitToUser(userId, 'event:joined', {
+        eventId,
+        membershipId: membership.id,
+      });
+    } else {
+      // Отправляем WebSocket событие о создании нового запроса на участие
+      // Отправляем организатору события
+      this.websocketService.emitToUser(event.organizerId, 'event:request:new', {
+        eventId,
+        membershipId: membership.id,
+        userId,
+        type: 'request',
+      });
+    }
 
     // Также отправляем в комнату события
     await this.websocketService.emitToEventParticipants(
       eventId,
       userId,
-      'event:request:new',
+      membership.status === MembershipStatus.ACCEPTED ? 'event:joined' : 'event:request:new',
       {
         eventId,
         membershipId: membership.id,
@@ -1032,6 +1186,12 @@ export class EventsService {
         return { success: true, message: 'Profile not found, nothing to remove' };
       }
 
+      // Получаем данные пользователя для уведомлений
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, name: true, username: true },
+      });
+      
       // Удаляем пользователя из participants профиля
       const deleted = await this.prisma.eventProfileParticipant.deleteMany({
         where: {
@@ -1044,19 +1204,39 @@ export class EventsService {
       logger.info(`User removed from event profile for past event, deleted: ${deleted.count}`);
       logger.info(`Remaining participants: ${remainingCount}`);
       
-      // КРИТИЧЕСКИ ВАЖНО: Если участников стало 0 (или был 1 и его удалили) - удаляем событие полностью
-      if (remainingCount === 0 || (profile.participants.length === 1 && deleted.count === 1)) {
-        logger.info(`🗑️ Последний участник удален, удаляем событие полностью`);
+      // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий НЕ применяем правило удаления по количеству участников
+      // Правило удаления события по количеству участников применяется ТОЛЬКО для предстоящих событий
+      // Для прошедших событий (Memories) событие остается для других участников, просто удаленный участник исключается из списка
+      logger.info(`Для прошедшего события не применяем правило удаления по количеству участников - событие остается для других участников`);
+      
+      // Получаем список оставшихся участников ДО удаления (из исходного профиля)
+      const remainingParticipantIds = profile.participants
+        .filter(p => p.userId !== userId)
+        .map(p => p.userId);
+      
+      // КРИТИЧЕСКИ ВАЖНО: Отправляем WebSocket уведомление другим участникам о том, что список участников обновился
+      // Это нужно, чтобы другие участники (например, nastya) видели обновленный список участников
+      if (remainingParticipantIds.length > 0) {
+        logger.info(`Отправляем WebSocket уведомление оставшимся участникам: ${remainingParticipantIds.length}`);
         
-        // Удаляем событие полностью через cancelEvent
-        try {
-          await this.cancelEvent(eventId, userId);
-          logger.info(`Событие полностью удалено`);
-          return { success: true, message: 'Event deleted (last participant removed)', eventDeleted: true };
-        } catch (cancelError) {
-          logger.error(`Ошибка при удалении события:`, cancelError);
-          // Продолжаем с обычным удалением из профиля
-        }
+        // Отправляем уведомление через EventProfile participants (не через EventMembership, т.к. для прошедших событий membership может не существовать)
+        await this.websocketService.emitToUsers(
+          remainingParticipantIds,
+          'event:profile:participant_removed',
+          {
+            eventId,
+            removedUserId: userId,
+            removedUserName: user?.name || user?.username || 'Пользователь',
+            remainingParticipants: remainingParticipantIds,
+          },
+        );
+        
+        // Также отправляем обновление профиля события, чтобы клиент перезагрузил список участников
+        await this.websocketService.emitToUsers(
+          remainingParticipantIds,
+          'event:profile:updated',
+          { eventId },
+        );
       }
       
       return { success: true, message: 'Removed from event profile', deletedCount: deleted.count };
@@ -1072,6 +1252,13 @@ export class EventsService {
     }
 
     const user = membership.user;
+
+    // Проверяем, является ли событие прошедшим (ДО удаления из профиля, чтобы использовать в логике)
+    const eventForCheck = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { startTime: true },
+    });
+    const isPastEventCheck = eventForCheck && eventForCheck.startTime < new Date();
 
     // Удаляем пользователя из профиля события (если профиль существует)
     const profile = await this.prisma.eventProfile.findUnique({
@@ -1092,11 +1279,14 @@ export class EventsService {
       });
       
       const remainingCount = participantsBefore - deleted.count;
-      logger.info(`User removed from event profile, remaining participants: ${remainingCount}`);
+      logger.info(`User removed from event profile, remaining participants: ${remainingCount}, isPastEvent: ${isPastEventCheck}`);
       
-      // КРИТИЧЕСКИ ВАЖНО: Если участников стало 0 (или был 1 и его удалили) - удаляем событие полностью
+      // КРИТИЧЕСКИ ВАЖНО: Правило удаления события по количеству участников применяется ТОЛЬКО для предстоящих событий
+      // Для прошедших событий (Memories) событие остается для других участников, просто удаленный участник исключается из списка
+      if (!isPastEventCheck) {
+        // Для предстоящих событий: если участников стало 0 (или был 1 и его удалили) - удаляем событие полностью
       if (remainingCount === 0 || (participantsBefore === 1 && deleted.count === 1)) {
-        logger.info(`🗑️ Последний участник удален, удаляем событие полностью`);
+          logger.info(`🗑️ Последний участник удален из предстоящего события, удаляем событие полностью`);
         
         // Удаляем событие полностью через cancelEvent
         try {
@@ -1106,11 +1296,44 @@ export class EventsService {
         } catch (cancelError) {
           logger.error(`Ошибка при удалении события:`, cancelError);
           // Продолжаем с обычным удалением из профиля
+          }
+        }
+      } else {
+        logger.info(`Для прошедшего события не применяем правило удаления по количеству участников - событие остается для других участников`);
+        
+        // Для прошедших событий отправляем WebSocket уведомления другим участникам
+        if (profile && remainingCount > 0) {
+          const remainingParticipantIds = profile.participants
+            .filter(p => p.userId !== userId)
+            .map(p => p.userId);
+          
+          logger.info(`Отправляем WebSocket уведомление оставшимся участникам прошедшего события: ${remainingParticipantIds.length}`);
+          
+          // Отправляем уведомление об удалении участника
+          await this.websocketService.emitToUsers(
+            remainingParticipantIds,
+            'event:profile:participant_removed',
+            {
+              eventId,
+              removedUserId: userId,
+              removedUserName: user.name || user.username || 'Пользователь',
+              remainingParticipants: remainingParticipantIds,
+            },
+          );
+          
+          // Также отправляем обновление профиля события
+          await this.websocketService.emitToUsers(
+            remainingParticipantIds,
+            'event:profile:updated',
+            { eventId },
+          );
         }
       }
     }
 
     // Создаем уведомления для всех участников об удалении участника (перед удалением)
+    // ТОЛЬКО для предстоящих событий (для прошедших уже отправили выше)
+    if (!isPastEvent) {
     await this.notificationsService.notifyEventParticipants(
       eventId,
       userId,
@@ -1120,6 +1343,7 @@ export class EventsService {
         actorName: user.name || user.username,
       },
     );
+    }
 
     return this.prisma.eventMembership.delete({ where: { id: membership.id } });
   }
@@ -1177,7 +1401,13 @@ export class EventsService {
       throw new ForbiddenException('Only organizer or participant can delete past event');
     }
 
-    const acceptedCount = event.memberships.length;
+    // КРИТИЧЕСКИ ВАЖНО: Считаем всех участников (ACCEPTED), включая организатора
+    // Если участников <= 2 (организатор + 1 участник), событие полностью удаляется
+    const acceptedCount = event.memberships.length; // Уже фильтруется по ACCEPTED
+    const totalParticipants = acceptedCount; // Организатор уже включен в memberships как ACCEPTED ORGANIZER
+    
+    logger.info(`[cancelEvent] Событие ${eventId}: участников (ACCEPTED) = ${acceptedCount}, должно быть удалено: ${acceptedCount <= 2 ? 'ДА' : 'НЕТ'}`);
+    
     const organizer = event.organizer;
 
     // Создаем уведомления для участников об отмене события (перед удалением)
@@ -1193,18 +1423,25 @@ export class EventsService {
 
     // Транзакция корректной отмены/удаления события с учётом внешних ключей
     return this.prisma.$transaction(async (tx) => {
+      logger.info(`[cancelEvent] Начинаем транзакцию удаления события ${eventId}`);
+      
       // 1) Переводим активные membership в REJECTED и удаляем все привязки по событию
-      await tx.eventMembership.updateMany({
+      const updatedMemberships = await tx.eventMembership.updateMany({
         where: { eventId, status: { in: [MembershipStatus.PENDING, MembershipStatus.ACCEPTED] } },
         data: { status: MembershipStatus.REJECTED },
       });
-      await tx.eventMembership.deleteMany({ where: { eventId } });
+      logger.info(`[cancelEvent] Обновлено memberships: ${updatedMemberships.count}`);
+      
+      const deletedMemberships = await tx.eventMembership.deleteMany({ where: { eventId } });
+      logger.info(`[cancelEvent] Удалено memberships: ${deletedMemberships.count}`);
 
       // 2) Удаляем персональные фото для события
-      await tx.eventPersonalPhoto.deleteMany({ where: { eventId } });
+      const deletedPhotos = await tx.eventPersonalPhoto.deleteMany({ where: { eventId } });
+      logger.info(`[cancelEvent] Удалено персональных фото: ${deletedPhotos.count}`);
 
       // 3) Обнуляем ссылку на событие в сообщениях (поле eventId опционально)
-      await tx.message.updateMany({ where: { eventId }, data: { eventId: null } });
+      const updatedMessages = await tx.message.updateMany({ where: { eventId }, data: { eventId: null } });
+      logger.info(`[cancelEvent] Обновлено сообщений: ${updatedMessages.count}`);
 
       // 4) Если есть связанный чат — удаляем его и зависимые записи
       const chat = await tx.chat.findUnique({ where: { eventId } });
@@ -1213,10 +1450,31 @@ export class EventsService {
         await tx.chatParticipant.deleteMany({ where: { chatId: chat.id } });
         await tx.folderChat.deleteMany({ where: { chatId: chat.id } });
         await tx.chat.delete({ where: { id: chat.id } });
+        logger.info(`[cancelEvent] Удален чат: ${chat.id}`);
+      } else {
+        logger.info(`[cancelEvent] Чат не найден для события ${eventId}`);
       }
 
       // 5) Профиль события (EventProfile) привязан к Event с onDelete: Cascade — удалится вместе с событием.
-      await tx.event.delete({ where: { id: eventId } });
+      const deletedEvent = await tx.event.delete({ where: { id: eventId } });
+      logger.info(`[cancelEvent] Событие удалено: ${eventId}, affected: ${deletedEvent ? '1' : '0'}`);
+
+      // 6) Отправляем WebSocket событие об удалении события ВНУТРИ транзакции, но после удаления
+      // Это гарантирует, что событие действительно удалено из базы данных
+      try {
+        await this.websocketService.emitToEventParticipants(
+          eventId,
+          userId,
+          'event:deleted',
+          { eventId },
+        );
+        // Также отправляем всем пользователям (для обновления в лентах)
+        this.websocketService.emitToAll('event:deleted', { eventId });
+        logger.info(`[cancelEvent] WebSocket событие отправлено для события ${eventId}`);
+      } catch (wsError) {
+        logger.error(`[cancelEvent] Ошибка отправки WebSocket события:`, wsError);
+        // Не прерываем транзакцию из-за ошибки WebSocket
+      }
 
       return { participantsAffected: acceptedCount };
     });
@@ -1250,10 +1508,8 @@ export class EventsService {
       throw new ForbiddenException('Not organizer');
     }
 
-    const acceptedCount = event.memberships.length;
-    if (acceptedCount <= 2) {
-      throw new BadRequestException('Use cancelEvent for events with ≤2 participants');
-    }
+    // Удаляем проверку на количество участников - теперь всегда можно отменить участие организатора
+    // (если организатор единственный участник, используется cancelEvent)
 
     const organizer = event.organizer;
 
@@ -1320,6 +1576,145 @@ export class EventsService {
     }
 
     return { eventContinues: true };
+  }
+
+  // 👤 ПЕРЕДАЧА РОЛИ ОРГАНИЗАТОРА
+  async transferOrganizerRole(eventId: string, currentOrganizerId: string, newOrganizerId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        organizer: {
+          select: {
+            id: true,
+            name: true,
+            username: true,
+            avatarUrl: true,
+          },
+        },
+        memberships: {
+          where: { status: MembershipStatus.ACCEPTED },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                username: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!event) {
+      throw new BadRequestException('Event not found');
+    }
+
+    // Валидация: только текущий организатор может передать роль
+    if (event.organizerId !== currentOrganizerId) {
+      throw new ForbiddenException('Only current organizer can transfer role');
+    }
+
+    // Проверяем, что новый организатор является участником события
+    const newOrganizerMembership = event.memberships.find(m => m.userId === newOrganizerId);
+    if (!newOrganizerMembership) {
+      throw new BadRequestException('New organizer must be a participant of the event');
+    }
+
+    // Проверяем, что новый организатор не является текущим организатором
+    if (newOrganizerId === currentOrganizerId) {
+      throw new BadRequestException('Cannot transfer role to yourself');
+    }
+
+    // Выполняем передачу роли в транзакции
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Обновляем событие - назначаем нового организатора
+      await tx.event.update({
+        where: { id: eventId },
+        data: {
+          organizerId: newOrganizerId,
+        },
+      });
+
+      // 2. Обновляем роли в memberships
+      // Старый организатор становится обычным участником
+      const oldOrganizerMembership = await tx.eventMembership.findUnique({
+        where: {
+          userId_eventId: {
+            userId: currentOrganizerId,
+            eventId,
+          },
+        },
+      });
+
+      if (oldOrganizerMembership) {
+        await tx.eventMembership.update({
+          where: { id: oldOrganizerMembership.id },
+          data: {
+            role: EventRole.PARTICIPANT,
+          },
+        });
+      }
+
+      // Новый организатор получает роль ORGANIZER
+      await tx.eventMembership.update({
+        where: { id: newOrganizerMembership.id },
+        data: {
+          role: EventRole.ORGANIZER,
+        },
+      });
+
+      // 3. Отправляем уведомления
+      const newOrganizer = newOrganizerMembership.user;
+      await this.notificationsService.notifyEventParticipants(
+        eventId,
+        currentOrganizerId,
+        'EVENT_ORGANIZER_TRANSFERRED' as NotificationType,
+        {
+          actorId: currentOrganizerId,
+          actorName: event.organizer.name || event.organizer.username,
+          eventId,
+        },
+      );
+
+      // Отправляем уведомление новому организатору
+      await this.notificationsService.createNotification({
+        userId: newOrganizerId,
+        type: 'EVENT_ORGANIZER_TRANSFERRED' as NotificationType,
+        payload: {
+          actorId: currentOrganizerId,
+          actorName: event.organizer.name || event.organizer.username,
+          eventId,
+        },
+      });
+
+      // 4. Отправляем WebSocket события
+      await this.websocketService.emitToEventParticipants(
+        eventId,
+        currentOrganizerId,
+        'event:organizer_transferred',
+        {
+          eventId,
+          oldOrganizerId: currentOrganizerId,
+          newOrganizerId,
+          newOrganizerName: newOrganizer.name || newOrganizer.username,
+        },
+      );
+
+      // Также отправляем всем пользователям (для обновления в лентах)
+      this.websocketService.emitToAll('event:updated', {
+        eventId,
+        organizerId: newOrganizerId,
+      });
+
+      return {
+        success: true,
+        eventId,
+        newOrganizerId,
+        newOrganizerName: newOrganizer.name || newOrganizer.username,
+      };
+    });
   }
 
   // ❌ ОТМЕНА ЗАПРОСА НА УЧАСТИЕ (waiting → non_member)
@@ -1509,11 +1904,54 @@ export class EventsService {
       throw new ForbiddenException('Must be an accepted participant to set personal photo');
     }
 
-    return this.prisma.eventPersonalPhoto.upsert({
+    const result = await this.prisma.eventPersonalPhoto.upsert({
       where: { eventId_userId: { eventId, userId } },
       update: { photoUrl },
       create: { eventId, userId, photoUrl },
     });
+
+    // Отправляем WebSocket событие об обновлении персонального фото
+    // Это уведомит других участников события об изменении
+    try {
+      // Получаем обновленное событие с персональными фото для отправки
+      const updatedEvent = await this.prisma.event.findUnique({
+        where: { id: eventId },
+        include: {
+          personalPhotos: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  username: true,
+                  avatarUrl: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (updatedEvent) {
+        // Отправляем обновление события всем участникам
+        await this.websocketService.emitToEventParticipants(
+          eventId,
+          userId,
+          'event:updated',
+          {
+            id: updatedEvent.id,
+            personalPhotos: updatedEvent.personalPhotos,
+            updatedField: 'personalPhoto',
+            updatedBy: userId,
+          },
+        );
+      }
+    } catch (error) {
+      // Логируем ошибку, но не прерываем выполнение
+      console.error('Failed to emit WebSocket event for personal photo update:', error);
+    }
+
+    return result;
   }
 
   async getPersonalPhotos(eventId: string) {

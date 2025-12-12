@@ -262,10 +262,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await setSession({ accessToken: nextAccount.accessToken, refreshToken: nextAccount.refreshToken });
           setUser({
             id: nextAccount.userId,
-            email: nextAccount.email,
-            username: nextAccount.username,
-            name: nextAccount.name,
-            avatarUrl: nextAccount.avatarUrl,
+            email: nextAccount.email || '',
+            username: nextAccount.username || '',
+            name: nextAccount.name || '',
+            avatarUrl: nextAccount.avatarUrl || '',
           });
         }
       }
@@ -332,8 +332,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const fetchProfile = useCallback(
-    async (tokenOverride: string | null = null) => {
+  const refreshSessionRef = useRef<((token?: string) => Promise<void>) | null>(null);
+
+  const fetchProfile: (tokenOverride?: string | null) => Promise<void> = useCallback(
+    async (tokenOverride: string | null = null): Promise<void> => {
       const tokenToUse = tokenOverride ?? accessToken;
       if (!tokenToUse) return;
       
@@ -358,7 +360,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Если получили 401 или 404 (пользователь не найден), пытаемся обновить токен или очищаем сессию
         if ((error?.status === 401 || error?.status === 404) && refreshToken && refreshToken.trim() !== '') {
           try {
-            await refreshSession(refreshToken);
+            if (refreshSessionRef.current) {
+              await refreshSessionRef.current(refreshToken);
+            }
             // refreshSession уже обновил токены и вызвал fetchProfile, ничего не делаем
             return;
           } catch (refreshError) {
@@ -385,11 +389,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
     },
-    [accessToken, refreshToken, upsertAccount, refreshSession, clearSession, clearSessionAndRemoveAccount, activeAccountId, user?.id, secureStorageAvailable],
+    [accessToken, refreshToken, upsertAccount, clearSession, clearSessionAndRemoveAccount, activeAccountId, user?.id, secureStorageAvailable],
   );
 
-  const handleAccountAuthFailure = useCallback(
-    async (failingAccountId: string | null) => {
+  const handleAccountAuthFailure: (failingAccountId: string | null) => Promise<boolean> = useCallback(
+    async (failingAccountId: string | null): Promise<boolean> => {
       const failureKey = failingAccountId || 'null';
       
       // Защита от рекурсивных вызовов
@@ -506,7 +510,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handlingAuthFailure.current.delete(failureKey);
       }
     },
-    [updateAccounts, persistActiveAccount, setSession, upsertAccount, clearSession, secureStorageAvailable, refreshSession, normalizeMediaUrl],
+    [updateAccounts, persistActiveAccount, setSession, upsertAccount, clearSession, secureStorageAvailable, normalizeMediaUrl],
   );
 
   const refreshSession = useCallback(
@@ -654,10 +658,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             console.warn('[Auth] Network error during profile fetch, using cached user data');
             setUser({
               id: targetAccount.userId,
-              email: targetAccount.email,
-              username: targetAccount.username,
-              name: targetAccount.name,
-              avatarUrl: targetAccount.avatarUrl,
+              email: targetAccount.email || '',
+              username: targetAccount.username || '',
+              name: targetAccount.name || '',
+              avatarUrl: targetAccount.avatarUrl || '',
               emailVerified: targetAccount.emailVerified ?? false, // Восстанавливаем статус верификации из кэша
             });
           } else if (error?.status === 401 && targetAccount.refreshToken && targetAccount.refreshToken.trim() !== '') {
@@ -785,20 +789,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Теперь устанавливаем сессию с токенами нового аккаунта
           await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
         } else {
-          const profile = await fetchProfile(data.accessToken);
-          if (profile?.id) {
-            // Если профиль загружен, сохраняем аккаунт и переключаемся на него
-            await upsertAccount(profile, {
-              accessToken: data.accessToken,
-              refreshToken: data.refreshToken,
-            });
-            await persistActiveAccount(profile.id);
-            console.log('[Auth] login: активный аккаунт установлен на', profile.id);
-            await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
-          } else {
-            // Если профиль не загружен, все равно устанавливаем сессию
-            await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
+          await fetchProfile(data.accessToken);
+          // fetchProfile уже обновил пользователя и аккаунт через setUser и upsertAccount
+          if (user?.id) {
+            await persistActiveAccount(user.id);
+            console.log('[Auth] login: активный аккаунт установлен на', user.id);
           }
+          await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
         }
       } finally {
         setLoading(false);
@@ -1050,10 +1047,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // upsertAccount может перезаписать аккаунты из storage, что приведет к потере данных
       setUser({
         id: nextAccount.userId,
-        email: nextAccount.email,
-        username: nextAccount.username,
-        name: nextAccount.name,
-        avatarUrl: nextAccount.avatarUrl,
+        email: nextAccount.email || '',
+        username: nextAccount.username || '',
+        name: nextAccount.name || '',
+        avatarUrl: nextAccount.avatarUrl || '',
       });
       // НЕ вызываем upsertAccount здесь, так как это может перезаписать аккаунты
       // Вместо этого просто обновляем состояние пользователя

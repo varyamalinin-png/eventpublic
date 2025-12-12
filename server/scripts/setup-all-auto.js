@@ -30,25 +30,10 @@ try {
   process.exit(1);
 }
 
-// 2. Проверяем подключение к Railway
-console.log('\n2️⃣ Проверка подключения к Railway...');
-try {
-  const railwayStatus = execSync('npx -y @railway/cli status', { 
-    encoding: 'utf-8',
-    cwd: __dirname + '/..',
-    stdio: 'pipe'
-  });
-  console.log('✅ Railway подключен');
-  console.log(railwayStatus.split('\n').slice(0, 3).join('\n'));
-} catch (error) {
-  console.log('⚠️ Railway CLI требует интерактивной настройки');
-}
-
-// 3. Выводим все значения для копирования
-console.log('\n3️⃣ Значения для установки в Railway:\n');
+// 2. Выводим все значения для копирования
+console.log('\n2️⃣ Значения для установки на Yandex Cloud VM:\n');
 console.log('='.repeat(80));
-console.log('\n📋 Скопируйте и установите эти переменные через Railway Dashboard:');
-console.log('   https://railway.app → проект → сервис eventpublic → Variables\n');
+console.log('\n📋 Скопируйте и установите эти переменные в .env файл на Yandex Cloud VM:\n');
 
 const variables = {
   'YANDEX_IAM_TOKEN': iamToken,
@@ -70,9 +55,9 @@ for (const [name, value] of Object.entries(variables)) {
 console.log('\n' + '='.repeat(80));
 console.log('\n✅ Все значения готовы!');
 console.log('\n📝 Следующие шаги:');
-console.log('   1. Откройте Railway Dashboard: https://railway.app');
-console.log('   2. Перейдите в проект → сервис eventpublic → Variables');
-console.log('   3. Добавьте каждую переменную через + New Variable');
+console.log('   1. Подключитесь к Yandex Cloud VM через SSH');
+console.log('   2. Отредактируйте .env файл в директории сервера');
+console.log('   3. Добавьте каждую переменную в .env');
 console.log('   4. Перезапустите сервис после установки');
 console.log('\n⚠️  ВАЖНО:');
 console.log('   • IAM токен действителен 12 часов');

@@ -181,7 +181,7 @@ export const useEventRequests = ({
                 return [];
               }
               return pending
-              .map((membership: ServerEventRequest) => {
+              .map((membership: any) => {
                 if (membership?.user) {
                   applyServerUserDataToState(membership.user);
                 }
@@ -221,7 +221,7 @@ export const useEventRequests = ({
 
         // Маппим входящие приглашения с сервера
         const mappedIncomingInvitations: EventRequest[] = (Array.isArray(incomingInvitations) ? incomingInvitations : [])
-          .map((membership: ServerEventRequest) => {
+          .map((membership: any) => {
             if (membership?.event?.organizer) {
               applyServerUserDataToState(membership.event.organizer);
             }
@@ -263,7 +263,7 @@ export const useEventRequests = ({
 
         // Маппим исходящие приглашения с сервера
         const mappedOutgoingInvitations: EventRequest[] = (Array.isArray(outgoingInvitations) ? outgoingInvitations : [])
-          .map((membership: ServerEventRequest) => {
+          .map((membership: any) => {
             if (membership?.event?.organizer) {
               applyServerUserDataToState(membership.event.organizer);
             }
@@ -289,7 +289,7 @@ export const useEventRequests = ({
 
         // Маппим исходящие join-запросы с сервера
         const mappedOutgoingJoinRequests: EventRequest[] = (Array.isArray(outgoingJoinRequests) ? outgoingJoinRequests : [])
-          .map((membership: ServerEventRequest) => {
+          .map((membership: any) => {
             if (membership?.event?.organizer) {
               applyServerUserDataToState(membership.event.organizer);
             }
@@ -361,7 +361,11 @@ export const useEventRequests = ({
           
           // Добавляем/обновляем запросы с сервера
           // Запросы с сервера имеют приоритет, так как они более актуальные
-          allRequests.forEach(req => byId.set(req.id, req));
+          allRequests.forEach(req => {
+            if (req) {
+              byId.set(req.id, req);
+            }
+          });
           
           const finalRequests = Array.from(byId.values());
           logger.debug('refreshPendingJoinRequests: итоговое количество запросов:', finalRequests.length);

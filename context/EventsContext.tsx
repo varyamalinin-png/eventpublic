@@ -200,9 +200,10 @@ interface EventsContextType {
   getEventProfile: (eventId: string) => EventProfile | null;
   fetchEventProfile: (eventId: string) => Promise<EventProfile | null>;
   createEventProfile: (eventId: string) => Promise<void>;
-  addEventProfilePost: (eventId: string, post: Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>) => Promise<void>;
+  addEventProfilePost: (eventId: string, post: Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>) => Promise<EventProfilePost | null>;
   updateEventProfile: (eventId: string, updates: Partial<EventProfile>) => Promise<void>;
   updateEventProfilePost: (eventId: string, postId: string, updates: Partial<EventProfilePost>) => Promise<void>;
+  addPostComment: (eventId: string, postId: string, comment: Omit<PostComment, 'id' | 'postId' | 'createdAt'>) => Promise<void>;
   getEventParticipants: (eventId: string) => string[];
   canEditEventProfile: (eventId: string, userId: string) => boolean;
   // Новые функции для системы участия
@@ -914,13 +915,9 @@ export function EventsProvider({ children }: EventsProviderProps) {
     const now = new Date();
     const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 часа назад
     
-    const recentWindowMs = 2 * 60 * 60 * 1000; // 2 часа назад
     const filtered = events.filter(event => {
-      const eventStart = getEventDateTime(event);
-      const recentlyStarted = eventStart.getTime() >= now.getTime() - recentWindowMs;
-
-      // предстоящее или только что начавшееся
-      if (!isEventUpcoming(event) && !recentlyStarted) return false;
+      // предстоящее
+      if (!isEventUpcoming(event)) return false;
       // не_набрано
       if (isEventFull(event)) return false;
       
@@ -988,6 +985,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     updateEventProfilePost,
     deleteEventProfilePost,
     canEditEventProfile,
+    addPostComment,
   } = useEventProfiles({
         accessToken,
     currentUserId,
@@ -2723,6 +2721,7 @@ const isHttpUrl = (value?: string | null): boolean => {
       addEventProfilePost,
       updateEventProfile,
       updateEventProfilePost,
+      addPostComment,
       getEventParticipants,
       canEditEventProfile,
       getMyEventRequests,

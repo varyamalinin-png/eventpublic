@@ -11,7 +11,7 @@ import { createLogger } from '../../utils/logger';
 const logger = createLogger('Memories');
 
 export default function MemoriesScreen() {
-  const { eventProfiles, getUserData, friends, events, isEventPast, isUserEventMember, fetchEventProfile } = useEvents();
+  const { eventProfiles, getUserData, friends, events, isEventPast, isUserEventMember, fetchEventProfile, isFriend } = useEvents();
   const { user: authUser } = useAuth();
   const { t } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
@@ -94,7 +94,7 @@ export default function MemoriesScreen() {
       // ВСЕГДА загружаем профили при фокусе на экране Memories
       // Это гарантирует загрузку профилей при открытии Memories
       loadProfilesForPastEvents();
-    }, [authUser?.id, events.length, isEventPast, fetchEventProfile])
+    }, [authUser?.id, events.length, isEventPast, fetchEventProfile, friends.length])
   );
   
   // Дополнительная загрузка профилей при изменении events (если useFocusEffect не сработал)
@@ -162,7 +162,7 @@ export default function MemoriesScreen() {
     };
     
     loadProfiles();
-  }, [authUser?.id, events.length, isEventPast, fetchEventProfile]); // Убрал eventProfiles.length из зависимостей, чтобы избежать бесконечного цикла
+  }, [authUser?.id, events.length, isEventPast, fetchEventProfile, friends.length]); // Добавлен friends.length для перезагрузки при изменении списка друзей
 
   // Функция поиска для memories
   const handleMemoriesSearch = (query: string) => {
@@ -197,7 +197,7 @@ export default function MemoriesScreen() {
     );
   }, [eventProfiles]);
 
-  // Фильтруем посты по друзьям и текущему пользователю
+  // Фильтруем посты - показываем посты только друзьям
   const filteredPosts = useMemo(() => {
     const currentUserId = authUser?.id;
     if (!currentUserId) {
@@ -206,39 +206,95 @@ export default function MemoriesScreen() {
     }
     
     logger.debug('filteredPosts: пересчет', { allPostsCount: allPosts.length, profilesCount: eventProfiles.length, currentUserId });
+    logger.debug('📊 [Memories] Статистика:', {
+      allPostsCount: allPosts.length,
+      profilesCount: eventProfiles.length,
+      currentUserId,
+      friendsCount: friends.length,
+      friendsList: friends
+    });
+    
+    // Логируем информацию о всех постах перед фильтрацией
+    logger.debug('📝 [Memories] ВСЕ ПОСТЫ ПЕРЕД ФИЛЬТРАЦИЕЙ:');
+    if (allPosts.length === 0) {
+      logger.warn('⚠️ [Memories] НЕТ ПОСТОВ ДЛЯ ФИЛЬТРАЦИИ!');
+    } else {
+      allPosts.forEach(({ post, eventId }, index) => {
+        const isAuthorFriend = isFriend(post.authorId);
+        logger.debug(`  [${index}] Пост ID: ${post.id}`, {
+          authorId: post.authorId,
+          eventId,
+          isCurrentUser: post.authorId === currentUserId,
+          isAuthorFriend,
+          authorInFriendsList: friends.includes(post.authorId),
+          willShow: post.authorId === currentUserId || isAuthorFriend
+        });
+      });
+    }
     
     const filtered = allPosts.filter(({ post, eventId }) => {
-      // Находим профиль события
-      const profile = eventProfiles.find(ep => ep.eventId === eventId);
-      if (!profile) {
-        // Если профиль не найден, не показываем пост
-        // Это нормально для новых событий, которые еще не загрузились
-        return false;
-      }
-      
-      // КРИТИЧЕСКИ ВАЖНО: Проверяем, участвует ли текущий пользователь в событии
-      // Если текущий пользователь НЕ в списке участников профиля - он удалил событие из Memories
-      // В этом случае не показываем посты этого события для него
-      if (currentUserId && !profile.participants.includes(currentUserId)) {
-        // Текущий пользователь не участвует в событии - он удалил его из Memories
-        // НЕ показываем посты этого события - это правильное поведение
-        return false;
-      }
-      
-      // Показываем посты текущего пользователя и его друзей
       const isCurrentUser = post.authorId === currentUserId;
-      const isFriend = friends.includes(post.authorId);
       
-      // Проверяем, есть ли среди участников события друзья или это текущий пользователь
-      const hasFriendParticipants = profile.participants?.some(id => 
-        friends.includes(id) || id === currentUserId
-      ) ?? false;
+      logger.debug(`🔍 [Memories] Фильтрация поста ${post.id}:`, {
+        authorId: post.authorId,
+        currentUserId,
+        isCurrentUser,
+        eventId
+      });
       
-      // Показываем пост если:
-      // 1. Это пост текущего пользователя
-      // 2. Это пост друга
-      // 3. В событии участвуют друзья или текущий пользователь
-      if (!isCurrentUser && !isFriend && !hasFriendParticipants) return false;
+      // Показываем свои посты всегда
+      if (isCurrentUser) {
+        logger.debug(`✅ [Memories] Пост ${post.id} - свой пост, показываем`);
+      
+        // Свой пост - показываем, но проверяем поиск
+        if (searchQuery) {
+          const lowerQuery = searchQuery.toLowerCase();
+          const author = getUserData(post.authorId);
+          const event = eventProfiles.find(ep => ep.eventId === eventId);
+          
+          // Поиск по автору
+          if (author?.name?.toLowerCase().includes(lowerQuery) || 
+              author?.username?.toLowerCase().includes(lowerQuery)) {
+            return true;
+          }
+          
+          // Поиск по названию события
+          if (event?.name?.toLowerCase().includes(lowerQuery)) {
+            return true;
+          }
+          
+          // Поиск по описанию поста
+          if (post.caption?.toLowerCase().includes(lowerQuery)) {
+            return true;
+          }
+          
+          // Поиск по типу контента
+          if (post.type?.toLowerCase().includes(lowerQuery)) {
+            return true;
+          }
+          
+        return false;
+      }
+        return true;
+      }
+      
+      // Для чужих постов - проверяем, является ли автор другом
+      const isAuthorFriend = isFriend(post.authorId);
+      
+      logger.debug(`👥 [Memories] Пост ${post.id} - проверка дружбы:`, {
+        authorId: post.authorId,
+        isAuthorFriend,
+        friendsList: friends,
+        friendsCount: friends.length,
+        authorInFriendsList: friends.includes(post.authorId)
+      });
+      
+      if (!isAuthorFriend) {
+        logger.warn(`❌ [Memories] Пост ${post.id} ОТФИЛЬТРОВАН: автор ${post.authorId} НЕ является другом текущего пользователя ${currentUserId}`);
+        return false;
+      }
+      
+      logger.debug(`✅ [Memories] Пост ${post.id} - автор является другом, показываем`);
       
       // Поиск по тексту
       if (searchQuery) {
@@ -247,13 +303,13 @@ export default function MemoriesScreen() {
         const event = eventProfiles.find(ep => ep.eventId === eventId);
         
         // Поиск по автору
-        if (author.name.toLowerCase().includes(lowerQuery) || 
-            author.username.toLowerCase().includes(lowerQuery)) {
+        if (author?.name?.toLowerCase().includes(lowerQuery) || 
+            author?.username?.toLowerCase().includes(lowerQuery)) {
           return true;
         }
         
         // Поиск по названию события
-        if (event?.name.toLowerCase().includes(lowerQuery)) {
+        if (event?.name?.toLowerCase().includes(lowerQuery)) {
           return true;
         }
         
@@ -263,19 +319,40 @@ export default function MemoriesScreen() {
         }
         
         // Поиск по типу контента
-        if (post.type.toLowerCase().includes(lowerQuery)) {
+        if (post.type?.toLowerCase().includes(lowerQuery)) {
           return true;
         }
         
         return false;
       }
       
+      // Без поиска - показываем посты друзей
       return true;
     });
     
+    logger.debug('═══════════════════════════════════════════════════════════');
+    logger.debug('📊 [Memories] РЕЗУЛЬТАТЫ ФИЛЬТРАЦИИ:');
+    logger.debug(`   Всего постов: ${allPosts.length}`);
+    logger.debug(`   Отфильтровано: ${filtered.length}`);
+    logger.debug(`   Друзей: ${friends.length}`);
+    if (filtered.length > 0) {
+      logger.debug(`   Показанные посты: ${filtered.map(({post, eventId}) => `${eventId}-${post.id}`).join(', ')}`);
+    } else if (allPosts.length > 0) {
+      logger.warn('⚠️ [Memories] ВСЕ ПОСТЫ ОТФИЛЬТРОВАНЫ!');
+      const samplePost = allPosts[0];
+      logger.warn('   Пример поста:', {
+        postId: samplePost.post.id,
+        authorId: samplePost.post.authorId,
+        isAuthorFriend: isFriend(samplePost.post.authorId),
+        authorInFriendsList: friends.includes(samplePost.post.authorId),
+        currentUserId
+      });
+    }
+    logger.debug('═══════════════════════════════════════════════════════════');
+    
     logger.debug('filteredPosts: итоговое количество отфильтрованных постов', { count: filtered.length, posts: filtered.map(({post, eventId}) => `${eventId}-${post.id}`).join(', ') || 'нет' });
     return filtered;
-  }, [allPosts, searchQuery, friends, getUserData, eventProfiles, authUser?.id]);
+  }, [allPosts, searchQuery, friends, getUserData, eventProfiles, authUser?.id, isFriend]);
 
   const onRefresh = () => {
     setRefreshing(true);

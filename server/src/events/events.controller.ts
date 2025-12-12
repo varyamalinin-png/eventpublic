@@ -310,6 +310,24 @@ export class EventsController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Post(':eventId/transfer-organizer')
+  async transferOrganizerRole(
+    @Param('eventId') eventId: string,
+    @RequestUser('userId') userId: string,
+    @Body() body: { newOrganizerId: string },
+  ) {
+    try {
+      logger.info(`📤 POST transfer organizer role: ${eventId}, from userId: ${userId}, to userId: ${body.newOrganizerId}`);
+      const result = await this.eventsService.transferOrganizerRole(eventId, userId, body.newOrganizerId);
+      logger.info(`Organizer role transferred successfully`);
+      return result;
+    } catch (error) {
+      logger.error(`Error transferring organizer role: ${error?.message}`, error?.stack);
+      throw error;
+    }
+  }
+
   // ❌ ОТМЕНА ЗАПРОСА НА УЧАСТИЕ
   @UseGuards(JwtAuthGuard)
   @Delete('requests/:membershipId')

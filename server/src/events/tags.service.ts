@@ -16,6 +16,7 @@ export class TagsService {
         ageRestriction: true,
         genderRestriction: true,
         isRecurring: true,
+        isMassEvent: true,
       },
     });
 
@@ -56,6 +57,14 @@ export class TagsService {
     // Recurring
     if (event.isRecurring) {
       autoTags.push('recurring');
+    }
+
+    // Mass event (массовое событие)
+    if (event.isMassEvent) {
+      autoTags.push('массовое');
+      console.log(`[TagsService] Event ${eventId} is mass event, added "массовое" tag`);
+    } else {
+      console.log(`[TagsService] Event ${eventId} isMassEvent: ${event.isMassEvent}`);
     }
 
     // Обновляем метки в базе данных

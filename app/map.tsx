@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, ScrollView, Dimensions, Image } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker } from 'react-native-maps';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
@@ -364,15 +364,18 @@ export default function MapScreen() {
           <MapView
             ref={mapRef}
             style={styles.map}
-            provider={PROVIDER_GOOGLE}
             initialRegion={mapRegion}
             region={mapRegion}
             showsUserLocation={true}
             showsMyLocationButton={false}
             mapType="standard"
             customMapStyle={darkMapStyle}
+            userInterfaceStyle="dark"
             onMapReady={() => {
               logger.debug('Map is ready');
+            }}
+            onError={(error) => {
+              logger.error('Map error:', error);
             }}
           >
             {eventsToShow.map((event) => {

@@ -24,7 +24,7 @@ export function isUserEventParticipant(
     if (event.organizerId === userId) return true;
     
     if (event.participantsData && Array.isArray(event.participantsData)) {
-      return event.participantsData.some((p: any) => p.userId === p.id === userId);
+      return event.participantsData.some((p: any) => p.userId === userId || p.id === userId);
     }
     
     if (event.participantsList && Array.isArray(event.participantsList)) {
