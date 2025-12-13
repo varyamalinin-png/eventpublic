@@ -302,7 +302,7 @@ export default function ExploreScreen() {
         try {
           const userData = getUserData(event.organizerId);
           const stats = getOrganizerStats(event.organizerId);
-          if (!userData || !userData.id) {
+          if (!userData || !userData.id || !userData.name) {
             console.warn('[Explore] Invalid userData for organizer:', event.organizerId);
             return null;
           }
@@ -313,7 +313,12 @@ export default function ExploreScreen() {
           return {
             eventId: event.id, // Добавляем ID события для связи
             organizerId: event.organizerId,
-            ...userData,
+            name: userData.name,
+            username: userData.username,
+            avatar: userData.avatar,
+            age: userData.age,
+            bio: userData.bio,
+            geoPosition: userData.geoPosition,
             stats: {
               ...stats,
               sharedEvents
@@ -688,25 +693,29 @@ export default function ExploreScreen() {
           scrollEventThrottle={16}
         >
           {organizersForCurrentEvents && organizersForCurrentEvents.length > 0 ? organizersForCurrentEvents.map((organizer, index) => {
+            if (!organizer || !organizer.organizerId || !organizer.eventId) {
+              console.warn('[Explore] Invalid organizer:', organizer);
+              return null;
+            }
             const correspondingEvent = currentEvents && currentEvents[index];
             const eventHeight = correspondingEvent ? eventHeights[correspondingEvent.id] : undefined;
             return (
               <OrganizerCard
                 key={`${organizer.eventId}-${organizer.organizerId}`}
                 organizerId={organizer.organizerId}
-                name={organizer.name}
-                age={organizer.age}
-                username={organizer.username}
-                avatar={organizer.avatar}
-                bio={organizer.bio}
-                geoPosition={organizer.geoPosition}
+                name={organizer.name || ''}
+                age={organizer.age || ''}
+                username={organizer.username || ''}
+                avatar={organizer.avatar || ''}
+                bio={organizer.bio || ''}
+                geoPosition={organizer.geoPosition || ''}
                 stats={organizer.stats}
                 correspondingEventId={organizer.eventId}
                 eventHeight={eventHeight}
                 currentUserId={currentUserId}
               />
             );
-          }) : null}
+          }).filter(Boolean) : null}
         </ScrollView>
       </Animated.View>
 
