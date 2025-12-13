@@ -57,6 +57,15 @@ function parseDateInput(text?: string): string | undefined {
 }
 
 export default function ExploreScreen() {
+  // Обработка ошибок для веба
+  if (typeof window !== 'undefined') {
+    try {
+      // Проверяем доступность необходимых API
+    } catch (error) {
+      console.error('ExploreScreen initialization error:', error);
+    }
+  }
+
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'GLOB' | 'FRIENDS'>('GLOB');
   const [searchQuery, setSearchQuery] = useState('');
@@ -186,7 +195,7 @@ export default function ExploreScreen() {
         const eventIds = events
           .filter(event => event && event.organizerId && folder.userIds.includes(event.organizerId))
           .map(event => event.id);
-        
+
         return {
           id: folder.id,
           name: folder.name || 'Unnamed',
@@ -309,7 +318,41 @@ export default function ExploreScreen() {
   // организатора (2-3с на запрос) и вызывает каскадные ре-рендеры через setOrganizerStatsCache.
   // Статистика грузится лениво внутри OrganizerCard при открытии панели.
   const getOrganizersForEvents = (eventsList: Event[]) => {
-    if (!eventsList || !Array.isArray(eventsList)) {
+    try {
+      if (!eventsList || !Array.isArray(eventsList)) {
+        return [];
+      }
+      if (!Array.isArray(events)) {
+        console.warn('[Explore] events is not an array in getOrganizersForEvents');
+        return [];
+      }
+      return eventsList
+        .filter(event => event && event.organizerId && event.id)
+        .map(event => {
+          try {
+            const userData = getUserData(event.organizerId);
+            const stats = getOrganizerStats(event.organizerId);
+            // Вычисляем sharedEvents если это не текущий пользователь
+            const sharedEvents = currentUserId && currentUserId !== event.organizerId
+              ? events.filter(e => e && isUserEventMember(e, currentUserId) && isUserEventMember(e, event.organizerId)).length
+              : undefined;
+            return {
+              eventId: event.id, // Добавляем ID события для связи
+              organizerId: event.organizerId,
+              ...userData,
+              stats: {
+                ...stats,
+                sharedEvents
+              }
+            };
+          } catch (error) {
+            console.error('[Explore] Error processing organizer for event:', event.id, error);
+            return null;
+          }
+        })
+        .filter(Boolean) as any[];
+    } catch (error) {
+      console.error('[Explore] Error in getOrganizersForEvents:', error);
       return [];
     }
     return eventsList
@@ -477,29 +520,39 @@ export default function ExploreScreen() {
   
   // Применяем фильтры и поиск с мемоизацией
   const globEvents = useMemo(() => {
-    const globalEvents = getGlobalEvents();
-    const filtered = filterEvents(globalEvents);
-    let result = searchEvents(filtered, searchQuery);
-    // Sort by distance if user location available (Haversine formula for accurate geo-distance)
-    if (userCoords && !searchQuery) {
-      const haversineDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-        const R = 6371;
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-          Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      };
-      result = [...result].sort((a, b) => {
-        const distA = a.latitude && a.longitude
-          ? haversineDistance(userCoords.lat, userCoords.lon, a.latitude, a.longitude) : 999;
-        const distB = b.latitude && b.longitude
-          ? haversineDistance(userCoords.lat, userCoords.lon, b.latitude, b.longitude) : 999;
-        return distA - distB;
-      });
+    try {
+      // Используем getGlobalEvents() для GLOB - только события, на которые еще не откликался
+      const globalEvents = getGlobalEvents();
+      if (!Array.isArray(globalEvents)) {
+        console.warn('[Explore] getGlobalEvents returned non-array:', globalEvents);
+        return [];
+      }
+      const filtered = filterEvents(globalEvents);
+      let result = searchEvents(filtered, searchQuery);
+      // Sort by distance if user location available (Haversine formula for accurate geo-distance)
+      if (userCoords && !searchQuery) {
+        const haversineDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+          const R = 6371;
+          const dLat = (lat2 - lat1) * Math.PI / 180;
+          const dLon = (lon2 - lon1) * Math.PI / 180;
+          const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+          return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        };
+        result = [...result].sort((a, b) => {
+          const distA = a.latitude && a.longitude
+            ? haversineDistance(userCoords.lat, userCoords.lon, a.latitude, a.longitude) : 999;
+          const distB = b.latitude && b.longitude
+            ? haversineDistance(userCoords.lat, userCoords.lon, b.latitude, b.longitude) : 999;
+          return distA - distB;
+        });
+      }
+      return result;
+    } catch (error) {
+      console.error('[Explore] Error in globEvents calculation:', error);
+      return [];
     }
-    return result;
   }, [getGlobalEvents, filters, searchQuery, userCoords]);
   
   // Прокручиваем к началу при появлении нового события организатора
@@ -524,17 +577,40 @@ export default function ExploreScreen() {
   );
   
   const friendsEvents = useMemo(() => {
-    const filtered = filterEvents(baseFriendsEvents);
-    return searchEvents(filtered, searchQuery);
+    try {
+      if (!Array.isArray(baseFriendsEvents)) {
+        console.warn('[Explore] baseFriendsEvents is not an array:', baseFriendsEvents);
+        return [];
+      }
+      const filtered = filterEvents(baseFriendsEvents);
+      return searchEvents(filtered, searchQuery);
+    } catch (error) {
+      console.error('[Explore] Error in friendsEvents calculation:', error);
+      return [];
+    }
   }, [baseFriendsEvents, filters, searchQuery]);
   
   // События для выбранной папки (FRIENDS) с мемоизацией
-  const folderEvents = useMemo(() => 
-    selectedFolder 
-      ? friendsEvents.filter(event => folders.find(f => f.id === selectedFolder)?.eventIds.includes(event.id))
-      : friendsEvents,
-    [selectedFolder, friendsEvents, folders]
-  );
+  const folderEvents = useMemo(() => {
+    try {
+      if (!Array.isArray(friendsEvents)) {
+        return [];
+      }
+      if (!selectedFolder) {
+        return friendsEvents;
+      }
+      const selectedFolderData = folders.find(f => f.id === selectedFolder);
+      if (!selectedFolderData || !Array.isArray(selectedFolderData.eventIds)) {
+        return friendsEvents;
+      }
+      return friendsEvents.filter(event => 
+        event && event.id && selectedFolderData.eventIds.includes(event.id)
+      );
+    } catch (error) {
+      console.error('[Explore] Error in folderEvents calculation:', error);
+      return [];
+    }
+  }, [selectedFolder, friendsEvents, folders]);
 
   // Получаем события для текущего таба (те же что отображаются)
   const getCurrentTabEvents = (): Event[] => {
@@ -546,13 +622,28 @@ export default function ExploreScreen() {
   };
 
   // Мемоизируем вычисления чтобы избежать лишних ререндеров
-  const currentEvents = useMemo(() => getCurrentTabEvents(), [activeTab, globEvents, folderEvents]);
-  const organizersForCurrentEvents = useMemo(() =>
-    getOrganizersForEvents(currentEvents),
+  const currentEvents = useMemo(() => {
+    try {
+      return getCurrentTabEvents();
+    } catch (error) {
+      console.error('[Explore] Error in currentEvents calculation:', error);
+      return [];
+    }
+  }, [activeTab, globEvents, folderEvents]);
+
+  const organizersForCurrentEvents = useMemo(() => {
+    try {
+      if (!Array.isArray(currentEvents)) {
+        return [];
+      }
+      return getOrganizersForEvents(currentEvents);
+    } catch (error) {
+      console.error('[Explore] Error in organizersForCurrentEvents calculation:', error);
+      return [];
+    }
     // getOrganizerStats намеренно исключён — см. getOrganizersForEvents
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [currentEvents, getUserData, currentUserId, events, isUserEventMember]
-  );
+  }, [currentEvents, getUserData, currentUserId, events, isUserEventMember]);
 
   // Функции для работы с папками
   const createFolder = () => {
@@ -635,7 +726,7 @@ export default function ExploreScreen() {
   const handleDragStart = (index: number) => {
     setDraggedIndex(index);
     if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     }
   };
 
@@ -646,7 +737,7 @@ export default function ExploreScreen() {
       setDraggedIndex(null);
       // Вибрация
       if (Platform.OS !== 'web') {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       }
     } else {
       // Обычный выбор папки
@@ -872,22 +963,28 @@ export default function ExploreScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.usersSearchScrollContent}
           >
-            {searchUsers.map((user) => (
-              <TouchableOpacity
-                key={user.id}
-                style={styles.userSearchItem}
-                onPress={() => router.push(`/profile/${user.id}`)}
-                activeOpacity={0.7}
-              >
-                <Image
-                  source={{ uri: user.avatar }}
-                  style={styles.userSearchAvatar}
+            {Array.isArray(searchUsers) && searchUsers.map((user) => {
+              if (!user || !user.id) {
+                console.warn('[Explore] Invalid user in searchUsers:', user);
+                return null;
+              }
+              return (
+                <TouchableOpacity
+                  key={user.id}
+                  style={styles.userSearchItem}
+                  onPress={() => router.push(`/profile/${user.id}`)}
+                  activeOpacity={0.7}
+                >
+                  <Image
+                    source={{ uri: user.avatar }}
+                    style={styles.userSearchAvatar}
                 />
                 <Text style={styles.userSearchUsername} numberOfLines={1}>
                   {formatUsername(user.username)}
                 </Text>
               </TouchableOpacity>
-            ))}
+              );
+            }).filter(Boolean)}
           </ScrollView>
         </View>
       )}
