@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Animated, PanResponder, Dimensions, Image } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Animated, PanResponder, Dimensions, Image, Platform } from 'react-native';
 import { Link, useRouter, useFocusEffect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import EventCard from '../../components/EventCard';
@@ -27,6 +27,15 @@ interface EventFolder {
 }
 
 export default function ExploreScreen() {
+  // ВЕБ-ПРОВЕРКИ: Логирование инициализации
+  useEffect(() => {
+    if (typeof window !== 'undefined' && Platform.OS === 'web') {
+      console.log('[Explore] Component mounted on web');
+      console.log('[Explore] Window available:', typeof window !== 'undefined');
+      console.log('[Explore] Platform.OS:', Platform.OS);
+    }
+  }, []);
+
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'GLOB' | 'FRIENDS'>('GLOB');
   const [searchQuery, setSearchQuery] = useState('');
@@ -48,13 +57,63 @@ export default function ExploreScreen() {
   const isSyncingRef = useRef(false);
   
   const router = useRouter();
-  const { events, getUserData, getOrganizerStats, getFriendsForEvents, userFolders, createUserFolder, getGlobalEvents, isUserEventMember } = useEvents();
-  const { user: authUser } = useAuth();
+  
+  // ВЕБ-ПРОВЕРКИ: Безопасное получение контекстов с обработкой ошибок
+  let eventsContext, authContext;
+  try {
+    eventsContext = useEvents();
+    authContext = useAuth();
+  } catch (error) {
+    console.error('[Explore] Error getting contexts:', error);
+    if (typeof window !== 'undefined' && Platform.OS === 'web') {
+      console.error('[Explore] Context initialization failed on web');
+    }
+    // Fallback значения
+    const defaultUser: User = {
+      id: '',
+      name: '',
+      username: '',
+      avatar: '',
+      age: '',
+      bio: '',
+      geoPosition: '',
+    };
+    eventsContext = {
+      events: [],
+      getUserData: () => defaultUser,
+      getOrganizerStats: () => ({ totalEvents: 0, organizedEvents: 0, participatedEvents: 0, complaints: 0, friends: 0 }),
+      getFriendsForEvents: () => [],
+      userFolders: [],
+      createUserFolder: async () => {},
+      getGlobalEvents: () => [],
+      isUserEventMember: () => false,
+      eventProfiles: [],
+      fetchEventProfile: async () => null,
+    };
+    authContext = { user: null };
+  }
+  
+  const { events, getUserData, getOrganizerStats, getFriendsForEvents, userFolders, createUserFolder, getGlobalEvents, isUserEventMember, eventProfiles, fetchEventProfile } = eventsContext;
+  const { user: authUser } = authContext;
   const currentUserId = authUser?.id ?? null;
 
-  // ОТЛАДКА: Показываем информацию о загрузке данных
+  // ВЕБ-ПРОВЕРКИ: Детальное логирование для веб-версии
   useEffect(() => {
-    if (events.length === 0 && currentUserId) {
+    if (typeof window !== 'undefined' && Platform.OS === 'web') {
+      console.log('[Explore] Data check:', {
+        eventsCount: Array.isArray(events) ? events.length : 'NOT_ARRAY',
+        eventsType: typeof events,
+        currentUserId,
+        userFoldersCount: Array.isArray(userFolders) ? userFolders.length : 'NOT_ARRAY',
+        hasGetUserData: typeof getUserData === 'function',
+        hasGetGlobalEvents: typeof getGlobalEvents === 'function',
+      });
+    }
+  }, [events, currentUserId, userFolders, getUserData, getGlobalEvents]);
+
+  // ОТЛАДКА: Показываем информацию о загрузке данных (только на мобильных, не на вебе)
+  useEffect(() => {
+    if (Platform.OS !== 'web' && events.length === 0 && currentUserId) {
       // Показываем Alert только один раз через 3 секунды после загрузки
       const timer = setTimeout(() => {
         Alert.alert(
@@ -64,6 +123,13 @@ export default function ExploreScreen() {
         );
       }, 3000);
       return () => clearTimeout(timer);
+    } else if (Platform.OS === 'web' && events.length === 0 && currentUserId) {
+      // На вебе просто логируем в консоль
+      console.warn('[Explore] No events loaded after 3 seconds', {
+        eventsCount: events.length,
+        hasUserId: !!currentUserId,
+        eventsIsArray: Array.isArray(events),
+      });
     }
   }, [events.length, currentUserId]);
   
@@ -88,18 +154,37 @@ export default function ExploreScreen() {
   };
   
   // Состояния для папок событий (FRIENDS) - синхронизируем с userFolders из контекста
-  const folders: EventFolder[] = userFolders.map(folder => {
-    // Получаем все события организаторов из этой папки
-    const eventIds = events
-      .filter(event => folder.userIds.includes(event.organizerId))
-      .map(event => event.id);
-    
-    return {
-      id: folder.id,
-      name: folder.name,
-      eventIds
-    };
-  });
+  const folders: EventFolder[] = useMemo(() => {
+    try {
+      if (!Array.isArray(userFolders)) {
+        console.warn('[Explore] userFolders is not an array:', userFolders);
+        return [];
+      }
+      if (!Array.isArray(events)) {
+        console.warn('[Explore] events is not an array in folders calculation:', events);
+        return [];
+      }
+      return userFolders.map(folder => {
+        if (!folder || !folder.id || !Array.isArray(folder.userIds)) {
+          console.warn('[Explore] Invalid folder:', folder);
+          return null;
+        }
+        // Получаем все события организаторов из этой папки
+        const eventIds = events
+          .filter(event => event && event.organizerId && folder.userIds.includes(event.organizerId))
+          .map(event => event.id);
+        
+        return {
+          id: folder.id,
+          name: folder.name || 'Unnamed',
+          eventIds
+        };
+      }).filter((f): f is EventFolder => f !== null);
+    } catch (error) {
+      console.error('[Explore] Error calculating folders:', error);
+      return [];
+    }
+  }, [userFolders, events]);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -142,14 +227,19 @@ export default function ExploreScreen() {
     const results: User[] = [];
 
     for (const userId of knownUserIds) {
-      const userData = getUserData(userId);
-      const userUsername = normalizeUsername(userData.username);
+      try {
+        const userData = getUserData(userId);
+        if (!userData || !userData.username) continue;
+        const userUsername = normalizeUsername(userData.username);
 
-      if (userUsername.startsWith(query)) {
-        results.push({
-          id: userId,
-          ...userData,
-        });
+        if (userUsername.startsWith(query)) {
+          results.push({
+            id: userId,
+            ...userData,
+          });
+        }
+      } catch (error) {
+        console.warn('[Explore] Error getting user data for search:', userId, error);
       }
     }
 
@@ -181,9 +271,13 @@ export default function ExploreScreen() {
       if (event.price.toLowerCase().includes(lowerQuery)) return true;
       
       // Поиск по организатору
-      const organizerData = getUserData(event.organizerId);
-      if (organizerData.name.toLowerCase().includes(lowerQuery) ||
-          organizerData.username.toLowerCase().includes(lowerQuery)) return true;
+      try {
+        const organizerData = getUserData(event.organizerId);
+        if (organizerData?.name?.toLowerCase().includes(lowerQuery) ||
+            organizerData?.username?.toLowerCase().includes(lowerQuery)) return true;
+      } catch (error) {
+        // Игнорируем ошибки получения данных организатора
+      }
       
       // Поиск по участникам
       if (event.participantsData) {
@@ -205,22 +299,32 @@ export default function ExploreScreen() {
     return eventsList
       .filter(event => event && event.organizerId && event.id)
       .map(event => {
-        const userData = getUserData(event.organizerId);
-        const stats = getOrganizerStats(event.organizerId);
-        // Вычисляем sharedEvents если это не текущий пользователь
-        const sharedEvents = currentUserId && currentUserId !== event.organizerId
-          ? events.filter(e => isUserEventMember(e, currentUserId) && isUserEventMember(e, event.organizerId)).length
-          : undefined;
-        return {
-          eventId: event.id, // Добавляем ID события для связи
-          organizerId: event.organizerId,
-          ...userData,
-          stats: {
-            ...stats,
-            sharedEvents
+        try {
+          const userData = getUserData(event.organizerId);
+          const stats = getOrganizerStats(event.organizerId);
+          if (!userData || !userData.id) {
+            console.warn('[Explore] Invalid userData for organizer:', event.organizerId);
+            return null;
           }
-        };
-      });
+          // Вычисляем sharedEvents если это не текущий пользователь
+          const sharedEvents = currentUserId && currentUserId !== event.organizerId
+            ? events.filter(e => isUserEventMember(e, currentUserId) && isUserEventMember(e, event.organizerId)).length
+            : undefined;
+          return {
+            eventId: event.id, // Добавляем ID события для связи
+            organizerId: event.organizerId,
+            ...userData,
+            stats: {
+              ...stats,
+              sharedEvents
+            }
+          };
+        } catch (error) {
+          console.error('[Explore] Error getting organizer data:', event.organizerId, error);
+          return null;
+        }
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
   };
 
 
@@ -334,13 +438,19 @@ export default function ExploreScreen() {
       
       // Фильтр по возрасту организатора
       if (filters.organizerAgeMin || filters.organizerAgeMax) {
-        const organizerData = getUserData(event.organizerId);
-        // Извлекаем числовой возраст из строки типа "28 лет" или "24 года"
-        const ageMatch = organizerData.age.match(/(\d+)/);
-        const orgAge = ageMatch ? parseInt(ageMatch[1]) : 0;
-        
-        if (filters.organizerAgeMin && orgAge < filters.organizerAgeMin) return false;
-        if (filters.organizerAgeMax && orgAge > filters.organizerAgeMax) return false;
+        try {
+          const organizerData = getUserData(event.organizerId);
+          if (!organizerData || !organizerData.age) return true; // Пропускаем если нет данных
+          // Извлекаем числовой возраст из строки типа "28 лет" или "24 года"
+          const ageMatch = organizerData.age.match(/(\d+)/);
+          const orgAge = ageMatch ? parseInt(ageMatch[1]) : 0;
+          
+          if (filters.organizerAgeMin && orgAge < filters.organizerAgeMin) return false;
+          if (filters.organizerAgeMax && orgAge > filters.organizerAgeMax) return false;
+        } catch (error) {
+          console.error('[Explore] Error filtering by organizer age:', error);
+          return true; // Пропускаем если ошибка
+        }
       }
       
       // Фильтр по меткам (тегам)
@@ -510,7 +620,9 @@ export default function ExploreScreen() {
 
   const handleDragStart = (index: number) => {
     setDraggedIndex(index);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
   };
 
   const handleFolderPress = (folderId: string | null, index?: number) => {
@@ -519,12 +631,26 @@ export default function ExploreScreen() {
       // Сбрасываем выбор
       setDraggedIndex(null);
       // Вибрация
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (Platform.OS !== 'web') {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
     } else {
       // Обычный выбор папки
       setSelectedFolder(folderId);
     }
   };
+
+  // ВЕБ-ПРОВЕРКИ: Fallback UI если контексты не загрузились
+  if (!eventsContext || !authContext) {
+    if (typeof window !== 'undefined' && Platform.OS === 'web') {
+      console.error('[Explore] Contexts not available, showing fallback');
+    }
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: '#FFF', fontSize: 16 }}>Загрузка...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
