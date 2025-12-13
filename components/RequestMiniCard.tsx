@@ -257,7 +257,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useEvents } from '../context/EventsContext';
 
 interface RequestMiniCardProps {

@@ -287,7 +287,7 @@ export default function EventProfileScreen() {
         actions.push({ id: 'accept_invite', label: t.events.acceptInvitation, isClickable: true });
         actions.push({ id: 'cancel_invite', label: t.events.cancelInvitation, isClickable: true });
         // Опция "go to chat" - неактивна для приглашенных пользователей
-          actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: false });
+        actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: false });
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });
         actions.push({ id: 'report', label: t.events.report, isClickable: true });
@@ -297,7 +297,7 @@ export default function EventProfileScreen() {
         actions.push({ id: 'view_requests', label: t.events.viewRequests, isClickable: true });
         actions.push({ id: 'cancel_request', label: t.events.cancelRequest, isClickable: true });
         // Опция "go to chat" - неактивна для пользователей в ожидании
-          actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: false });
+        actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: false });
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });
         actions.push({ id: 'report', label: t.events.report, isClickable: true });
@@ -306,7 +306,7 @@ export default function EventProfileScreen() {
       else if (relationship === 'accepted') {
         actions.push({ id: 'cancel_participation', label: t.events.cancelParticipation });
         // Опция "go to chat" - активна для принятых участников
-          const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
+        const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
         actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: !!eventChat });
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });
@@ -323,7 +323,7 @@ export default function EventProfileScreen() {
         }
         actions.push({ id: 'remove_participant', label: t.events.removeParticipant, isClickable: true });
         // Опция "go to chat" - активна для принятых участников
-          const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
+        const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
         actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: !!eventChat });
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });

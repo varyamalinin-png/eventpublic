@@ -13,9 +13,6 @@ export interface SwipeButtons {
   secondary: SwipeButton | null;
 }
 
-// Re-export для использования в EventCardSwipe
-export type { SwipeButton, SwipeButtons };
-
 export const getSwipeButtons = (
   event: Event | undefined,
   context: 'explore' | 'other_profile' | 'own_profile',

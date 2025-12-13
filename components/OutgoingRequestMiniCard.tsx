@@ -61,7 +61,7 @@ export default function OutgoingRequestMiniCard({
   };
 
   // КРИТИЧЕСКИ ВАЖНО: Если событие удалено - делаем иконку некликабельной
-  const isDisabled = (type === 'event' && eventId && !event) || (type === 'friend' && userId && !user);
+  const isDisabled: boolean = Boolean((type === 'event' && eventId && !event) || (type === 'friend' && userId && !user));
   
   return (
     <TouchableOpacity 
@@ -151,9 +151,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F0F0',
     marginBottom: 10,
     marginTop: 5,
-  },
-  disabledCard: {
-    opacity: 0.5,
   },
   disabledCard: {
     opacity: 0.5,
