@@ -94,6 +94,7 @@ model User {
   folders                  Folder[]
   userFolders              UserFolder[]              @relation("UserFolderOwner")
   userFolderUsers          UserFolderUser[]          @relation("UserFolderUser")
+  eventFolders             EventFolder[]             @relation("EventFolderOwner")
   eventProfilePosts        EventProfilePost[]        @relation("EventProfilePostAuthor")
   eventProfileParticipants EventProfileParticipant[] @relation("EventProfileParticipant")
   eventParticipations      UserEventParticipation[]  @relation("UserEventParticipation")
@@ -149,6 +150,7 @@ model Event {
   messages       Message[]
   complaints     Complaint[]
   participations UserEventParticipation[]
+  eventFolders   EventFolderEvent[]
 
   @@index([isRecurring])
   @@index([autoTags])
@@ -210,14 +212,14 @@ model EventProfilePost {
   profileId String
   authorId  String
   content   String?
-  photoUrl  String?  // Для обратной совместимости
-  photoUrls Json?    // Массив URL для карусели
-  captions  Json?    // Массив описаний для каждого фото
+  photoUrl  String? // Для обратной совместимости
+  photoUrls Json? // Массив URL для карусели
+  captions  Json? // Массив описаний для каждого фото
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  profile EventProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  author  User         @relation("EventProfilePostAuthor", fields: [authorId], references: [id])
+  profile  EventProfile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  author   User          @relation("EventProfilePostAuthor", fields: [authorId], references: [id])
   comments PostComment[]
 }
 
@@ -447,4 +449,32 @@ model PersonalChatKey {
 
   @@unique([userAId, userBId])
   @@index([userAId, userBId])
+}
+
+model EventFolder {
+  id            String   @id @default(uuid())
+  ownerId       String
+  name          String
+  description   String?
+  coverPhotoUrl String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  owner  User               @relation("EventFolderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  events EventFolderEvent[]
+
+  @@index([ownerId])
+}
+
+model EventFolderEvent {
+  folderId String
+  eventId  String
+  addedAt  DateTime @default(now())
+
+  folder EventFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  event  Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@id([folderId, eventId])
+  @@index([folderId])
+  @@index([eventId])
 }
