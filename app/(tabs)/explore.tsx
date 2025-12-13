@@ -270,46 +270,56 @@ export default function ExploreScreen() {
 
   // Расширенная фильтрация событий для explore
   const searchEvents = (eventsList: Event[], query: string) => {
+    if (!Array.isArray(eventsList)) {
+      console.warn('[Explore] searchEvents received non-array:', eventsList);
+      return [];
+    }
     if (!query.trim()) return eventsList;
     
     const lowerQuery = query.toLowerCase();
     return eventsList.filter(event => {
-      // Поиск по названию события
-      if (event.title.toLowerCase().includes(lowerQuery)) return true;
-      
-      // Поиск по описанию
-      if (event.description.toLowerCase().includes(lowerQuery)) return true;
-      
-      // Поиск по локации
-      if (event.location.toLowerCase().includes(lowerQuery)) return true;
-      
-      // Поиск по дате (формат "15 мая")
-      if (event.displayDate.toLowerCase().includes(lowerQuery)) return true;
-      
-      // Поиск по времени
-      if (event.time.toLowerCase().includes(lowerQuery)) return true;
-      
-      // Поиск по цене
-      if (event.price.toLowerCase().includes(lowerQuery)) return true;
-      
-      // Поиск по организатору
+      if (!event) return false;
       try {
-        const organizerData = getUserData(event.organizerId);
-        if (organizerData?.name?.toLowerCase().includes(lowerQuery) ||
-            organizerData?.username?.toLowerCase().includes(lowerQuery)) return true;
+        // Поиск по названию события
+        if (event.title?.toLowerCase().includes(lowerQuery)) return true;
+
+        // Поиск по описанию
+        if (event.description?.toLowerCase().includes(lowerQuery)) return true;
+
+        // Поиск по локации
+        if (event.location?.toLowerCase().includes(lowerQuery)) return true;
+
+        // Поиск по дате (формат "15 мая")
+        if (event.displayDate?.toLowerCase().includes(lowerQuery)) return true;
+
+        // Поиск по времени
+        if (event.time?.toLowerCase().includes(lowerQuery)) return true;
+
+        // Поиск по цене
+        if (event.price?.toLowerCase().includes(lowerQuery)) return true;
+
+        // Поиск по организатору
+        try {
+          const organizerData = getUserData(event.organizerId);
+          if (organizerData?.name?.toLowerCase().includes(lowerQuery) ||
+              organizerData?.username?.toLowerCase().includes(lowerQuery)) return true;
+        } catch (error) {
+          // Игнорируем ошибки получения данных организатора
+        }
+
+        // Поиск по участникам
+        if (Array.isArray(event.participantsData)) {
+          const participantMatch = event.participantsData.some(participant =>
+            participant?.name?.toLowerCase().includes(lowerQuery)
+          );
+          if (participantMatch) return true;
+        }
+
+        return false;
       } catch (error) {
-        // Игнорируем ошибки получения данных организатора
+        console.error('[Explore] Error in searchEvents for event:', event.id, error);
+        return false;
       }
-      
-      // Поиск по участникам
-      if (event.participantsData) {
-        const participantMatch = event.participantsData.some(participant => 
-          participant.name?.toLowerCase().includes(lowerQuery)
-        );
-        if (participantMatch) return true;
-      }
-      
-      return false;
     });
   };
 
@@ -437,7 +447,12 @@ export default function ExploreScreen() {
 
   // Функция фильтрации событий
   const filterEvents = (eventsList: any[]) => {
+    if (!Array.isArray(eventsList)) {
+      console.warn('[Explore] filterEvents received non-array:', eventsList);
+      return [];
+    }
     return eventsList.filter(event => {
+      if (!event) return false;
       // Фильтр по количеству участников
       if (filters.participantsMin && event.participants < filters.participantsMin) return false;
       if (filters.participantsMax && event.participants > filters.participantsMax) return false;
@@ -459,9 +474,14 @@ export default function ExploreScreen() {
 
       // Фильтр по цене
       if (filters.priceMax) {
-        const price = event.price.replace(/[^\d]/g, '');
-        const priceValue = parseInt(price) || 0;
-        if (priceValue > filters.priceMax) return false;
+        try {
+          const price = (event.price || '').replace(/[^\d]/g, '');
+          const priceValue = parseInt(price) || 0;
+          if (priceValue > filters.priceMax) return false;
+        } catch (error) {
+          console.error('[Explore] Error filtering by price:', error);
+          return true; // Пропускаем если ошибка
+        }
       }
       
       // Фильтр по возрасту организатора
@@ -472,7 +492,7 @@ export default function ExploreScreen() {
           // Извлекаем числовой возраст из строки типа "28 лет" или "24 года"
           const ageMatch = organizerData.age.match(/(\d+)/);
           const orgAge = ageMatch ? parseInt(ageMatch[1]) : 0;
-          
+
           if (filters.organizerAgeMin && orgAge < filters.organizerAgeMin) return false;
           if (filters.organizerAgeMax && orgAge > filters.organizerAgeMax) return false;
         } catch (error) {
