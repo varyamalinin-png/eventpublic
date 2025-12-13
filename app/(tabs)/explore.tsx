@@ -432,17 +432,26 @@ export default function ExploreScreen() {
 
   // Получаем все уникальные метки из событий
   const allAvailableTags = useMemo(() => {
-    const tagsSet = new Set<string>();
-    events.forEach(event => {
-      if (event.tags && Array.isArray(event.tags)) {
-        event.tags.forEach(tag => {
-          if (tag && typeof tag === 'string') {
-            tagsSet.add(tag);
-          }
-        });
+    try {
+      if (!Array.isArray(events)) {
+        return [];
       }
-    });
-    return Array.from(tagsSet).sort();
+      const tagsSet = new Set<string>();
+      events.forEach(event => {
+        if (!event) return;
+        if (event.tags && Array.isArray(event.tags)) {
+          event.tags.forEach(tag => {
+            if (tag && typeof tag === 'string') {
+              tagsSet.add(tag);
+            }
+          });
+        }
+      });
+      return Array.from(tagsSet).sort();
+    } catch (error) {
+      console.error('[Explore] Error calculating allAvailableTags:', error);
+      return [];
+    }
   }, [events]);
 
   // Функция фильтрации событий
@@ -459,9 +468,16 @@ export default function ExploreScreen() {
       
       // Фильтр по времени (через сколько часов)
       if (filters.timeHoursMax) {
-        const eventDateTime = new Date(`${event.date}T${event.time}`);
-        const hoursUntilEvent = (eventDateTime.getTime() - new Date().getTime()) / (1000 * 60 * 60);
-        if (hoursUntilEvent > filters.timeHoursMax) return false;
+        try {
+          if (!event.date || !event.time) return true; // Пропускаем если нет даты/времени
+          const eventDateTime = new Date(`${event.date}T${event.time}`);
+          if (isNaN(eventDateTime.getTime())) return true; // Пропускаем если невалидная дата
+          const hoursUntilEvent = (eventDateTime.getTime() - new Date().getTime()) / (1000 * 60 * 60);
+          if (hoursUntilEvent > filters.timeHoursMax) return false;
+        } catch (error) {
+          console.error('[Explore] Error filtering by time:', error);
+          return true; // Пропускаем если ошибка
+        }
       }
       
       // Фильтр по диапазону дат (ISO-строки сравнимы лексикографически)
