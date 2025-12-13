@@ -8,16 +8,17 @@ import { isEventPast, isEventUpcoming } from './eventHelpers';
 
 /**
  * Проверяет, является ли пользователь участником события
- * Для будущих событий - через обычную проверку
- * Для прошедших событий - через eventProfiles.participants
+ * Использует единую логику для всех событий (предстоящих и прошедших)
+ * @deprecated Используйте isUserEventMember из EventsContext вместо этой функции
  */
 export function isUserEventParticipant(
   event: Event,
   userId: string,
-  eventProfiles: EventProfile[]
+  eventProfiles?: EventProfile[] // Оставлено для обратной совместимости, но не используется
 ): boolean {
   if (!event || !userId) return false;
 
+<<<<<<< HEAD
   // Для будущих событий используем стандартную проверку
   if (isEventUpcoming(event)) {
     // Проверяем через organizerId и participantsData/participantsList
@@ -32,39 +33,42 @@ export function isUserEventParticipant(
     }
     
     return false;
+=======
+  // Проверяем через organizerId и participantsData/participantsList
+  if (event.organizerId === userId) return true;
+  
+  if (event.participantsData && Array.isArray(event.participantsData)) {
+    return event.participantsData.some((p: any) => (p.userId || p.id) === userId);
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   }
-
-  // Для прошедших событий проверяем через eventProfiles
-  if (isEventPast(event)) {
-    const profile = eventProfiles.find(p => p.eventId === event.id);
-    if (profile) {
-      return profile.participants.includes(userId);
-    }
-    // Если профиля нет - пользователь не участник (был удален)
-    return false;
+  
+  if (event.participantsList && Array.isArray(event.participantsList)) {
+    return event.participantsList.includes(userId);
   }
-
+  
   return false;
 }
 
 /**
  * Фильтрует события, где пользователь является участником
+ * @deprecated Используйте фильтрацию через EventsContext напрямую
  */
 export function filterUserEvents(
   events: Event[],
   userId: string,
-  eventProfiles: EventProfile[]
+  eventProfiles?: EventProfile[] // Оставлено для обратной совместимости, но не используется
 ): Event[] {
   return events.filter(event => isUserEventParticipant(event, userId, eventProfiles));
 }
 
 /**
  * Фильтрует будущие события пользователя
+ * @deprecated Используйте фильтрацию через EventsContext напрямую
  */
 export function filterUpcomingUserEvents(
   events: Event[],
   userId: string,
-  eventProfiles: EventProfile[]
+  eventProfiles?: EventProfile[] // Оставлено для обратной совместимости, но не используется
 ): Event[] {
   return events.filter(event => 
     isEventUpcoming(event) && isUserEventParticipant(event, userId, eventProfiles)
@@ -73,11 +77,12 @@ export function filterUpcomingUserEvents(
 
 /**
  * Фильтрует прошедшие события пользователя
+ * @deprecated Используйте фильтрацию через EventsContext напрямую
  */
 export function filterPastUserEvents(
   events: Event[],
   userId: string,
-  eventProfiles: EventProfile[]
+  eventProfiles?: EventProfile[] // Оставлено для обратной совместимости, но не используется
 ): Event[] {
   return events.filter(event => 
     isEventPast(event) && isUserEventParticipant(event, userId, eventProfiles)

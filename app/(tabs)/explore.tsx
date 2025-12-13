@@ -360,13 +360,21 @@ export default function ExploreScreen() {
   };
 
   // Мемоизируем фильтрацию событий
-  const futureEvents = useMemo(() => 
-    events.filter(event => 
-      !event.title.toLowerCase().includes('архив') && 
-      !event.title.toLowerCase().includes('(архив)')
-    ),
-    [events]
-  );
+  const futureEvents = useMemo(() => {
+    try {
+      if (!Array.isArray(events)) {
+        return [];
+      }
+      return events.filter(event => {
+        if (!event || !event.title) return false;
+        const titleLower = event.title.toLowerCase();
+        return !titleLower.includes('архив') && !titleLower.includes('(архив)');
+      });
+    } catch (error) {
+      console.error('[Explore] Error filtering future events:', error);
+      return [];
+    }
+  }, [events]);
   
   // Базовые события для табов
   const baseGlobEvents = futureEvents;
@@ -711,7 +719,7 @@ export default function ExploreScreen() {
           {/* Фильтр по меткам (тегам) */}
           {allAvailableTags.length > 0 && (
             <View style={styles.filterRowTags}>
-              <Text style={styles.filterLabel}>{t.explore.tags || 'Tags'}</Text>
+              <Text style={styles.filterLabel}>{'Tags'}</Text>
               <ScrollView 
                 horizontal 
                 showsHorizontalScrollIndicator={false}
@@ -927,7 +935,7 @@ export default function ExploreScreen() {
             <Text style={styles.modalTitle}>{t.explore.createFolder}</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder={t.explore.folderName}
+              placeholder={t.explore.createFolder || 'Название папки'}
               value={newFolderName}
               onChangeText={setNewFolderName}
               autoFocus={true}

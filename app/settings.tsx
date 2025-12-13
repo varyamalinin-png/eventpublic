@@ -12,8 +12,8 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -73,28 +73,51 @@ export default function SettingsScreen() {
     };
   }, []);
   
+  const fetchUserProfile = useCallback(() => {
+    if (!currentUserId || !accessToken) return;
+    
+    logger.debug('Fetching user profile...', { userId: currentUserId });
+    apiRequest(`/users/${currentUserId}`, {}, accessToken)
+      .then((data) => {
+        if (isMountedRef.current) {
+          logger.debug('User profile loaded:', { 
+            userId: currentUserId, 
+            role: data?.role, 
+            hasRole: !!data?.role,
+            allKeys: Object.keys(data || {})
+          });
+          setUserProfile(data);
+        }
+      })
+      .catch((error) => {
+        if (!isMountedRef.current) return;
+        logger.error('Error fetching user profile:', error);
+        // Если пользователь не найден (404), сбрасываем профиль
+        if (error?.status === 404) {
+          setUserProfile(null);
+          lastFetchedUserIdRef.current = null;
+        }
+      });
+  }, [currentUserId, accessToken]);
+
   useEffect(() => {
     if (!isMountedRef.current) return;
     
     if (currentUserId && accessToken && lastFetchedUserIdRef.current !== currentUserId) {
       lastFetchedUserIdRef.current = currentUserId;
-      apiRequest(`/users/${currentUserId}`, {}, accessToken)
-        .then((data) => {
-          if (isMountedRef.current) {
-            setUserProfile(data);
-          }
-        })
-        .catch((error) => {
-          if (!isMountedRef.current) return;
-          logger.error('Error fetching user profile:', error);
-          // Если пользователь не найден (404), сбрасываем профиль
-          if (error?.status === 404) {
-            setUserProfile(null);
-            lastFetchedUserIdRef.current = null;
-          }
-        });
+      fetchUserProfile();
     }
-  }, [currentUserId, accessToken]);
+  }, [currentUserId, accessToken, fetchUserProfile]);
+
+  // Обновляем профиль при фокусе на экране (когда пользователь открывает настройки)
+  useFocusEffect(
+    useCallback(() => {
+      if (currentUserId && accessToken) {
+        logger.debug('Settings screen focused, refreshing user profile...');
+        fetchUserProfile();
+      }
+    }, [currentUserId, accessToken, fetchUserProfile])
+  );
   
   // Состояния для настроек
   const [twoFactorAuth, setTwoFactorAuth] = useState(false);
@@ -818,7 +841,7 @@ const removeAvatarFromServer = async () => {
             )}
             {renderSettingItem(
               t.settings.saved.savedMemories || 'Сохраненные меморис',
-              getSavedMemoryPosts(eventProfiles).length > 0 ? `${getSavedMemoryPosts(eventProfiles).length} ${t.settings.saved.memoriesCount || 'постов'}` : t.settings.saved.noSaved,
+              getSavedMemoryPosts(eventProfiles).length > 0 ? `${getSavedMemoryPosts(eventProfiles).length} ${(t.settings.saved as any).memoriesCount || 'постов'}` : t.settings.saved.noSaved,
               () => router.push('/(tabs)/saved')
             )}
           </>
@@ -882,9 +905,17 @@ const removeAvatarFromServer = async () => {
             {renderSettingItem(t.settings.support.terms, undefined, () => {})}
             {renderSettingItem(t.settings.support.privacy, undefined, () => {})}
             {renderSettingItem(t.settings.support.myComplaints, undefined, () => router.push('/my-complaints'))}
-            {userProfile?.role === 'ADMIN' && (
-              renderSettingItem(t.settings.support.adminPanel, t.settings.support.moderation, () => router.push('/admin/complaints'))
-            )}
+            {(() => {
+              logger.debug('Checking admin panel visibility:', { 
+                hasUserProfile: !!userProfile, 
+                role: userProfile?.role, 
+                isAdmin: userProfile?.role === 'ADMIN',
+                userProfileKeys: userProfile ? Object.keys(userProfile) : []
+              });
+              return userProfile?.role === 'ADMIN' && (
+                renderSettingItem(t.settings.support.adminPanel, t.settings.support.moderation, () => router.push('/admin/complaints'))
+              );
+            })()}
             {userProfile?.role === 'SUPPORT' && (
               renderSettingItem(t.settings.support.supportCabinet, t.settings.support.complaintProcessing, () => router.push('/support/complaints'))
             )}
@@ -1730,6 +1761,23 @@ const styles = StyleSheet.create({
   datePickerButtonText: {
     color: '#FFF',
     fontSize: 16,
+  },
+  genderOption: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    backgroundColor: '#2A2A2A',
+  },
+  genderOptionSelected: {
+    backgroundColor: '#8B5CF6',
+  },
+  genderOptionText: {
+    color: '#FFF',
+    fontSize: 16,
+  },
+  genderOptionTextSelected: {
+    color: '#FFF',
+    fontWeight: 'bold',
   },
 });
 

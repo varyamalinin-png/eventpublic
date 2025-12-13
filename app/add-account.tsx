@@ -190,7 +190,7 @@ export default function AddAccountScreen() {
       });
       
       console.log('[AddAccount] Register result:', result);
-      console.log('[AddAccount] requiresEmailVerification:', result?.requiresEmailVerification);
+      console.log('[AddAccount] requiresEmailVerification:', (result as any)?.requiresEmailVerification);
       console.log('[AddAccount] isAuthenticated before navigation:', isAuthenticated);
       
       // После регистрации НЕМЕДЛЕННО переходим на подтверждение email

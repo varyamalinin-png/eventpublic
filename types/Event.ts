@@ -41,6 +41,8 @@ export interface Event {
   recurringDays?: number[]; // Для weekly: [1,3,5] = понедельник, среда, пятница
   recurringDayOfMonth?: number; // Для monthly: день месяца (1-31)
   recurringCustomDates?: string[]; // Для custom: массив дат в формате "YYYY-MM-DD"
+  // Поле для массового события
+  isMassEvent?: boolean;
   // Метки (теги) события
   tags?: string[]; // Массив меток (автоматические и пользовательские)
 }

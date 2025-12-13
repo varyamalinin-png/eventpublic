@@ -32,7 +32,7 @@ export default function NotificationItem({ notification, onPress, onDelete }: No
         return `${actorName} ${t.notifications.changed || 'changed'} ${payload.changedField || (t.notifications.parameters || 'parameters')} ${t.notifications.in || 'in'}`;
       case 'EVENT_CANCELLED': {
         // Для отмененных событий добавляем дату
-        const eventDate = payload.eventDate || event?.date;
+        const eventDate = (payload as any).eventDate || event?.date;
         const formattedDate = eventDate ? formatDate(eventDate) : '';
         return `${actorName} ${t.notifications.cancelled || 'cancelled'} ${t.notifications.event || 'event'}${formattedDate ? ` ${formattedDate}` : ''}`;
       }

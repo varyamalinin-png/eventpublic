@@ -37,7 +37,6 @@ export default function CalendarScreen() {
   const { t } = useLanguage();
   const { 
     events, 
-    eventProfiles,
     eventRequests,
     getMyEventParticipationStatus,
     sendEventRequest,
@@ -134,7 +133,8 @@ export default function CalendarScreen() {
   }, [params.date, params.mode]);
 
   // КАЛЕНДАРЬ: я_член_события (показываем все события, где я член - организатор или принятый участник)
-  // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий проверяем через eventProfiles, чтобы учесть удаление
+  // Используем те же признаки для всех событий
+  // КРИТИЧЕСКИ ВАЖНО: Добавляем eventRequests в зависимости, чтобы userEvents обновлялся при изменении статуса запросов
   const userEvents = useMemo(() => {
     const userId = calendarUserId ?? currentUserId;
     if (!userId) return [];
@@ -143,37 +143,38 @@ export default function CalendarScreen() {
       // Проверяем отношения пользователя к событию
       const relationship = getUserRelationship(event, userId);
       
+      // ОТЛАДКА: Логируем для событий, которые должны быть waiting
+      if (event.id === 'ddcb8b5d-bb8c-4dbb-8c71-d2e62773152c') {
+        console.log(`[Calendar] 🔵 userEvents: событие ${event.id} (${event.title}), relationship=${relationship}`);
+      }
+      
       // Включаем события, где пользователь:
       // - организатор (organizer)
       // - участник (accepted)
       // - в ожидании (waiting) - запланировал событие
       // - приглашен (invited)
-      if (relationship === 'organizer' || relationship === 'accepted' || relationship === 'waiting' || relationship === 'invited') {
-        return true;
-      }
-      
-      // Для прошедших событий - дополнительно проверяем через профиль
-      if (isEventPast(event)) {
-        const profile = eventProfiles.find(p => p.eventId === event.id);
-        if (profile) {
-          // Проверяем, есть ли пользователь в participants
-          return profile.participants.includes(userId);
-        }
-      }
-      
-      return false;
+      return relationship === 'organizer' || relationship === 'accepted' || relationship === 'waiting' || relationship === 'invited';
     });
     
     // Убираем дубликаты по id - оставляем только первое вхождение каждого события
     const seen = new Set<string>();
-    return filtered.filter(event => {
+    const result = filtered.filter(event => {
       if (seen.has(event.id)) {
         return false;
       }
       seen.add(event.id);
       return true;
     });
-  }, [events, eventProfiles, calendarUserId, currentUserId, getUserRelationship, isEventPast]);
+    
+    // ОТЛАДКА: Логируем результат
+    if (result.some(e => e.id === 'ddcb8b5d-bb8c-4dbb-8c71-d2e62773152c')) {
+      console.log(`[Calendar] ✅ userEvents: событие ddcb8b5d-bb8c-4dbb-8c71-d2e62773152c включено в userEvents`);
+    } else {
+      console.log(`[Calendar] ❌ userEvents: событие ddcb8b5d-bb8c-4dbb-8c71-d2e62773152c НЕ включено в userEvents`);
+    }
+    
+    return result;
+  }, [events, calendarUserId, currentUserId, getUserRelationship, eventRequests]); // Добавляем eventRequests для обновления при изменении статуса запросов
 
   // Проверяем, прошедшее ли событие (с учётом времени)
   const isPastEvent = (event: any): boolean => {
@@ -410,6 +411,11 @@ export default function CalendarScreen() {
     // Получаем события дня один раз
     const dayEvents = getEventsForDay(date);
     
+    // ОТЛАДКА: Логируем dayEvents для нужного события
+    if (dayEvents.some(e => e.id === 'ddcb8b5d-bb8c-4dbb-8c71-d2e62773152c')) {
+      console.log(`[Calendar] ✅ getEventsForHour: событие ddcb8b5d-bb8c-4dbb-8c71-d2e62773152c найдено в dayEvents для даты ${dateKey}, час ${hour}`);
+    }
+    
     // СНАЧАЛА добавляем preview событие (если передано через GO)
     // Это приоритетно, чтобы оно показывалось с кнопкой
     // НО только если статус еще не waiting (запрос уже отправлен)
@@ -448,7 +454,16 @@ export default function CalendarScreen() {
         // Проверяем статус через getUserRelationship для правильного различения состояний
         const relationship = getUserRelationship(event, currentUserId ?? '');
         
-        // Если это приглашение (invited) - показываем как preview с кнопкой
+        // ПРИОРИТЕТ 1: Если это waiting (пользователь отправил запрос на участие) - показываем с оранжевым значком
+        // КРИТИЧЕСКИ ВАЖНО: Добавляем waiting события из dayEvents, а не пропускаем их!
+        if (relationship === 'waiting') {
+          console.log(`[Calendar] ✅ Добавляем waiting событие ${event.id} (${event.title}) из dayEvents для часа ${hour}`);
+          result.push({ ...event, isPending: true, participationStatus: 'pending', relationshipType: 'waiting' });
+          addedEventIds.add(event.id);
+          return; // Важно: возвращаемся, чтобы не проверять дальше
+        }
+        
+        // ПРИОРИТЕТ 2: Если это приглашение (invited) - показываем как preview с кнопкой
         if (relationship === 'invited') {
           result.push({
             ...event,
@@ -459,12 +474,7 @@ export default function CalendarScreen() {
           return; // Пропускаем добавление как обычное событие
         }
         
-        // Если это waiting - не добавляем здесь, добавим в pending секции ниже
-        if (relationship === 'waiting') {
-          return; // Пропускаем, добавим в pending секции
-        }
-        
-        // Обычные события (accepted, organizer) - НЕ включаем non_member
+        // ПРИОРИТЕТ 3: Обычные события (accepted, organizer) - НЕ включаем non_member
         // non_member события не должны показываться в календаре
         if (relationship === 'accepted' || relationship === 'organizer') {
           result.push(event);
@@ -473,8 +483,9 @@ export default function CalendarScreen() {
       }
     });
     
-    // Также проверяем ВСЕ события (не только userEvents) на наличие приглашений
-    // Это нужно, потому что invited события могут не попадать в userEvents
+    // КРИТИЧЕСКИ ВАЖНО: Проверяем ВСЕ события (не только userEvents) на наличие приглашений и pending запросов
+    // Это нужно, потому что invited/waiting события могут не попадать в userEvents после присоединения
+    // Проверяем СНАЧАЛА waiting, ПОТОМ invited, чтобы события со статусом waiting не терялись
     events.forEach(event => {
       // Для регулярных событий проверяем через matchesRecurringEvent
       const matchesDate = event.isRecurring 
@@ -484,9 +495,29 @@ export default function CalendarScreen() {
       if (matchesDate) {
         const eventHour = parseInt(event.time.split(':')[0]);
         if (eventHour === hour && !addedEventIds.has(event.id)) {
+          // Пропускаем, если это preview событие (уже добавлено выше)
+          if (previewEvent && event.id === previewEvent.id) {
+            return;
+          }
+          
+          // Проверяем статус через getUserRelationship для правильного различения состояний
           const relationship = getUserRelationship(event, currentUserId ?? '');
           
-          // Если это приглашение (invited) - показываем как preview с кнопкой
+          // ОТЛАДКА: Логируем для событий, которые могут быть waiting
+          if (currentUserId && eventRequests.some(req => req.eventId === event.id && req.type === 'join' && req.fromUserId === currentUserId)) {
+            console.log(`[Calendar] 🔵 Событие ${event.id} (${event.title}): relationship=${relationship}, pendingRequests=${eventRequests.filter(req => req.eventId === event.id && req.type === 'join' && req.fromUserId === currentUserId).length}`);
+          }
+          
+          // ПРИОРИТЕТ 1: Если это waiting (пользователь отправил запрос на участие) - показываем с оранжевым значком
+          // Это должно быть ПЕРЕД проверкой invited, чтобы события не терялись после присоединения
+          if (relationship === 'waiting') {
+            console.log(`[Calendar] ✅ Добавляем событие ${event.id} (${event.title}) со статусом waiting`);
+            result.push({ ...event, isPending: true, participationStatus: 'pending', relationshipType: 'waiting' });
+            addedEventIds.add(event.id);
+            return; // Важно: возвращаемся, чтобы не проверять дальше
+          }
+          
+          // ПРИОРИТЕТ 2: Если это приглашение (invited) - показываем как preview с кнопкой
           if (relationship === 'invited') {
             result.push({
               ...event,
@@ -499,44 +530,9 @@ export default function CalendarScreen() {
       }
     });
 
-    // Добавляем pending запросы для визуализации
-    // Различаем два состояния:
-    // 1. waiting - пользователь отправил запрос на участие (type: 'join') - показываем с оранжевым значком
-    // 2. invited - пользователя пригласили (type: 'invite') - НЕ добавляем здесь, показываем как preview выше
-    events.forEach(evt => {
-      // Для регулярных событий проверяем через matchesRecurringEvent
-      const matchesDate = evt.isRecurring 
-        ? matchesRecurringEvent(evt, date)
-        : evt.date === dateKey;
-      
-      if (matchesDate) {
-        const eventHour = parseInt(evt.time.split(':')[0]);
-        if (eventHour === hour) {
-          // Пропускаем, если событие уже добавлено
-          if (addedEventIds.has(evt.id)) {
-            return;
-          }
-          // Пропускаем, если это preview событие (уже добавлено выше)
-          if (previewEvent && evt.id === previewEvent.id) {
-            return;
-          }
-          
-          // Проверяем статус через getUserRelationship для правильного различения состояний
-          const relationship = getUserRelationship(evt, currentUserId ?? '');
-          
-          // Добавляем только если это waiting (пользователь отправил запрос на участие)
-          // invited события НЕ добавляем здесь - они показываются как preview выше
-          if (relationship === 'waiting') {
-            result.push({ ...evt, isPending: true, participationStatus: 'pending', relationshipType: 'waiting' });
-            addedEventIds.add(evt.id);
-          }
-        }
-      }
-    });
-
     
     return result;
-  }, [getEventsForDay, previewEvent, events, getMyEventParticipationStatus, inviteId, currentUserId, isUserEventMember, getUserRelationship]);
+  }, [getEventsForDay, previewEvent, events, eventRequests, getMyEventParticipationStatus, inviteId, currentUserId, isUserEventMember, getUserRelationship]);
 
   // Создаем слоты времени (0:00 - 23:00) - полная версия часов
   const hourSlots: HourSlot[] = useMemo(() => {
@@ -991,13 +987,12 @@ export default function CalendarScreen() {
                                   // Синхронизация событий происходит автоматически через WebSocket
                                   // Не нужно вызывать syncEventsFromServer вручную
                                   
-                                  // Удаляем запрос из списка после принятия в календаре
-                                  setTimeout(() => {
-                                    if (request.type === 'invite') {
-                                      // Удаляем запрос по его ID
-                                      removeEventRequestById(requestIdToUse);
-                                    }
-                                  }, 500);
+                                  // КРИТИЧЕСКИ ВАЖНО: Удаляем запрос из списка сразу после принятия
+                                  // Это нужно, чтобы кнопка "принять приглашение" исчезла
+                                  // removeEventRequestById уже обновляет состояние eventRequests
+                                  if (request.type === 'invite') {
+                                    removeEventRequestById(requestIdToUse);
+                                  }
                                 }
                               } else {
                                 // Если нет приглашения - отправляем запрос на участие
@@ -1021,10 +1016,17 @@ export default function CalendarScreen() {
                                 // Для бизнес-аккаунтов запрос автоматически принимается в sendEventRequest
                                 try {
                                   await sendEventRequest(event.id, currentUserId);
-                                  // Даем время на обновление состояния запросов
+                                  // КРИТИЧЕСКИ ВАЖНО: После отправки запроса событие должно остаться в календаре
+                                  // со статусом "waiting" (ожидание подтверждения от организатора)
+                                  // Событие будет показано в pending секции с оранжевым значком ожидания
+                                  // НЕ удаляем событие из календаря - оно должно остаться видимым
+                                  
+                                  // Даем время на обновление состояния запросов и пересчет зависимостей
+                                  // Используем более длительную задержку для гарантии обновления всех зависимостей
                                   await new Promise(resolve => setTimeout(resolve, 500));
-                                  // Принудительно обновляем состояние для немедленного отображения
-                                  // Событие должно появиться со статусом waiting
+                                  
+                                  // Принудительно обновляем календарь, чтобы событие появилось со статусом waiting
+                                  // Это нужно, потому что React может не пересчитать useMemo сразу после обновления eventRequests
                                   
                                   // Для бизнес-аккаунтов показываем сообщение об успешном присоединении
                                   if (isBusinessAccount) {

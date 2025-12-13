@@ -343,6 +343,7 @@ export const ru = {
     changeParameters: 'Изменить параметры',
     changeVisibility: 'Изменить видимость',
     cancelEvent: 'Отменить событие',
+    transferOrganizerRole: 'Передать роль организатора',
     cancelParticipation: 'Отменить участие',
     transferOrganizerRole: 'Передать роль организатора',
     viewRequests: 'Перейти в "Исходящие"',
@@ -498,6 +499,25 @@ export const ru = {
         all: 'Все',
       },
 
+<<<<<<< HEAD
+=======
+  // Request Item
+  requestItem: {
+    sentFriendRequest: 'отправили заявку в друзья к',
+    sentJoinRequest: 'отправили заявку на участие в',
+    sentInvite: 'пригласили',
+    toEvent: 'на',
+    wantsToBeFriend: 'хочет быть вашим другом',
+    wantsToInviteYou: 'хочет пригласить вас на',
+    wantsToJoin: 'хочет присоединиться к',
+    invitedYouToEvent: 'пригласил(а) вас на событие',
+    user: 'Пользователь',
+    accepted: 'принято',
+    rejected: 'отклонено',
+    pending: 'ожидает',
+  },
+
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   // Participants Modal
   participantsModal: {
     title: 'Участники события',
@@ -533,6 +553,7 @@ export const ru = {
     from: 'От',
     searchEventsAndPeople: 'Поиск событий и людей...',
     maximum: 'Максимум',
+    tags: 'Метки:',
   },
 
       // Event Profile
@@ -549,22 +570,6 @@ export const ru = {
         descriptionOptional: 'Описание (необязательно)',
         enterPostText: 'Введите текст поста',
       },
-
-  // Request Item
-  requestItem: {
-    sentFriendRequest: 'Вы отправили заявку в друзья к',
-    sentJoinRequest: 'Вы хотите присоединиться к',
-    sentInvite: 'Вы пригласили',
-    toEvent: 'на событие',
-    wantsToBeFriend: 'хочет добавить в друзья',
-    wantsToInviteYou: 'хочет пригласить вас на',
-    wantsToJoin: 'хочет присоединиться к',
-    invitedYouToEvent: 'пригласил(а) вас на событие',
-    user: 'Пользователь',
-    accepted: 'принято',
-    rejected: 'отклонено',
-    pending: 'в ожидании',
-  },
 
   // Map
   map: {

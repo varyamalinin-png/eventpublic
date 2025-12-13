@@ -263,9 +263,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser({
             id: nextAccount.userId,
             email: nextAccount.email || '',
+<<<<<<< HEAD
             username: nextAccount.username || '',
             name: nextAccount.name || '',
             avatarUrl: nextAccount.avatarUrl || '',
+=======
+            username: nextAccount.username || undefined,
+            name: nextAccount.name || undefined,
+            avatarUrl: nextAccount.avatarUrl || undefined,
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
           });
         }
       }
@@ -332,8 +338,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+<<<<<<< HEAD
   const refreshSessionRef = useRef<((token?: string) => Promise<void>) | null>(null);
 
+=======
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   const fetchProfile: (tokenOverride?: string | null) => Promise<void> = useCallback(
     async (tokenOverride: string | null = null): Promise<void> => {
       const tokenToUse = tokenOverride ?? accessToken;
@@ -393,7 +402,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const handleAccountAuthFailure: (failingAccountId: string | null) => Promise<boolean> = useCallback(
+<<<<<<< HEAD
     async (failingAccountId: string | null): Promise<boolean> => {
+=======
+    async (failingAccountId: string | null) => {
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
       const failureKey = failingAccountId || 'null';
       
       // Защита от рекурсивных вызовов
@@ -463,7 +476,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             if (!isNetworkError && (error?.status === 401 || error?.status === 403) && fallbackAccount.refreshToken && fallbackAccount.refreshToken.trim() !== '') {
               try {
-                await refreshSession(fallbackAccount.refreshToken);
+                if (refreshSessionRef.current) {
+                  await refreshSessionRef.current(fallbackAccount.refreshToken);
+                }
                 // После обновления токена повторяем fetchProfile
                 const updatedAccountsRaw = await storageGet(ACCOUNTS_KEY, secureStorageAvailable);
                 const updatedAccounts = parseAccounts(updatedAccountsRaw);
@@ -513,6 +528,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [updateAccounts, persistActiveAccount, setSession, upsertAccount, clearSession, secureStorageAvailable, normalizeMediaUrl],
   );
 
+  // Объявляем refreshSession перед handleAccountAuthFailure, но используем forward declaration
+  const refreshSessionRef = useRef<((token?: string) => Promise<void>) | null>(null);
+  
   const refreshSession = useCallback(
     async (token?: string) => {
       const refreshTokenToUse = token ?? refreshToken;
@@ -667,7 +685,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } else if (error?.status === 401 && targetAccount.refreshToken && targetAccount.refreshToken.trim() !== '') {
             // Пытаемся обновить токен, но если это тоже невалидный refresh token, handleAccountAuthFailure обработает это
             try {
-              await refreshSession(targetAccount.refreshToken);
+              if (refreshSessionRef.current) {
+                await refreshSessionRef.current(targetAccount.refreshToken);
+              }
             } catch (refreshError: any) {
               // Если refresh тоже не удался, обрабатываем через handleAccountAuthFailure
               if (refreshError?.status === 401 || refreshError?.status === 403 || 
@@ -701,7 +721,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } else if (error?.status === 401 && storedRefresh && storedRefresh.trim() !== '') {
             // Пытаемся обновить токен, но если это тоже невалидный refresh token, очищаем сессию
             try {
-              await refreshSession(storedRefresh);
+              if (refreshSessionRef.current) {
+                await refreshSessionRef.current(storedRefresh);
+              }
             } catch (refreshError: any) {
               // Если refresh тоже не удался, просто очищаем сессию (legacy session не имеет accountId)
               if (refreshError?.status === 401 || refreshError?.status === 403 || 
@@ -789,11 +811,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Теперь устанавливаем сессию с токенами нового аккаунта
           await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
         } else {
+<<<<<<< HEAD
           await fetchProfile(data.accessToken);
           // fetchProfile уже обновил пользователя и аккаунт через setUser и upsertAccount
           if (user?.id) {
             await persistActiveAccount(user.id);
             console.log('[Auth] login: активный аккаунт установлен на', user.id);
+=======
+          // Загружаем профиль - fetchProfile сам установит пользователя через setUser
+          await fetchProfile(data.accessToken);
+          // После fetchProfile пользователь уже установлен через setUser внутри fetchProfile
+          // и аккаунт уже сохранен через upsertAccount внутри fetchProfile
+          if (user?.id) {
+            await persistActiveAccount(user.id);
+            console.log('[Auth] login: активный аккаунт установлен на', user.id);
+            await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
+          } else {
+            // Если профиль не загружен, все равно устанавливаем сессию
+            await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
           }
           await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
         }
@@ -960,7 +996,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Если ошибка 401 и есть refresh token, пытаемся обновить
         if ((error?.status === 401 || error?.status === 403) && target.refreshToken && target.refreshToken.trim() !== '') {
           try {
-            await refreshSession(target.refreshToken);
+            if (refreshSessionRef.current) {
+              await refreshSessionRef.current(target.refreshToken);
+            }
             // После обновления токена повторяем fetchProfile
             const updatedAccountsRaw = await storageGet(ACCOUNTS_KEY, secureStorageAvailable);
             const updatedAccounts = parseAccounts(updatedAccountsRaw);

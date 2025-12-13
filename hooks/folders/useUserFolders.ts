@@ -217,7 +217,10 @@ export const useUserFolders = ({
 
   // Удалить папку пользователя
   const deleteUserFolder = useCallback(async (folderId: string) => {
-    if (!accessToken || !currentUserId) {
+    const actualToken = currentAccessTokenRef.current;
+    const actualUserId = currentUserIdRef.current;
+    
+    if (!actualToken || !actualUserId) {
       // Fallback: удаляем локально
       setUserFolders(prev => prev.filter(folder => folder.id !== folderId));
       return;

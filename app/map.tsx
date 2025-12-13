@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, ScrollView, Dimensions, Image } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
@@ -594,3 +595,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+=======
+// Базовый файл для Expo Router
+// Для веба используем map.web.tsx, для нативных платформ - map.native.tsx
+// Expo Router автоматически выберет правильную версию через платформенные расширения
+
+// Просто реэкспортируем веб-версию
+// Для веба это будет использоваться
+// Для нативных платформ Expo Router выберет map.native.tsx автоматически
+export { default } from './map.web';
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)

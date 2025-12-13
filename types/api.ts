@@ -79,6 +79,7 @@ export interface ServerEvent {
   recurringDays?: number[];
   recurringDayOfMonth?: number;
   recurringCustomDates?: string[];
+  isMassEvent?: boolean; // КРИТИЧЕСКИ ВАЖНО: поле для массовых событий
   tags?: string[];
   autoTags?: string[];
   customTags?: string[];
@@ -193,6 +194,7 @@ export interface ServerEventProfilePost {
   author?: ServerUser;
   content?: string;
   photoUrl?: string;
+<<<<<<< HEAD
   photoUrls?: string[];
   captions?: string[];
   caption?: string;
@@ -204,6 +206,10 @@ export interface ServerEventProfilePost {
     content: string;
     createdAt?: string;
   }>;
+=======
+  photoUrls?: string[]; // Массив URL для карусели
+  captions?: string[]; // Массив подписей для каждого фото
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   createdAt?: string;
   [key: string]: unknown;
 }

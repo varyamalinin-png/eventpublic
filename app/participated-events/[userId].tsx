@@ -1,6 +1,6 @@
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import EventCard from '../../components/EventCard';
 import { useEvents, Event } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
@@ -11,7 +11,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export default function ParticipatedEventsScreen() {
   const { userId } = useLocalSearchParams();
   const router = useRouter();
-  const { events, getUserData, isUserAttendee } = useEvents();
+  const { events, getUserData, isUserAttendee, isUserOrganizer, isEventUpcoming, isEventPast, getUserRequestStatus } = useEvents();
   const { user: authUser } = useAuth();
   const { t } = useLanguage();
   const [showEventFeed, setShowEventFeed] = useState(false);
@@ -35,9 +35,32 @@ export default function ParticipatedEventsScreen() {
   const userData = getUserData(targetUserId);
   
   // Все события где я_участник (не организатор) (текущие и прошлые)
-  const participatedEvents = events.filter(event => 
-    isUserAttendee(event, targetUserId)
-  );
+  // КРИТИЧЕСКИ ВАЖНО: Используем ту же логику фильтрации, что и в профиле
+  const participatedEvents = useMemo(() => {
+    return events.filter(event => {
+      // Исключаем отклоненные/отмененные события
+      const userStatus = getUserRequestStatus(event, targetUserId);
+      if (userStatus === 'rejected') {
+        return false;
+      }
+      
+      // Для текущих событий - проверяем обычным способом
+      if (isEventUpcoming(event)) {
+        return isUserAttendee(event, targetUserId);
+      }
+      
+      // Для прошедших событий - используем те же признаки, что и для предстоящих
+      if (isEventPast(event)) {
+        // Организатор не считается участником
+        if (isUserOrganizer(event, targetUserId)) {
+          return false;
+        }
+        return isUserAttendee(event, targetUserId);
+      }
+      
+      return isUserAttendee(event, targetUserId);
+    });
+  }, [events, targetUserId, isUserAttendee, isUserOrganizer, isEventUpcoming, isEventPast, getUserRequestStatus]);
 
   const handleEventPress = (event: Event) => {
     setSelectedEvent(event);
@@ -238,7 +261,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   feedContentContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 12, // Соответствует marginHorizontal в MemoryPost
     flexGrow: 1,
     paddingBottom: 100,
   },

@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   feedContentContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 12, // Соответствует marginHorizontal в MemoryPost
     flexGrow: 1,
     paddingBottom: 100,
   },

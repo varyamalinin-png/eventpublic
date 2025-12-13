@@ -8,7 +8,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -28,6 +28,14 @@
           "NSAllowsArbitraryLoads": true,
           "NSExceptionDomains": {
             "192.168.0.39": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
+            },
+            "100.114.37.214": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
+            },
+            "100.114.32.1": {
               "NSExceptionAllowsInsecureHTTPLoads": true,
               "NSIncludesSubdomains": true
             },
@@ -93,7 +101,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Приложение использует ваше местоположение для отображения событий на карте."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "extra": {
       "router": {

@@ -1,16 +1,21 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Modal, TextInput, Alert, Dimensions } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Image, Modal, TextInput, Alert, Dimensions } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useEvents } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { Audio } from 'expo-av';
 import MemoryPost from '../../components/MemoryPost';
 import ParticipantsModal from '../../components/ParticipantsModal';
 import { createLogger } from '../../utils/logger';
+import { API_BASE_URL } from '../../services/api';
+import type { EventProfilePost } from '../../types/EventProfile';
+import { eventProfileStyles } from './[id].styles';
 
 const logger = createLogger('EventProfile');
+const styles = eventProfileStyles;
 
 export default function EventProfileScreen() {
   const { id, viewerUserId } = useLocalSearchParams();
@@ -21,7 +26,8 @@ export default function EventProfileScreen() {
     getEventProfile, 
     getUserData, 
     canEditEventProfile, 
-    addEventProfilePost, 
+    addEventProfilePost,
+    deleteEventProfilePost, 
     updateEventProfile,
     getEventParticipants,
     createEventProfile,
@@ -44,9 +50,10 @@ export default function EventProfileScreen() {
     cancelEventRequest,
     removeParticipantFromEvent,
     respondToEventRequest,
-    fetchEventProfile
+    fetchEventProfile,
+    getChatsForUser
   } = useEvents();
-  const { user: authUser } = useAuth();
+  const { user: authUser, accessToken } = useAuth();
   const currentUserId = authUser?.id ?? null;
   
   const eventId = Array.isArray(id) ? id[0] : id || '';
@@ -89,6 +96,9 @@ export default function EventProfileScreen() {
   const [musicTitle, setMusicTitle] = useState('');
   const [musicArtist, setMusicArtist] = useState('');
   const [contentCaption, setContentCaption] = useState('');
+  const [selectedPhotos, setSelectedPhotos] = useState<Array<{ uri: string; index: number; id: string; caption?: string }>>([]);
+  const [isUploadingPhotos, setIsUploadingPhotos] = useState(false);
+  const [combineIntoOnePost, setCombineIntoOnePost] = useState(false); // Чекбокс "объединить в один пост"
   
   // Состояния для поиска музыки
   const [searchQuery, setSearchQuery] = useState('');
@@ -119,7 +129,7 @@ export default function EventProfileScreen() {
       // Профиль доступен всем для просмотра, редактирование доступно только участникам
       fetchEventProfile(eventId).then((profile) => {
         if (!profile) {
-          logger.debug('Профиль не найден - событие еще не завершилось или профиль не создан');
+          logger.debug('Профиль события не найден');
         }
         attemptedProfiles.current.delete(eventId);
       }).catch(() => {
@@ -127,6 +137,23 @@ export default function EventProfileScreen() {
       });
     }
   }, [eventId, eventProfile, event, fetchEventProfile]);
+
+  // Обновляем данные события (включая персональные фото) при открытии профиля
+  useEffect(() => {
+    if (eventId && event) {
+      // Синхронизируем события с сервера, чтобы получить актуальные персональные фото
+      const syncEvents = async () => {
+        try {
+          // Используем syncEventsFromServer из контекста через useEvents
+          // Но так как это не экспортируется напрямую, мы можем вызвать обновление через другой способ
+          // Или просто полагаемся на WebSocket обновления
+        } catch (error) {
+          logger.error('Failed to sync events on profile open:', error);
+        }
+      };
+      syncEvents();
+    }
+  }, [eventId, event]);
 
   // Получаем обновленный профиль события после создания
   const currentEventProfile = getEventProfile(eventId);
@@ -184,14 +211,28 @@ export default function EventProfileScreen() {
       if (relationship === 'invited') {
         actions.push({ id: 'accept_invite', label: t.events.acceptInvitation, isClickable: true });
         actions.push({ id: 'cancel_invite', label: t.events.cancelInvitation, isClickable: true });
+        // Опция "go to chat" - активна только если пользователь является участником (accepted или organizer)
+          const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
+        if (eventChat && (relationship === 'accepted' || relationship === 'organizer')) {
+            actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: true });
+        } else {
+          actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: false });
+        }
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });
         actions.push({ id: 'report', label: t.events.report, isClickable: true });
       }
       // ПРИОРИТЕТ 2: В ожидании (waiting)
       else if (relationship === 'waiting') {
-        actions.push({ id: 'view_requests', label: t.events.viewRequests });
-        actions.push({ id: 'cancel_request', label: t.events.cancelRequest });
+        actions.push({ id: 'view_requests', label: t.events.viewRequests, isClickable: true });
+        actions.push({ id: 'cancel_request', label: t.events.cancelRequest, isClickable: true });
+        // Опция "go to chat" - активна только если пользователь является участником (accepted или organizer)
+          const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
+        if (eventChat && (relationship === 'accepted' || relationship === 'organizer')) {
+            actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: true });
+        } else {
+          actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: false });
+        }
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });
         actions.push({ id: 'report', label: t.events.report, isClickable: true });
@@ -199,6 +240,13 @@ export default function EventProfileScreen() {
       // ПРИОРИТЕТ 3: Участник (accepted)
       else if (relationship === 'accepted') {
         actions.push({ id: 'cancel_participation', label: t.events.cancelParticipation });
+        // Опция "go to chat" - активна только если пользователь является участником (accepted или organizer)
+          const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
+        if (eventChat && (relationship === 'accepted' || relationship === 'organizer')) {
+            actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: true });
+        } else {
+          actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: false });
+        }
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });
         actions.push({ id: 'report', label: t.events.report, isClickable: true });
@@ -206,22 +254,29 @@ export default function EventProfileScreen() {
       // ПРИОРИТЕТ 4: Организатор (organizer)
       else if (relationship === 'organizer') {
         actions.push({ id: 'change_parameters', label: t.events.changeParameters, isClickable: true });
-        if (participantsCount <= 2) {
+        if (participantsCount === 1) {
           actions.push({ id: 'cancel_event', label: t.events.cancelEvent, isClickable: true });
         } else {
-          actions.push({ id: 'cancel_organizer_participation', label: t.events.cancelParticipation, isClickable: true });
+          actions.push({ id: 'transfer_organizer_role', label: t.events.transferOrganizerRole || 'Передать роль организатора', isClickable: true });
         }
         // Действие "продлить" для регулярных событий
         if (event.isRecurring) {
           actions.push({ id: 'extend_recurring', label: t.events.extendRecurring || 'Продлить', isClickable: true });
         }
         actions.push({ id: 'remove_participant', label: t.events.removeParticipant, isClickable: true });
+        // Опция "go to chat" - активна только если пользователь является участником (accepted или organizer)
+          const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
+        if (eventChat && (relationship === 'accepted' || relationship === 'organizer')) {
+            actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: true });
+        } else {
+          actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: false });
+        }
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });
       }
       // ПРИОРИТЕТ 5: Не член (non_member)
       else if (relationship === 'non_member') {
-        actions.push({ id: 'schedule', label: t.events.schedule });
+        actions.push({ id: 'schedule', label: t.events.schedule, isClickable: true });
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });
         actions.push({ id: 'report', label: t.events.report, isClickable: true });
@@ -325,25 +380,309 @@ export default function EventProfileScreen() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'images' as any,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 1,
+        allowsMultipleSelection: true,
+        allowsEditing: false,
+        quality: 0.7, // Уменьшаем качество для уменьшения размера файлов
       });
 
-      if (!result.canceled && result.assets[0]) {
-        addEventProfilePost(eventId, {
-          authorId: currentUserId,
-          content: contentCaption || 'Новое фото с события!',
-          photoUrl: result.assets[0].uri,
-        });
-        setShowAddContentModal(false);
-        setContentCaption('');
-        setContentType(null);
-        // Остаемся в режиме редактирования
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        // Сохраняем выбранные фото с нумерацией и уникальным ID
+        const photosWithIndex = result.assets.map((asset, index) => ({
+          uri: asset.uri,
+          index: index + 1,
+          id: `${asset.uri}-${Date.now()}-${index}`, // Уникальный ID для каждого фото
+        }));
+        setSelectedPhotos(prev => [...prev, ...photosWithIndex]);
       }
     } catch (error) {
       Alert.alert('Ошибка', 'Не удалось выбрать фото');
     }
+  };
+
+  // Функция для сжатия фото перед загрузкой
+  const compressPhoto = async (uri: string): Promise<string> => {
+    try {
+      // Сжимаем изображение: максимум 1200px по ширине, качество 0.75
+      const manipResult = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1200 } }], // Максимальная ширина 1200px (сохраняет пропорции)
+        { 
+          compress: 0.75, // Качество 75% (хороший баланс между качеством и размером)
+          format: ImageManipulator.SaveFormat.JPEG 
+        }
+      );
+      logger.debug('Фото сжато:', { original: uri, compressed: manipResult.uri });
+      return manipResult.uri;
+    } catch (error) {
+      logger.warn('Не удалось сжать фото, используем оригинал:', error);
+      // Если сжатие не удалось, возвращаем оригинальный URI
+      return uri;
+    }
+  };
+
+  const handleUploadSelectedPhotos = async () => {
+    if (!currentUserId || selectedPhotos.length === 0) {
+      return;
+    }
+
+    if (isUploadingPhotos) {
+      return; // Предотвращаем множественные загрузки
+    }
+
+    setIsUploadingPhotos(true);
+
+    try {
+      // Загружаем фото в порядке нумерации
+      const sortedPhotos = [...selectedPhotos].sort((a, b) => a.index - b.index);
+      const successfulUploads: string[] = [];
+      const failedUploads: Array<{ photo: typeof sortedPhotos[0]; error: any }> = [];
+      
+      // Если объединяем в один пост - создаем один пост с каруселью
+      if (combineIntoOnePost && sortedPhotos.length > 1) {
+        try {
+          // Загружаем все фото по очереди и получаем их URL
+          const uploadedUrls: string[] = [];
+          const temporaryPostIds: string[] = []; // ID временных постов для удаления
+          
+          for (const photo of sortedPhotos) {
+            try {
+              // Сжимаем фото перед загрузкой
+              const compressedUri = await compressPhoto(photo.uri);
+              
+              // Загружаем фото через FormData и получаем URL
+              // ВАЖНО: создаем временный пост только для получения URL
+              const formData = new FormData();
+              const filename = compressedUri.split('/').pop() || 'photo.jpg';
+              const match = /\.(\w+)$/.exec(filename);
+              const type = match ? `image/${match[1]}` : 'image/jpeg';
+              
+              formData.append('file', {
+                uri: compressedUri,
+                name: filename,
+                type: type,
+              } as any);
+              
+              // Используем токен из useAuth (уже определен в компоненте)
+              if (!accessToken) {
+                throw new Error('No access token');
+              }
+              
+              const uploadResponse = await fetch(`${API_BASE_URL}/events/${eventId}/profile/posts`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                },
+                body: formData,
+              });
+              
+              if (!uploadResponse.ok) {
+                throw new Error(`Failed to upload photo ${photo.index}`);
+              }
+              
+              const uploadResult = await uploadResponse.json();
+              logger.debug(`Загружено фото ${photo.index}:`, { 
+                postId: uploadResult.id, 
+                photoUrl: uploadResult.photoUrl,
+                hasId: !!uploadResult.id 
+              });
+              if (uploadResult.photoUrl) {
+                uploadedUrls.push(uploadResult.photoUrl);
+                // Сохраняем ID временного поста для последующего удаления
+                if (uploadResult.id) {
+                  temporaryPostIds.push(uploadResult.id);
+                  logger.debug(`Добавлен ID временного поста: ${uploadResult.id}`);
+                } else {
+                  logger.warn(`⚠️ Временный пост не имеет ID:`, uploadResult);
+                }
+              } else {
+                logger.warn(`⚠️ Загруженное фото не имеет photoUrl:`, uploadResult);
+              }
+              
+              // Задержка между загрузками
+              if (sortedPhotos.indexOf(photo) < sortedPhotos.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 800));
+              }
+            } catch (error: any) {
+              logger.error(`Failed to upload photo ${photo.index} for carousel:`, error);
+              failedUploads.push({ photo, error });
+            }
+          }
+          
+          // Если все фото загружены, создаем один пост с массивом URL
+          if (uploadedUrls.length > 0) {
+            logger.debug(`Создаем финальный пост с каруселью: ${uploadedUrls.length} фото`, {
+              photoUrls: uploadedUrls,
+              captions: sortedPhotos.slice(0, uploadedUrls.length).map(p => p.caption || ''),
+              content: contentCaption || '',
+            });
+            
+            // Создаем финальный пост с каруселью
+            logger.debug(`Создаем финальный пост с каруселью:`, {
+              eventId,
+              authorId: currentUserId,
+              content: contentCaption || '',
+              photoUrls: uploadedUrls,
+              photoUrlsCount: uploadedUrls.length,
+              captions: sortedPhotos.slice(0, uploadedUrls.length).map(p => p.caption || ''),
+              captionsCount: sortedPhotos.slice(0, uploadedUrls.length).length,
+            });
+            
+            if (!currentUserId) {
+              throw new Error('Current user ID is required');
+            }
+            
+            const finalPost = await addEventProfilePost(eventId, {
+              authorId: currentUserId,
+              content: contentCaption || '',
+              photoUrls: uploadedUrls, // Массив фото для карусели
+              captions: sortedPhotos.slice(0, uploadedUrls.length).map(p => p.caption || ''), // Массив описаний для каждого фото
+            } as Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>);
+            
+            const finalPostTyped = (finalPost as unknown) as EventProfilePost | null;
+            
+            logger.debug(`✅ Финальный пост с каруселью создан:`, {
+              postId: finalPostTyped?.id,
+              hasPhotoUrls: !!(finalPostTyped as any)?.photoUrls,
+              photoUrlsCount: Array.isArray((finalPostTyped as any)?.photoUrls) ? (finalPostTyped as any).photoUrls.length : 0,
+              photoUrls: (finalPostTyped as any)?.photoUrls,
+              temporaryPostIdsCount: temporaryPostIds.length,
+              temporaryPostIds: temporaryPostIds,
+            });
+            
+            // Удаляем временные посты, которые были созданы при загрузке файлов
+            // ВАЖНО: удаляем только если финальный пост успешно создан И имеет photoUrls
+            if (finalPostTyped && Array.isArray((finalPostTyped as any).photoUrls) && (finalPostTyped as any).photoUrls.length > 0) {
+              if (temporaryPostIds.length > 0) {
+                logger.debug(`Удаляем ${temporaryPostIds.length} временных постов:`, temporaryPostIds);
+                // Удаляем все временные посты параллельно для ускорения
+                const deletePromises = temporaryPostIds.map(async (tempPostId) => {
+                  try {
+                    logger.debug(`Удаляем временный пост: ${tempPostId}`);
+                    await deleteEventProfilePost(eventId, tempPostId);
+                    logger.debug(`✅ Удален временный пост: ${tempPostId}`);
+                    return { success: true, postId: tempPostId };
+                  } catch (error) {
+                    logger.warn(`⚠️ Не удалось удалить временный пост ${tempPostId}:`, error);
+                    return { success: false, postId: tempPostId, error };
+                  }
+                });
+                
+                const deleteResults = await Promise.all(deletePromises);
+                const successCount = deleteResults.filter(r => r.success).length;
+                const failCount = deleteResults.filter(r => !r.success).length;
+                logger.debug(`Удаление временных постов завершено: ${successCount} успешно, ${failCount} ошибок`);
+              } else {
+                logger.warn(`⚠️ Нет временных постов для удаления (temporaryPostIds пуст, но финальный пост создан)`);
+              }
+            } else {
+              logger.warn(`⚠️ Финальный пост не создан или не имеет photoUrls:`, {
+                hasFinalPost: !!finalPostTyped,
+                hasPhotoUrls: !!(finalPostTyped as any)?.photoUrls,
+                photoUrlsCount: Array.isArray((finalPostTyped as any)?.photoUrls) ? (finalPostTyped as any).photoUrls.length : 0,
+                temporaryPostIdsCount: temporaryPostIds.length,
+              });
+            }
+            
+            // Все успешно загруженные фото помечаем как успешные
+            successfulUploads.push(...sortedPhotos.slice(0, uploadedUrls.length).map(p => p.id));
+          }
+        } catch (error: any) {
+          logger.error('Failed to upload combined post:', error);
+          failedUploads.push(...sortedPhotos.map(photo => ({ photo, error })));
+        }
+      } else {
+        // Если не объединяем - создаем отдельные посты для каждого фото
+        for (const photo of sortedPhotos) {
+          try {
+            // Сжимаем фото перед загрузкой для предотвращения ошибки 413
+            const compressedUri = await compressPhoto(photo.uri);
+            
+            await addEventProfilePost(eventId, {
+              authorId: currentUserId,
+              content: photo.caption || `Фото ${photo.index} с события!`,
+              photoUrl: compressedUri, // Используем сжатое фото
+            });
+            successfulUploads.push(photo.id);
+            
+            // Увеличиваем задержку между загрузками для предотвращения перегрузки сервера
+            if (sortedPhotos.indexOf(photo) < sortedPhotos.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 800)); // Увеличено с 300ms до 800ms
+            }
+          } catch (error: any) {
+            logger.error(`Failed to upload photo ${photo.index}:`, error);
+            failedUploads.push({ photo, error });
+            
+            // Если ошибка 413 (Payload Too Large), пропускаем это фото и продолжаем
+            const isPayloadTooLarge = error?.status === 413 || 
+                                      error?.message?.includes('413') || 
+                                      error?.message?.toLowerCase().includes('payload too large') ||
+                                      error?.message?.toLowerCase().includes('too large');
+            
+            if (isPayloadTooLarge) {
+              // Не показываем Alert для каждого фото отдельно, чтобы не спамить
+              // Покажем общее сообщение в конце
+            }
+          }
+        }
+      }
+
+      // Удаляем только успешно загруженные фото из списка
+      if (successfulUploads.length > 0) {
+        setSelectedPhotos(prev => prev.filter(p => !successfulUploads.includes(p.id)));
+      }
+      
+      // Если все фото загружены успешно, очищаем caption и сбрасываем чекбокс
+      if (failedUploads.length === 0 && successfulUploads.length === sortedPhotos.length) {
+        setContentCaption('');
+        setCombineIntoOnePost(false);
+        setSelectedPhotos([]);
+        // Сбрасываем contentType, чтобы при следующем открытии показывался выбор типа контента
+        setContentType(null);
+      }
+      
+      // Показываем итоговое сообщение
+      const payloadTooLargeCount = failedUploads.filter(f => {
+        const error = f.error;
+        return error?.status === 413 || 
+               error?.message?.includes('413') || 
+               error?.message?.toLowerCase().includes('payload too large') ||
+               error?.message?.toLowerCase().includes('too large');
+      }).length;
+      
+      if (successfulUploads.length > 0 && failedUploads.length === 0) {
+        const message = combineIntoOnePost && sortedPhotos.length > 1
+          ? `Создан пост с ${successfulUploads.length} фото`
+          : `Загружено ${successfulUploads.length} фото`;
+        Alert.alert('Успешно', message);
+        // Если все фото загружены успешно, закрываем модальное окно
+        setShowAddContentModal(false);
+      } else if (successfulUploads.length > 0 && failedUploads.length > 0) {
+        const message = payloadTooLargeCount > 0
+          ? `Загружено ${successfulUploads.length} из ${sortedPhotos.length} фото. ${payloadTooLargeCount} фото слишком большие и не были загружены. Попробуйте выбрать фото меньшего размера.`
+          : `Загружено ${successfulUploads.length} из ${sortedPhotos.length} фото. ${failedUploads.length} фото не удалось загрузить.`;
+        Alert.alert('Частично успешно', message);
+        // Если есть успешные загрузки, но не все - оставляем модальное окно открытым для повторной попытки
+      } else if (failedUploads.length > 0) {
+        const message = payloadTooLargeCount > 0
+          ? `Не удалось загрузить ${failedUploads.length} фото. Файлы слишком большие. Попробуйте выбрать фото меньшего размера или уменьшите качество.`
+          : `Не удалось загрузить ${failedUploads.length} фото. Попробуйте еще раз.`;
+        Alert.alert('Ошибка', message);
+        // Если все загрузки провалились - оставляем модальное окно открытым для повторной попытки
+      }
+    } catch (error) {
+      logger.error('Error in handleUploadSelectedPhotos:', error);
+      Alert.alert('Ошибка', 'Не удалось загрузить фото. Попробуйте выбрать фото меньшего размера.');
+    } finally {
+      setIsUploadingPhotos(false);
+    }
+  };
+
+  const handleRemovePhoto = (photoId: string) => {
+    setSelectedPhotos(prev => {
+      const filtered = prev.filter(p => p.id !== photoId);
+      // Пересчитываем индексы после удаления
+      return filtered.map((p, i) => ({ ...p, index: i + 1 }));
+    });
   };
 
   // Функция поиска треков через SoundCloud API
@@ -431,7 +770,8 @@ export default function EventProfileScreen() {
       caption: contentCaption || 'Трек ассоциируется с нашей встречей'
     });
     
-    setShowAddContentModal(false);
+    // НЕ закрываем модальное окно и НЕ сбрасываем состояние, чтобы можно было добавить еще
+    // setShowAddContentModal(false);
     setMusicUrl('');
     setMusicTitle('');
     setMusicArtist('');
@@ -439,8 +779,7 @@ export default function EventProfileScreen() {
     setSelectedTrack(null);
     setSearchResults([]);
     setSearchQuery('');
-    setContentType(null);
-    // Остаемся в режиме редактирования
+    // setContentType(null);
   };
 
   // Функции для воспроизведения музыки
@@ -553,13 +892,22 @@ export default function EventProfileScreen() {
               onPress={() => handlePostPress(post)}
               activeOpacity={0.9}
             >
-              {(post.photoUrl) ? (
+              {(() => {
+                // Получаем превью фото: первое фото из карусели или одиночное фото
+                const previewPhotoUrl = (post.photoUrls && post.photoUrls.length > 0)
+                  ? post.photoUrls[0]
+                  : (post.photoUrl || null);
+                
+                if (previewPhotoUrl) {
+                  return (
                 <Image 
-                  source={{ uri: post.photoUrl || post.content }} 
+                      source={{ uri: previewPhotoUrl }} 
                   style={[styles.postImage, { width: '100%', height: cardHeight }]} 
                   resizeMode="cover"
                 />
-              ) : post.type === 'music' ? (
+                  );
+                } else if (post.type === 'music') {
+                  return (
                 <View style={[styles.musicCard, { width: '100%', height: cardHeight }]}>
                   {post.artwork_url ? (
                     <Image 
@@ -589,11 +937,15 @@ export default function EventProfileScreen() {
                     </TouchableOpacity>
                   )}
                 </View>
-              ) : (
+                  );
+                } else {
+                  return (
                 <View style={[styles.postTextContainer, { width: '100%', height: cardHeight }]}>
                   <Text style={styles.postText} numberOfLines={10}>{post.content}</Text>
                 </View>
-              )}
+                  );
+                }
+              })()}
             </TouchableOpacity>
           );
         })}
@@ -608,7 +960,11 @@ export default function EventProfileScreen() {
         <Text style={styles.backText}>←</Text>
       </TouchableOpacity>
 
-      <ScrollView style={styles.content}>
+      <ScrollView 
+        style={styles.content}
+        nestedScrollEnabled={true}
+        removeClippedSubviews={false}
+      >
         {/* Event Info */}
         {/* Аватар события - от края до края */}
         {(() => {
@@ -671,17 +1027,31 @@ export default function EventProfileScreen() {
               {/* Параметры события - скрываются если скрыто */}
               <View style={styles.parametersContainer}>
                 {renderParameterWithOverlay('date', (
-                  <TouchableOpacity onPress={() => router.push('/calendar')} style={styles.parameterItem}>
+                  <TouchableOpacity 
+                    onPress={() => {
+                      // Переход в календарь на недельную раскладку с кнопкой schedule
+                      const isoDateTime = `${event.date}T${event.time}:00`;
+                      router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${eventId}`);
+                    }} 
+                    style={styles.parameterItem}
+                  >
                     <Text style={styles.parameterEmoji}>📅</Text>
                     <Text style={styles.parameterText}>{event.displayDate || event.date}</Text>
                   </TouchableOpacity>
                 ), localHiddenParameters.date)}
                 
                 {renderParameterWithOverlay('time', (
-                  <View style={styles.parameterItem}>
+                  <TouchableOpacity 
+                    onPress={() => {
+                      // Переход в календарь на недельную раскладку с кнопкой schedule
+                      const isoDateTime = `${event.date}T${event.time}:00`;
+                      router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${eventId}`);
+                    }} 
+                    style={styles.parameterItem}
+                  >
                     <Text style={styles.parameterEmoji}>🕐</Text>
                     <Text style={styles.parameterText}>{event.time}</Text>
-                  </View>
+                  </TouchableOpacity>
                 ), localHiddenParameters.time)}
                 
                 {renderParameterWithOverlay('location', (
@@ -769,10 +1139,23 @@ export default function EventProfileScreen() {
 
         {/* Разделительная линия с кнопкой "+" по центру */}
         <View style={styles.divider}>
-          {isPast && isMember && (
+          {isMember && (
             <TouchableOpacity 
               style={styles.addContentButton}
-              onPress={() => setShowAddContentModal(true)}
+              onPress={() => {
+                // Сбрасываем состояние при открытии модального окна
+                setContentType(null);
+                setContentCaption('');
+                setSelectedPhotos([]);
+                setCombineIntoOnePost(false);
+                setMusicUrl('');
+                setMusicTitle('');
+                setMusicArtist('');
+                setSelectedTrack(null);
+                setSearchQuery('');
+                setSearchResults([]);
+                setShowAddContentModal(true);
+              }}
             >
               <Text style={styles.addContentIcon}>+</Text>
             </TouchableOpacity>
@@ -828,7 +1211,7 @@ export default function EventProfileScreen() {
       >
         <View style={styles.modalOverlay}>
           <TouchableOpacity 
-            style={StyleSheet.absoluteFill}
+            style={styles.absoluteFill}
             activeOpacity={1}
             onPress={() => setShowEventActionsModal(false)}
           />
@@ -897,15 +1280,21 @@ export default function EventProfileScreen() {
                       }
                       setShowEventActionsModal(false);
                     } else if (action.id === 'schedule') {
-                      // Переход в календарь для планирования
-                      if (event && currentUserId) {
-                        const isoDateTime = `${event.date}T${event.time}:00`;
-                        router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${eventId}`);
+                      // Переход в календарь для планирования (всегда кликабельно)
+                      if (event) {
+                        // Для регулярных событий показываем модальное окно со списком дат
+                        if (event.isRecurring) {
+                          // TODO: Добавить модальное окно для регулярных событий
+                          Alert.alert('Информация', 'Для регулярных событий выберите конкретную дату');
+                        } else {
+                          const isoDateTime = `${event.date}T${event.time}:00`;
+                          router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${eventId}`);
+                        }
                       }
                       setShowEventActionsModal(false);
                     } else if (action.id === 'cancel_request') {
-                      // Отмена запроса
-                      if (event && currentUserId) {
+                      // Отмена запроса (всегда кликабельно, как по свайпу)
+                      if (currentUserId) {
                         cancelEventRequest(eventId, currentUserId);
                       }
                       setShowEventActionsModal(false);
@@ -941,9 +1330,16 @@ export default function EventProfileScreen() {
                       Alert.alert(t.common.confirm || 'Info', 'Выберите участника для удаления');
                       setShowEventActionsModal(false);
                     } else if (action.id === 'view_requests') {
-                      // Переход в "Мои запросы"
+                      // Переход в "Мои запросы" (всегда кликабельно)
                       router.push('/(tabs)/inbox');
                       setShowEventActionsModal(false);
+                    } else if (action.id === 'go_to_chat' && action.isClickable) {
+                      // Переход в чат события
+                      const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
+                      if (eventChat) {
+                        router.push(`/(tabs)/inbox/${eventChat.id}`);
+                        setShowEventActionsModal(false);
+                      }
                     } else if (action.id === 'report') {
                       // TODO: Реализовать функционал "Пожаловаться"
                       Alert.alert(t.common.confirm || 'Info', 'Функция "Пожаловаться" будет реализована');
@@ -978,7 +1374,26 @@ export default function EventProfileScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{t.eventProfile.addContent}</Text>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{t.eventProfile.addContent}</Text>
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => {
+                  setShowAddContentModal(false);
+                  setContentType(null);
+                  setContentCaption('');
+                  setSelectedPhotos([]);
+                  setMusicUrl('');
+                  setMusicTitle('');
+                  setMusicArtist('');
+                  setSelectedTrack(null);
+                  setSearchResults([]);
+                  setSearchQuery('');
+                }}
+              >
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
             
             {!contentType ? (
               <View style={styles.contentTypeButtons}>
@@ -1007,30 +1422,138 @@ export default function EventProfileScreen() {
                 </TouchableOpacity>
               </View>
             ) : contentType === 'photo' ? (
-              <View>
-                <TextInput
-                  style={[styles.editInput, styles.editTextArea]}
-                  placeholder={t.eventProfile.descriptionOptional}
-                  placeholderTextColor="#999"
-                  value={contentCaption}
-                  onChangeText={setContentCaption}
-                  multiline
-                  numberOfLines={3}
-                />
+              <ScrollView style={{ maxHeight: 500 }} showsVerticalScrollIndicator={true}>
+                {/* Чекбокс "объединить в один пост" - показывается только если выбрано несколько фото */}
+                {selectedPhotos.length > 1 && (
+                  <View style={styles.checkboxContainer}>
+                    <TouchableOpacity
+                      style={styles.checkbox}
+                      onPress={() => setCombineIntoOnePost(!combineIntoOnePost)}
+                    >
+                      <View style={[styles.checkboxBox, combineIntoOnePost && styles.checkboxBoxChecked]}>
+                        {combineIntoOnePost && <Text style={styles.checkboxCheckmark}>✓</Text>}
+                      </View>
+                      <Text style={styles.checkboxLabel}>Объединить в один пост</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* Если объединены в один пост - одно поле описания */}
+                {combineIntoOnePost && selectedPhotos.length > 1 ? (
+                  <TextInput
+                    style={[styles.editInput, styles.editTextArea]}
+                    placeholder={t.eventProfile.descriptionOptional}
+                    placeholderTextColor="#999"
+                    value={contentCaption}
+                    onChangeText={setContentCaption}
+                    multiline
+                    numberOfLines={3}
+                  />
+                ) : (
+                  /* Если не объединены - несколько полей описания (номер фото слева, описание справа) */
+                  selectedPhotos.length > 0 && (
+                    <View style={styles.photoCaptionsContainer}>
+                      {selectedPhotos.map((photo) => (
+                        <View key={photo.id} style={styles.photoCaptionRow}>
+                          <View style={styles.photoNumberBadge}>
+                            <Text style={styles.photoNumberText}>{photo.index}</Text>
+                          </View>
+                          <TextInput
+                            style={[styles.editInput, styles.photoCaptionInput]}
+                            placeholder={`Описание для фото ${photo.index} (необязательно)`}
+                            placeholderTextColor="#999"
+                            value={photo.caption || ''}
+                            onChangeText={(text) => {
+                              setSelectedPhotos(prev => 
+                                prev.map(p => p.id === photo.id ? { ...p, caption: text } : p)
+                              );
+                            }}
+                            multiline
+                            numberOfLines={2}
+                          />
+                        </View>
+                      ))}
+                    </View>
+                  )
+                )}
+                
+                {/* Отображение выбранных фото с нумерацией */}
+                {selectedPhotos.length > 0 && (
+                  <ScrollView 
+                    horizontal 
+                    style={{ marginVertical: 10, maxHeight: 150 }}
+                    showsHorizontalScrollIndicator={false}
+                    nestedScrollEnabled={true}
+                  >
+                    {selectedPhotos.map((photo) => (
+                      <View key={photo.id} style={{ marginRight: 10, position: 'relative' }}>
+                        <Image 
+                          source={{ uri: photo.uri }} 
+                          style={{ width: 100, height: 100, borderRadius: 8 }}
+                          resizeMode="cover"
+                          onError={(error) => {
+                            logger.error('Failed to load image:', error);
+                          }}
+                        />
+                        <View style={{
+                          position: 'absolute',
+                          top: 5,
+                          left: 5,
+                          backgroundColor: '#8B5CF6',
+                          borderRadius: 12,
+                          width: 24,
+                          height: 24,
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                        }}>
+                          <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>
+                            {photo.index}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={{
+                            position: 'absolute',
+                            top: 5,
+                            right: 5,
+                            backgroundColor: 'rgba(0,0,0,0.6)',
+                            borderRadius: 12,
+                            width: 24,
+                            height: 24,
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                          }}
+                          onPress={() => handleRemovePhoto(photo.id)}
+                        >
+                          <Text style={{ color: 'white', fontSize: 16 }}>×</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </ScrollView>
+                )}
                 
                 <View style={styles.modalActions}>
                   <TouchableOpacity style={styles.cancelButton} onPress={() => {
                     setContentType(null);
                     setContentCaption('');
+                    setSelectedPhotos([]);
+                    setCombineIntoOnePost(false);
                   }}>
                     <Text style={styles.cancelButtonText}>{t.eventProfile.back}</Text>
                   </TouchableOpacity>
                   
-                  <TouchableOpacity style={styles.saveButton} onPress={handleAddPhoto}>
-                    <Text style={styles.saveButtonText}>Выбрать фото</Text>
+                  <TouchableOpacity 
+                    style={[styles.saveButton, selectedPhotos.length === 0 && { opacity: 0.5 }]} 
+                    onPress={selectedPhotos.length > 0 ? handleUploadSelectedPhotos : handleAddPhoto}
+                    disabled={isUploadingPhotos}
+                  >
+                    <Text style={styles.saveButtonText}>
+                      {selectedPhotos.length > 0 
+                        ? (isUploadingPhotos ? 'Загрузка...' : `Загрузить ${selectedPhotos.length} фото`)
+                        : 'Выбрать фото'}
+                    </Text>
                   </TouchableOpacity>
                 </View>
-              </View>
+              </ScrollView>
             ) : contentType === 'music' ? (
               <View>
                 {/* Поиск треков */}
@@ -1187,10 +1710,10 @@ export default function EventProfileScreen() {
                         content: contentCaption.trim(),
                         caption: ''
                       });
-                      setShowAddContentModal(false);
+                      // НЕ закрываем модальное окно и НЕ сбрасываем состояние, чтобы можно было добавить еще
+                      // setShowAddContentModal(false);
                       setContentCaption('');
-                      setContentType(null);
-                      // Остаемся в режиме редактирования
+                      // setContentType(null);
                     }
                   }}>
                     <Text style={styles.saveButtonText}>Добавить</Text>
@@ -1211,7 +1734,7 @@ export default function EventProfileScreen() {
       >
         <View style={styles.imageModalOverlay}>
           <TouchableOpacity
-            style={StyleSheet.absoluteFill}
+            style={styles.absoluteFill}
             activeOpacity={1}
             onPress={() => setShowImageModal(false)}
           />
@@ -1234,699 +1757,3 @@ export default function EventProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#121212',
-  },
-  backButtonFixed: {
-    position: 'absolute',
-    top: 60,
-    left: 20,
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    borderRadius: 20,
-  },
-  backText: {
-    color: '#FFF',
-    fontSize: 24,
-  },
-  editButtonFixed: {
-    position: 'absolute',
-    top: 60,
-    right: 20,
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    borderRadius: 20,
-  },
-  editIcon: {
-    fontSize: 20,
-  },
-  content: {
-    flex: 1,
-  },
-  eventInfo: {
-    paddingHorizontal: 20,
-    paddingTop: 8, // Такое же расстояние как в карточке события (contentContainer paddingTop: 8)
-    paddingBottom: 20,
-    position: 'relative',
-  },
-  eventAvatarContainer: {
-    width: '100%',
-    marginBottom: 0, // Убрали marginBottom, чтобы расстояние было как в карточке (только paddingTop: 8)
-    borderRadius: 0,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  eventAvatar: {
-    width: '100%',
-    height: '100%', // Занимает всю высоту контейнера, как в карточке (mediaImageVertical)
-    borderRadius: 0,
-    resizeMode: 'cover', // Как в карточке события (mediaImageVertical)
-  },
-  changePhotoButton: {
-    position: 'absolute',
-    bottom: 10,
-    right: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-  },
-  changePhotoButtonText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  eventName: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 6,
-  },
-  eventDescription: {
-    color: '#CCC',
-    fontSize: 14,
-    lineHeight: 18,
-    marginBottom: 8,
-  },
-  parametersContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 8,
-  },
-  parameterItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#2a2a2a',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 6,
-    marginBottom: 4,
-  },
-  parameterEmoji: {
-    fontSize: 12,
-    marginRight: 4,
-  },
-  parameterText: {
-    fontSize: 12,
-    color: '#DDD',
-    fontWeight: '500',
-  },
-  participantsParameterItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#2a2a2a',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 6,
-    marginBottom: 4,
-  },
-  participantsMiniAvatars: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 6,
-  },
-  participantMiniAvatar: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: '#FFFFFF',
-  },
-  participantMoreMini: {
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  participantMoreMiniText: {
-    color: '#FFFFFF',
-    fontSize: 8,
-    fontWeight: 'bold',
-  },
-  participantsCountText: {
-    fontSize: 12,
-    color: '#DDD',
-    fontWeight: '500',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#333',
-    marginVertical: 20,
-    marginHorizontal: 20,
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addContentButton: {
-    position: 'absolute',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#007AFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  addContentIcon: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: '300',
-  },
-  eventActionsButton: {
-    position: 'absolute',
-    bottom: 15,
-    right: 15,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 4,
-    elevation: 10,
-  },
-  eventActionsButtonText: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-    lineHeight: 20,
-  },
-  actionsModalContainer: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 16,
-    width: '85%',
-    maxHeight: '70%',
-    alignSelf: 'center',
-  },
-  actionsModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-  },
-  actionsModalTitle: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  actionsModalClose: {
-    color: '#999',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  actionsModalScroll: {
-    maxHeight: 400,
-  },
-  actionItem: {
-    padding: 18,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-  },
-  actionItemLast: {
-    borderBottomWidth: 0,
-  },
-  actionItemText: {
-    color: '#FFF',
-    fontSize: 16,
-  },
-  actionItemTextDisabled: {
-    color: '#666',
-  },
-  saveButton: {
-    position: 'absolute',
-    bottom: 12,
-    right: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#007AFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 4,
-    elevation: 10,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  parameterWrapper: {
-    position: 'relative',
-  },
-  parameterOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  parameterOverlayHidden: {
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-  },
-  eyeIcon: {
-    fontSize: 24,
-  },
-  editField: {
-    backgroundColor: '#333',
-    color: '#FFF',
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    borderRadius: 12,
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  editFieldDescription: {
-    fontWeight: 'normal',
-    minHeight: 60,
-    textAlignVertical: 'top',
-  },
-  parameterTextInput: {
-    fontSize: 12,
-    color: '#DDD',
-    fontWeight: '500',
-    flex: 1,
-    padding: 0,
-    margin: 0,
-  },
-  postsSection: {
-    paddingHorizontal: 0, // Нет отступов от краев
-  },
-  postsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-  },
-  postItem: {
-    marginBottom: 0,
-    overflow: 'hidden',
-  },
-  postItemWithRightDivider: {
-    borderRightWidth: 1,
-    borderRightColor: '#333',
-  },
-  postImage: {
-    width: '100%',
-    borderRadius: 0,
-  },
-  postTextContainer: {
-    backgroundColor: '#333',
-    borderRadius: 0,
-    padding: 15,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  postText: {
-    color: '#FFF',
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  musicCard: {
-    backgroundColor: '#333',
-    borderRadius: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  musicCoverImageFull: {
-    width: '100%',
-    height: '100%',
-  },
-  musicPlaceholder: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#2a2a2a',
-  },
-  playingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  playingIcon: {
-    fontSize: 24,
-  },
-  playButtonOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-  },
-  playIconOverlay: {
-    fontSize: 24,
-  },
-  emptyPosts: {
-    paddingVertical: 40,
-    alignItems: 'center',
-  },
-  emptyPostsText: {
-    color: '#999',
-    fontSize: 16,
-    fontStyle: 'italic',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 16,
-    padding: 20,
-    width: '90%',
-    maxHeight: '80%',
-  },
-  modalTitle: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  editInput: {
-    backgroundColor: '#333',
-    color: '#FFF',
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    borderRadius: 8,
-    fontSize: 16,
-    marginBottom: 15,
-  },
-  editTextArea: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  cancelButton: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginRight: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#666',
-  },
-  cancelButtonText: {
-    color: '#999',
-    fontSize: 16,
-  },
-  errorText: {
-    color: '#FFF',
-    fontSize: 16,
-    textAlign: 'center',
-    marginTop: 100,
-  },
-  // Стили для музыки (старые - удалены, используются новые выше)
-  musicIcon: {
-    fontSize: 32,
-  },
-  // Стили для модального окна добавления контента
-  contentTypeButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginVertical: 20,
-  },
-  contentTypeButton: {
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#333',
-    borderRadius: 12,
-    minWidth: 100,
-  },
-  contentTypeIcon: {
-    fontSize: 32,
-    marginBottom: 10,
-  },
-  contentTypeText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  demoLabel: {
-    color: '#FFA500',
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 8,
-    backgroundColor: '#2A2A2A',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 4,
-  },
-  // Стили для поиска треков
-  searchResults: {
-    maxHeight: 200,
-    marginVertical: 10,
-  },
-  searchResultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    backgroundColor: '#444',
-    borderRadius: 8,
-    marginBottom: 5,
-  },
-  searchResultImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 8,
-    marginRight: 12,
-  },
-  searchResultInfo: {
-    flex: 1,
-  },
-  searchResultTitle: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  searchResultArtist: {
-    color: '#999',
-    fontSize: 14,
-  },
-  loadingContainer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: '#999',
-    fontSize: 16,
-  },
-  selectedTrackContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 15,
-    backgroundColor: '#333',
-    borderRadius: 12,
-    marginVertical: 10,
-  },
-  selectedTrackImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-    marginRight: 15,
-  },
-  selectedTrackInfo: {
-    flex: 1,
-  },
-  selectedTrackTitle: {
-    color: '#FFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
-  selectedTrackArtist: {
-    color: '#999',
-    fontSize: 16,
-  },
-  // Стили для ленты контента
-  contentFeedContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#121212',
-    zIndex: 1000,
-  },
-  backToProfileButton: {
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 10,
-  },
-  backToProfileText: {
-    color: '#007AFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  contentFeedScroll: {
-    flex: 1,
-  },
-  contentFeedContent: {
-    paddingBottom: 100,
-    paddingTop: 8,
-  },
-  fullPostCard: {
-    marginBottom: 20,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  fullPostImage: {
-    width: '100%',
-    height: 400,
-  },
-  fullMusicCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#333',
-  },
-  fullMusicCover: {
-    width: 80,
-    height: 80,
-    backgroundColor: '#555',
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 20,
-  },
-  fullMusicIcon: {
-    fontSize: 32,
-  },
-  fullMusicInfo: {
-    flex: 1,
-  },
-  fullMusicTitle: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  fullMusicArtist: {
-    color: '#999',
-    fontSize: 16,
-  },
-  fullPlayButton: {
-    width: 60,
-    height: 60,
-    backgroundColor: '#007AFF',
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  fullPlayIcon: {
-    fontSize: 24,
-  },
-  fullPostTextContainer: {
-    padding: 20,
-    backgroundColor: '#333',
-  },
-  fullPostText: {
-    color: '#FFF',
-  },
-  imageModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.95)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  fullImage: {
-    width: '100%',
-    height: '100%',
-  },
-  imageModalCloseButton: {
-    position: 'absolute',
-    top: 60,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  imageModalCloseText: {
-    color: '#FFF',
-    fontSize: 24,
-    fontWeight: '600',
-    fontSize: 16,
-    lineHeight: 24,
-  },
-  fullPostAuthor: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 15,
-    backgroundColor: '#2A2A2A',
-  },
-  fullAuthorAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 12,
-  },
-  fullAuthorInfo: {
-    flex: 1,
-  },
-  fullAuthorUsername: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  fullPostDate: {
-    color: '#999',
-    fontSize: 14,
-    marginTop: 2,
-  },
-  fullPostCaption: {
-    color: '#FFF',
-    fontSize: 16,
-    lineHeight: 24,
-    padding: 15,
-    backgroundColor: '#2A2A2A',
-  },
-});

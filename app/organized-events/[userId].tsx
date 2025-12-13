@@ -1,6 +1,6 @@
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import EventCard from '../../components/EventCard';
 import { useEvents, Event } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
@@ -11,7 +11,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export default function OrganizedEventsScreen() {
   const { userId } = useLocalSearchParams();
   const router = useRouter();
-  const { events, getUserData, isUserOrganizer } = useEvents();
+  const { events, getUserData, isUserOrganizer, isEventUpcoming, isEventPast, getUserRequestStatus } = useEvents();
   const { user: authUser } = useAuth();
   const { t } = useLanguage();
   const [showEventFeed, setShowEventFeed] = useState(false);
@@ -35,9 +35,34 @@ export default function OrganizedEventsScreen() {
   const userData = getUserData(targetUserId);
   
   // Все события где я_организатор_события (текущие и прошлые)
-  const organizedEvents = events.filter(event => 
-    isUserOrganizer(event, targetUserId)
-  );
+  // КРИТИЧЕСКИ ВАЖНО: Используем ту же логику фильтрации, что и в профиле
+  const organizedEvents = useMemo(() => {
+    return events.filter(event => {
+      // КРИТИЧЕСКИ ВАЖНО: НЕ исключаем события, где targetUserId является организатором
+      // rejected статус применяется только для участников, не для организаторов
+      // Если пользователь организатор - событие должно показываться независимо от rejected статуса
+      const isOrganizer = event.organizerId === targetUserId;
+      if (!isOrganizer) {
+        // Если не организатор - проверяем rejected статус
+        const userStatus = getUserRequestStatus(event, targetUserId);
+        if (userStatus === 'rejected') {
+          return false;
+        }
+      }
+      
+      // Для текущих событий - проверяем обычным способом
+      if (isEventUpcoming(event)) {
+        return isUserOrganizer(event, targetUserId);
+      }
+      
+      // Для прошедших событий - используем те же признаки, что и для предстоящих
+      if (isEventPast(event)) {
+        return isUserOrganizer(event, targetUserId);
+      }
+      
+      return isUserOrganizer(event, targetUserId);
+    });
+  }, [events, targetUserId, isUserOrganizer, isEventUpcoming, isEventPast, getUserRequestStatus]);
 
   const handleEventPress = (event: Event) => {
     setSelectedEvent(event);
@@ -239,7 +264,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   feedContentContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 12, // Соответствует marginHorizontal в MemoryPost
     flexGrow: 1,
     paddingBottom: 100,
   },

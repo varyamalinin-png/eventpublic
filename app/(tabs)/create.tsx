@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Image, Platform, Modal, Dimensions } from 'react-native';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, Alert, Image, Platform, Modal, Dimensions, ActivityIndicator } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEvents, Event } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
@@ -10,6 +10,7 @@ import { suggestAddresses, geocodeAddress } from '../../utils/yandexGeocoder';
 import { getSelectedLocation, clearSelectedLocation } from '../select-location';
 import EventCard from '../../components/EventCard';
 import { createLogger } from '../../utils/logger';
+import { createEventStyles } from './create.styles';
 
 const logger = createLogger('CreateEvent');
 
@@ -54,6 +55,8 @@ interface EventFormData {
   recurringDays?: number[]; // Для weekly: дни недели (0=воскресенье, 1=понедельник, ...)
   recurringDayOfMonth?: number; // Для monthly: день месяца
   recurringCustomDates?: Date[]; // Для custom: выбранные даты
+  // Поле для массового события
+  isMassEvent?: boolean;
   // Метки (теги) события
   tags?: string[]; // Массив меток
 }
@@ -73,6 +76,7 @@ export default function CreateEventScreen() {
   const [selectedCustomDates, setSelectedCustomDates] = useState<Date[]>([]);
   const [showWeekdayPicker, setShowWeekdayPicker] = useState(false);
   const [showMonthDayPicker, setShowMonthDayPicker] = useState(false);
+  const [showMassEventTooltip, setShowMassEventTooltip] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
   const [showTagInput, setShowTagInput] = useState(false);
@@ -160,6 +164,7 @@ export default function CreateEventScreen() {
     recurringDays: undefined,
     recurringDayOfMonth: undefined,
     recurringCustomDates: undefined,
+    isMassEvent: false,
     tags: [],
   });
 
@@ -231,6 +236,7 @@ export default function CreateEventScreen() {
       recurringDays: undefined,
       recurringDayOfMonth: undefined,
       recurringCustomDates: undefined,
+      isMassEvent: false,
       tags: [],
     });
     setShowSuggestions(false);
@@ -271,7 +277,7 @@ export default function CreateEventScreen() {
   useEffect(() => {
     if (!isEditMode || !editingEventId) return;
     if (prefillRef.current === editingEventId) return;
-    const ev = events.find(e => e.id === editingEventId);
+    const ev = events.find((e: Event) => e.id === editingEventId);
     if (!ev) return;
 
     prefillRef.current = editingEventId;
@@ -317,6 +323,12 @@ export default function CreateEventScreen() {
       mediaType: (ev.mediaType as any) || prev.mediaType,
       selectedImage: ev.mediaUrl || null,
       invitedUsers: pendingInvitedUserIds,
+      isRecurring: (ev as any).isRecurring || false,
+      recurringType: (ev as any).recurringType || undefined,
+      recurringDays: (ev as any).recurringDays || undefined,
+      recurringDayOfMonth: (ev as any).recurringDayOfMonth || undefined,
+      recurringCustomDates: (ev as any).recurringCustomDates ? (ev as any).recurringCustomDates.map((d: string) => new Date(d)) : undefined,
+      isMassEvent: (ev as any).isMassEvent || false,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditMode, editingEventId, events]);
@@ -337,6 +349,16 @@ export default function CreateEventScreen() {
     { number: 4, title: t.createEvent.steps.preview }
   ];
 
+  // Функция генерации дефолтного изображения
+  const generateDefaultImage = React.useCallback(async (title: string, description: string): Promise<string> => {
+    // Используем placeholder API для генерации изображения на основе текста
+    const prompt = `${title}. ${description}`.substring(0, 100);
+    // Используем placeholder service (можно заменить на реальный API)
+    const encodedPrompt = encodeURIComponent(prompt);
+    // TODO: Заменить на реальный API для генерации изображений
+    return `https://via.placeholder.com/800x600/8B5CF6/FFFFFF?text=${encodedPrompt}`;
+  }, []);
+
   // Генерируем дефолтное изображение, если нет медиа
   useEffect(() => {
     const previewMediaUrl = formData.selectedImage || formData.mediaUrl;
@@ -350,24 +372,65 @@ export default function CreateEventScreen() {
     }
   }, [formData.title, formData.description, formData.selectedImage, formData.mediaUrl, currentStep, defaultImageUrl, generateDefaultImage]);
 
+  // Функции форматирования дат - определяем ДО использования в useMemo
+  const formatDateForAPI = useCallback((date: Date | undefined) => {
+    if (!date) return new Date().toISOString().split('T')[0];
+    return date.toISOString().split('T')[0];
+  }, []);
+
+  const formatTime = useCallback((date: Date | undefined) => {
+    if (!date) return '12:00';
+    return date.toLocaleTimeString('ru-RU', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }, []);
+
+  const formatDisplayDate = useCallback((date: Date | undefined) => {
+    if (!date) return new Date().toLocaleDateString('ru-RU');
+    return date.toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'long'
+    });
+  }, []);
+
   // Создаем preview-событие через useMemo для синхронного доступа
   const previewEventData = useMemo(() => {
-    if (currentStep !== 4) return null;
+    // ВСЕГДА создаем preview данные, даже если currentStep !== 4 (для отладки)
+    // Но возвращаем null только если явно не на шаге 4
+    if (currentStep !== 4) {
+      return null;
+    }
+    
     
     try {
       const previewMediaUrl = formData.selectedImage || formData.mediaUrl;
       const previewEventId = 'preview-event-temp';
       const finalMediaUrl = previewMediaUrl || defaultImageUrl || undefined;
       
-      return {
+      // Безопасное форматирование даты - проверяем что date существует
+      if (!formData.date) {
+        console.warn('[CreateEvent] formData.date is missing, using current date');
+      }
+      const eventDate = formData.date ? formatDateForAPI(formData.date) : formatDateForAPI(new Date());
+      const eventTime = formData.time ? formatTime(formData.time) : formatTime(new Date());
+      const eventDisplayDate = formData.date ? formatDisplayDate(formData.date) : formatDisplayDate(new Date());
+      
+      // Определяем location - используем formData.location если есть, иначе проверяем coordinates
+      let location = formData.location;
+      if (!location) {
+        location = formData.coordinates ? 'Место проведения' : 'Онлайн';
+      }
+      
+      const previewData = {
         id: previewEventId,
         title: formData.title || t.createEvent.defaultEventTitle || 'Новое событие',
         description: formData.description || t.createEvent.defaultEventDescription || 'Описание события',
-        date: formatDateForAPI(formData.date) || new Date().toISOString(),
-        time: formatTime(formData.time) || '12:00',
-        displayDate: formatDisplayDate(formData.date) || new Date().toLocaleDateString('ru-RU'),
-        displayTime: formatTime(formData.time) || '12:00',
-        location: formData.location || t.createEvent.defaultLocation || 'Место проведения',
+        date: eventDate,
+        time: eventTime,
+        displayDate: eventDisplayDate,
+        displayTime: eventTime,
+        location: location,
         price: formData.price || t.createEvent.defaultPrice || '0',
         participants: 0,
         maxParticipants: parseInt(String(formData.maxParticipants)) || 10,
@@ -376,7 +439,7 @@ export default function CreateEventScreen() {
         mediaUrl: finalMediaUrl,
         originalMediaUrl: formData.originalMediaUrl || finalMediaUrl,
         mediaType: formData.mediaType || 'image',
-        mediaAspectRatio: finalMediaUrl ? (SCREEN_WIDTH / 160) : 1,
+        mediaAspectRatio: finalMediaUrl ? 1.33 : 1,
         participantsList: [],
         participantsData: [],
         createdAt: new Date(),
@@ -385,30 +448,145 @@ export default function CreateEventScreen() {
         recurringDays: formData.recurringDays || [],
         recurringDayOfMonth: formData.recurringDayOfMonth || null,
         recurringCustomDates: formData.recurringCustomDates?.map(d => formatDateForAPI(d)) || [],
-        tags: formData.tags || [],
+        isMassEvent: formData.isMassEvent || false,
+        // Генерируем теги для preview - включая автоматические
+        tags: (() => {
+          const autoTags: string[] = [];
+          const customTags = formData.tags || [];
+          
+          // "массовое" - если событие массовое
+          if (formData.isMassEvent) {
+            autoTags.push('массовое');
+          }
+          
+          // "18+" - если выбран age restriction с минимальным возрастом >= 18
+          if (formData.ageRestriction && formData.ageRestriction.min >= 18) {
+            autoTags.push('18+');
+          }
+          
+          // "women only" - если выбрано gender restriction только женщины
+          if (formData.genderRestriction && formData.genderRestriction.length === 1 && formData.genderRestriction[0] === 'female') {
+            autoTags.push('women only');
+          }
+          
+          // "Регулярное" - если событие регулярное
+          if (formData.isRecurring) {
+            autoTags.push('Регулярное');
+          }
+          
+          return [...autoTags, ...customTags];
+        })(),
       } as Event;
+      
+      
+      return previewData;
     } catch (error) {
       console.error('[CreateEvent] Error creating preview event data:', error);
-      return null;
+      // Возвращаем минимальный объект вместо null, чтобы превью не было пустым
+      return {
+        id: 'preview-event-temp',
+        title: formData.title || 'Новое событие',
+        description: formData.description || '',
+        date: formatDateForAPI(formData.date || new Date()),
+        time: formatTime(formData.time || new Date()),
+        displayDate: formatDisplayDate(formData.date || new Date()),
+        displayTime: formatTime(formData.time || new Date()),
+        location: formData.location || 'Место проведения',
+        price: formData.price || '0',
+        participants: 0,
+        maxParticipants: parseInt(String(formData.maxParticipants)) || 10,
+        organizerAvatar: authUser?.avatarUrl || '',
+        organizerId: currentUserId || '',
+        mediaUrl: formData.mediaUrl,
+        originalMediaUrl: formData.originalMediaUrl,
+        mediaType: formData.mediaType || 'image',
+        mediaAspectRatio: 1.33,
+        participantsList: [],
+        participantsData: [],
+        createdAt: new Date(),
+        isRecurring: false,
+        isMassEvent: formData.isMassEvent || false,
+        // Генерируем теги для preview даже в fallback случае
+        tags: (() => {
+          const autoTags: string[] = [];
+          if (formData.isMassEvent) {
+            autoTags.push('массовое');
+          }
+          if (formData.ageRestriction && formData.ageRestriction.min >= 18) {
+            autoTags.push('18+');
+          }
+          if (formData.genderRestriction && formData.genderRestriction.length === 1 && formData.genderRestriction[0] === 'female') {
+            autoTags.push('women only');
+          }
+          return [...autoTags, ...(formData.tags || [])];
+        })(),
+      } as Event;
     }
-  }, [currentStep, formData, defaultImageUrl, authUser?.avatarUrl, currentUserId, t, SCREEN_WIDTH]);
+  }, [
+    currentStep, 
+    formData.title,
+    formData.description,
+    formData.date,
+    formData.time,
+    formData.location,
+    formData.price,
+    formData.maxParticipants,
+    formData.selectedImage,
+    formData.mediaUrl,
+    formData.originalMediaUrl,
+    formData.mediaType,
+    formData.isRecurring,
+    formData.recurringType,
+    formData.recurringDays,
+    formData.recurringDayOfMonth,
+    formData.recurringCustomDates,
+    formData.isMassEvent,
+    formData.tags,
+    formData.ageRestriction,
+    formData.genderRestriction,
+    formData.coordinates,
+    defaultImageUrl, 
+    authUser?.avatarUrl, 
+    currentUserId, 
+    t, 
+    formatDateForAPI, 
+    formatTime, 
+    formatDisplayDate
+  ]);
 
-  // Добавляем preview-событие в контекст
-  useEffect(() => {
+  // Добавляем preview-событие в контекст СРАЗУ при переходе на шаг 4
+  // Используем useRef для отслеживания, было ли событие уже добавлено
+  const previewEventAddedRef = React.useRef<string | null>(null);
+  
+  // Добавляем preview-событие в контекст СРАЗУ при переходе на шаг 4
+  React.useLayoutEffect(() => {
     if (currentStep === 4 && previewEventData) {
+      // Проверяем, не добавляли ли мы уже это событие
+      const eventKey = `${previewEventData.id}-${previewEventData.title}-${previewEventData.date}`;
+      if (previewEventAddedRef.current === eventKey) {
+        // Событие уже добавлено, пропускаем
+        return;
+      }
+      
       try {
+        // Добавляем событие в контекст (updateEvent сам проверит, нужно ли обновлять)
         updateEvent(previewEventData.id, previewEventData);
+        previewEventAddedRef.current = eventKey;
       } catch (error) {
-        console.error('[CreateEvent] Error updating preview event:', error);
+        console.error('[CreateEvent] ❌ Error updating preview event:', error);
       }
     } else if (currentStep !== 4) {
       // Удаляем временное событие при выходе из шага превью
+      previewEventAddedRef.current = null;
       try {
         deleteEvent('preview-event-temp');
       } catch (error) {
         console.error('[CreateEvent] Error deleting preview event:', error);
       }
     }
+    // Используем только currentStep и previewEventData?.id для зависимостей
+    // updateEvent и deleteEvent убраны из зависимостей, так как они стабильны из контекста
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep, previewEventData?.id]);
 
   // Проверяем выбранное место каждые 500мс
@@ -484,25 +662,8 @@ export default function CreateEventScreen() {
     }
   };
 
+  // Функции форматирования дат - определяем ДО использования в useMemo
   const formatDate = (date: Date) => {
-    return date.toLocaleDateString('ru-RU', {
-      day: 'numeric',
-      month: 'long'
-    });
-  };
-
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('ru-RU', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const formatDateForAPI = (date: Date) => {
-    return date.toISOString().split('T')[0];
-  };
-
-  const formatDisplayDate = (date: Date) => {
     return date.toLocaleDateString('ru-RU', {
       day: 'numeric',
       month: 'long'
@@ -512,23 +673,12 @@ export default function CreateEventScreen() {
   const requestPermissions = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(t.messages.error, t.messages.noGalleryAccess);
+      Alert.alert(t.common.error, t.messages.noGalleryAccess);
       return false;
     }
     return true;
   };
 
-  // Функция для генерации дефолтного изображения через ИИ (placeholder)
-  // В реальном приложении здесь будет вызов API для генерации изображений (например, DALL-E, Stable Diffusion и т.д.)
-  const generateDefaultImage = React.useCallback(async (title: string, description: string): Promise<string> => {
-    // Используем placeholder API для генерации изображения на основе текста
-    const prompt = `${title}. ${description}`.substring(0, 100);
-    // Используем placeholder service (можно заменить на реальный API)
-    const encodedPrompt = encodeURIComponent(prompt);
-    // TODO: Заменить на реальный API для генерации изображений
-    // Пример: const response = await fetch('https://api.example.com/generate-image', { method: 'POST', body: JSON.stringify({ prompt }) });
-    return `https://via.placeholder.com/800x400/4A5568/FFFFFF?text=${encodedPrompt}`;
-  }, []);
 
   const pickImage = async () => {
     try {
@@ -612,7 +762,7 @@ export default function CreateEventScreen() {
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(t.messages.error, t.messages.noCameraAccess);
+      Alert.alert(t.common.error, t.messages.noCameraAccess);
       return;
     }
 
@@ -637,31 +787,20 @@ export default function CreateEventScreen() {
     logger.debug('Оригинальное фото установлено в formData для карточки и профиля');
 
     // Старая логика обрезки удалена - используем оригинальное фото
-    if (false) {
-      const croppedAsset = croppedResult.assets[0];
-      setFormData(prev => ({ 
-        ...prev, 
-        selectedImage: croppedAsset.uri,
-        mediaUrl: croppedAsset.uri, // Обрезанное фото для карточки
-        originalMediaUrl: originalUri, // Оригинальное фото для профиля
-        mediaType: 'image'
-      }));
-    } else {
-      // Если пользователь отменил обрезку, используем оригинальное фото для обоих
-      setFormData(prev => ({ 
-        ...prev, 
-        selectedImage: originalUri,
-        mediaUrl: originalUri,
-        originalMediaUrl: originalUri,
-        mediaType: 'image'
-      }));
-    }
+    // Используем оригинальное фото для обоих (карточка и профиль)
+    setFormData(prev => ({ 
+      ...prev, 
+      selectedImage: originalUri,
+      mediaUrl: originalUri,
+      originalMediaUrl: originalUri,
+      mediaType: 'image'
+    }));
   };
 
   const takeVideo = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(t.messages.error, t.messages.noCameraAccess);
+      Alert.alert(t.common.error, t.messages.noCameraAccess);
       return;
     }
 
@@ -802,9 +941,10 @@ export default function CreateEventScreen() {
                   formData: JSON.stringify({
                     title: formData.title,
                     description: formData.description,
-                    date: formatDateForAPI(formData.date),
-                    time: formatTime(formData.time),
-                    location: formData.location,
+        date: formatDateForAPI(formData.date),
+        time: formatTime(formData.time),
+        // Используем formData.location если есть, иначе определяем по coordinates
+        location: formData.location || (formData.coordinates ? 'Место проведения' : 'Онлайн'),
                     price: formData.price,
                     maxParticipants: maxParticipants,
                     mediaUrl: formData.mediaUrl,
@@ -837,7 +977,8 @@ export default function CreateEventScreen() {
         description: formData.description,
         date: formatDateForAPI(formData.date),
         time: formatTime(formData.time),
-        location: formData.location || 'Онлайн',
+        // Используем formData.location если есть, иначе определяем по coordinates
+        location: formData.location || (formData.coordinates ? 'Место проведения' : 'Онлайн'),
         price: formData.price || 'Бесплатно',
         maxParticipants: maxParticipants,
         mediaUrl: formData.mediaUrl || undefined,
@@ -856,6 +997,8 @@ export default function CreateEventScreen() {
         recurringDays: formData.recurringDays,
         recurringDayOfMonth: formData.recurringDayOfMonth,
         recurringCustomDates: formData.recurringCustomDates?.map(d => formatDateForAPI(d)),
+        // Поле для массового события
+        isMassEvent: formData.isMassEvent || false,
         // Метки (теги) - только пользовательские (автоматические генерируются на сервере)
         tags: formData.tags || [],
       };
@@ -879,6 +1022,7 @@ export default function CreateEventScreen() {
           recurringDays: payload.recurringDays,
           recurringDayOfMonth: payload.recurringDayOfMonth,
           recurringCustomDates: payload.recurringCustomDates,
+          isMassEvent: payload.isMassEvent,
           tags: payload.tags,
         } as any);
         Alert.alert('Сохранено', 'Изменения сохранены.', [
@@ -887,6 +1031,12 @@ export default function CreateEventScreen() {
       } else {
         // Создание нового события
         await createEvent(payload);
+        // КРИТИЧЕСКИ ВАЖНО: Удаляем preview-событие после успешного создания реального события
+        try {
+          deleteEvent('preview-event-temp');
+        } catch (error) {
+          logger.warn('Failed to delete preview event after creation', error);
+        }
         Alert.alert(
           t.createEvent.success,
           t.createEvent.eventCreated,
@@ -955,6 +1105,38 @@ export default function CreateEventScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* Чекбокс "Массовое событие" */}
+            <View style={styles.checkboxContainer}>
+              <TouchableOpacity
+                style={styles.checkboxOption}
+                onPress={() => {
+                  setFormData(prev => ({
+                    ...prev,
+                    isMassEvent: !prev.isMassEvent,
+                  }));
+                }}
+              >
+                <Text style={styles.checkboxText}>
+                  {formData.isMassEvent ? '☑' : '☐'} Массовое событие
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.tooltipButton}
+                onPress={() => setShowMassEventTooltip(!showMassEventTooltip)}
+              >
+                <Text style={styles.tooltipIcon}>❓</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Подсказка для массового события */}
+            {showMassEventTooltip && (
+              <View style={styles.tooltipContainer}>
+                <Text style={styles.tooltipText}>
+                  Участники будут добавляться автоматически без вашего подтверждения. Событие получит метку "массовое".
+                </Text>
+              </View>
+            )}
+
             {/* Поле даты - скрывается если регулярное */}
             {!formData.isRecurring && (
               <>
@@ -1022,7 +1204,7 @@ export default function CreateEventScreen() {
                 {formData.recurringType === 'weekly' && formData.recurringDays && formData.recurringDays.length > 0 && (
                   <Text style={styles.selectedRecurringText}>
                     {t.createEvent.selectedDays || 'Selected:'} {formData.recurringDays.map(d => {
-                      return t.createEvent[`day${d}`] || ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d];
+                      return (t.createEvent as any)[`day${d}`] || ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d];
                     }).join(', ')}
                   </Text>
                 )}
@@ -1322,7 +1504,7 @@ export default function CreateEventScreen() {
             {formData.invitedUsers && formData.invitedUsers.length > 0 && (
               <View style={styles.invitedAvatarsContainer}>
                 {formData.invitedUsers.map((userId) => {
-                  const user = getFriendsList().find(f => f.id === userId);
+                  const user = getFriendsList().find((f: any) => f.id === userId);
                   if (!user) return null;
                   return (
                     <View key={userId} style={styles.invitedAvatarContainer}>
@@ -1435,7 +1617,7 @@ export default function CreateEventScreen() {
                       ...prev,
                       targeting: {
                         ...prev.targeting,
-                        enabled: !prev.targeting?.enabled,
+                        enabled: !(prev.targeting?.enabled ?? false),
                       }
                     }));
                   }}
@@ -1456,6 +1638,7 @@ export default function CreateEventScreen() {
                         setFormData(prev => ({
                           ...prev,
                           targeting: {
+                            enabled: prev.targeting?.enabled ?? false,
                             ...prev.targeting,
                             reach,
                           }
@@ -1475,6 +1658,7 @@ export default function CreateEventScreen() {
                         setFormData(prev => ({
                           ...prev,
                           targeting: {
+                            enabled: prev.targeting?.enabled ?? false,
                             ...prev.targeting,
                             responses,
                           }
@@ -1503,7 +1687,7 @@ export default function CreateEventScreen() {
             {formData.visibility?.excludedUsers && formData.visibility.excludedUsers.length > 0 && (
               <View style={styles.excludedAvatarsContainer}>
                 {formData.visibility.excludedUsers.map((userId) => {
-                  const user = getFriendsList().find(f => f.id === userId);
+                  const user = getFriendsList().find((f: any) => f.id === userId);
                   if (!user) return null;
                   return (
                     <View key={userId} style={styles.excludedAvatarContainer}>
@@ -1579,57 +1763,9 @@ export default function CreateEventScreen() {
         );
 
       case 4:
-        // Используем previewEventData из useMemo
-        if (!previewEventData) {
-          return (
-            <View style={styles.emptyPreview}>
-              <Text style={styles.emptyPreviewText}>
-                {t.createEvent.fillBasicFieldsForPreview || 'Fill in the basic fields on the first step to see the preview'}
-              </Text>
-            </View>
-          );
-        }
-
-        // Всегда показываем карточку на странице превью (даже с дефолтными значениями)
-        // Полностью повторяем структуру ленты (explore.tsx) - карточка отображается как в ленте
-        try {
-          return (
-            <EventCard
-              key={previewEventData.id}
-              id={previewEventData.id}
-              title={previewEventData.title || ''}
-              description={previewEventData.description || ''}
-              date={previewEventData.date || ''}
-              time={previewEventData.time || ''}
-              displayDate={previewEventData.displayDate}
-              location={previewEventData.location || ''}
-              price={previewEventData.price || ''}
-              participants={previewEventData.participants || 0}
-              maxParticipants={previewEventData.maxParticipants || 10}
-              organizerAvatar={previewEventData.organizerAvatar || ''}
-              organizerId={previewEventData.organizerId || ''}
-              variant="default"
-              mediaUrl={previewEventData.mediaUrl}
-              originalMediaUrl={previewEventData.originalMediaUrl}
-              mediaType={previewEventData.mediaType || 'image'}
-              mediaAspectRatio={previewEventData.mediaAspectRatio || 1}
-              participantsList={previewEventData.participantsList || []}
-              participantsData={previewEventData.participantsData || []}
-              context="explore"
-              tags={previewEventData.tags || []}
-              showSwipeAction={false}
-            />
-          );
-        } catch (error) {
-          console.error('[CreateEvent] Error rendering preview:', error);
-          return (
-            <View style={styles.emptyPreview}>
-              <Text style={styles.emptyPreviewText}>
-                Ошибка при отображении превью. Попробуйте заполнить форму заново.
-              </Text>
-            </View>
-          );
-        }
+        // Страница превью - простая страница с карточкой события как в ленте
+        // ВОЗВРАЩАЕМ NULL - контент будет рендериться напрямую в ScrollView
+        return null;
 
       default:
         return null;
@@ -1672,14 +1808,48 @@ export default function CreateEventScreen() {
 
       {/* Контент */}
       {currentStep === 4 ? (
-        // На странице превью - точная копия ленты (explore.tsx)
-        <View style={styles.previewContainer}>
+        // На странице превью - простой экран с карточкой события (как в ленте)
+        <View style={styles.previewWrapper}>
           <ScrollView 
             style={styles.previewScrollView}
             contentContainerStyle={styles.previewScrollContent}
             showsVerticalScrollIndicator={false}
           >
-            {renderStepContent()}
+            {!previewEventData ? (
+              <View style={styles.previewEmptyContainer}>
+                <Text style={styles.previewEmptyText}>
+                  {t.createEvent.fillBasicFieldsForPreview || 'Заполните основные поля на первом шаге, чтобы увидеть превью'}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.previewCardContainer}>
+                <EventCard
+                  key={`preview-${previewEventData.id}`}
+                  id={previewEventData.id}
+                  title={previewEventData.title || ''}
+                  description={previewEventData.description || ''}
+                  date={previewEventData.date || ''}
+                  time={previewEventData.time || ''}
+                  displayDate={previewEventData.displayDate}
+                  location={previewEventData.location || ''}
+                  price={previewEventData.price || ''}
+                  participants={previewEventData.participants || 0}
+                  maxParticipants={previewEventData.maxParticipants || 10}
+                  organizerAvatar={previewEventData.organizerAvatar || ''}
+                  organizerId={previewEventData.organizerId || ''}
+                  variant="default"
+                  mediaUrl={previewEventData.mediaUrl}
+                  originalMediaUrl={previewEventData.originalMediaUrl}
+                  mediaType={previewEventData.mediaType || 'image'}
+                  mediaAspectRatio={previewEventData.mediaAspectRatio || 1}
+                  participantsList={previewEventData.participantsList || []}
+                  participantsData={previewEventData.participantsData || []}
+                  context="explore"
+                  tags={previewEventData.tags || []}
+                  showSwipeAction={true}
+                />
+              </View>
+            )}
           </ScrollView>
           
           {/* Навигация для превью - внизу экрана */}
@@ -1771,11 +1941,11 @@ export default function CreateEventScreen() {
             
             <ScrollView style={styles.modalScrollView}>
               {getFriendsList()
-                .filter(friend => 
+                .filter((friend: any) => 
                   friend.name.toLowerCase().includes(inviteSearchQuery.toLowerCase()) ||
                   friend.username.toLowerCase().includes(inviteSearchQuery.toLowerCase())
                 )
-                .map(friend => (
+                .map((friend: any) => (
                   <TouchableOpacity
                     key={friend.id}
                     style={styles.modalFriendItem}
@@ -1811,7 +1981,7 @@ export default function CreateEventScreen() {
               }}
               disabled={selectedInviteUsers.length === 0}
             >
-              <Text style={styles.modalConfirmButtonText}>{t.createEvent.invite}</Text>
+              <Text style={styles.modalConfirmButtonText}>{(t.createEvent as any).invite || t.events.invite}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1843,11 +2013,11 @@ export default function CreateEventScreen() {
             
             <ScrollView style={styles.modalScrollView}>
               {getFriendsList()
-                .filter(friend => 
+                .filter((friend: any) => 
                   friend.name.toLowerCase().includes(excludeSearchQuery.toLowerCase()) ||
                   friend.username.toLowerCase().includes(excludeSearchQuery.toLowerCase())
                 )
-                .map(friend => (
+                .map((friend: any) => (
                   <TouchableOpacity
                     key={friend.id}
                     style={styles.modalFriendItem}
@@ -1913,7 +2083,7 @@ export default function CreateEventScreen() {
             <ScrollView style={styles.modalScrollView}>
               {[0, 1, 2, 3, 4, 5, 6].map((index) => {
                 const isSelected = formData.recurringDays?.includes(index) || false;
-                const dayName = t.createEvent[`day${index}`] || ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][index];
+                const dayName = (t.createEvent as any)[`day${index}`] || ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][index];
                 return (
                   <TouchableOpacity
                     key={index}
@@ -2151,936 +2321,4 @@ export default function CreateEventScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#121212',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 60,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333333',
-  },
-  backButton: {
-    fontSize: 16,
-    color: '#007AFF',
-    marginRight: 15,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1A1A1A',
-  },
-  progressContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: '#1A1A1A',
-    paddingTop: 60,
-  },
-  progressStep: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  progressCircle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#333333',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  progressCircleActive: {
-    backgroundColor: '#8B5CF6',
-  },
-  progressNumber: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#999999',
-  },
-  progressNumberActive: {
-    color: '#FFFFFF',
-  },
-  progressTitle: {
-    fontSize: 9,
-    color: '#999999',
-    textAlign: 'center',
-  },
-  progressTitleActive: {
-    color: '#8B5CF6',
-    fontWeight: '600',
-  },
-  content: {
-    flex: 1,
-  },
-  contentPreview: {
-    flex: 1,
-    backgroundColor: '#1A1A1A',
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  stepContent: {
-    flex: 1,
-  },
-  previewContainer: {
-    flex: 1,
-    backgroundColor: '#121212',
-  },
-  previewScrollView: {
-    flex: 1,
-  },
-  previewScrollContent: {
-    paddingHorizontal: 20, // Как в ленте (eventsContainer)
-    paddingTop: 20, // Отступ сверху как в ленте
-    paddingBottom: 100, // Отступ снизу для навигации
-    minHeight: '100%', // Минимальная высота для отображения контента
-  },
-  previewNavigation: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    paddingBottom: 50, // Отступ снизу для таб-бара
-    backgroundColor: '#121212',
-    borderTopWidth: 1,
-    borderTopColor: '#333',
-  },
-  stepTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 24,
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 8,
-    marginTop: 16,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#333333',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    backgroundColor: '#1A1A1A',
-    color: '#FFFFFF',
-  },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  radioGroup: {
-    marginTop: 20,
-  },
-  radioOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#333333',
-    borderRadius: 8,
-    marginBottom: 8,
-    backgroundColor: '#1A1A1A',
-  },
-  radioSelected: {
-    borderColor: '#8B5CF6',
-    backgroundColor: '#2A1A3A',
-  },
-  radioText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-  },
-  previewCardContainer: {
-    marginTop: 16,
-  },
-  previewCardWrapper: {
-    position: 'relative',
-    marginBottom: 0,
-  },
-  addMediaButton: {
-    position: 'absolute',
-    top: 80, // Центр места для фото (160px / 2 = 80px) - медиа-контейнер в EventCard имеет высоту 160px
-    left: '50%',
-    transform: [{ translateX: -22 }], // Центрирование по горизонтали (44px / 2 = 22px)
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#8B5CF6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  addMediaButtonText: {
-    fontSize: 28,
-    color: '#FFFFFF',
-    fontWeight: '300',
-  },
-  removeMediaButton: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  removeMediaButtonText: {
-    fontSize: 18,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-  previewHint: {
-    fontSize: 14,
-    color: '#999999',
-    marginBottom: 12,
-    fontStyle: 'italic',
-  },
-  emptyPreview: {
-    marginTop: 32,
-    padding: 24,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#333333',
-    alignItems: 'center',
-  },
-  emptyPreviewText: {
-    fontSize: 14,
-    color: '#999999',
-    textAlign: 'center',
-  },
-  tagsSection: {
-    marginTop: 20,
-    padding: 16,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#333333',
-  },
-  tagsSectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 12,
-  },
-  tagsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  tagBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: '#2A1A3A',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#8B5CF6',
-  },
-  tagText: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    marginRight: 6,
-  },
-  removeTagButton: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#8B5CF6',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  removeTagText: {
-    fontSize: 12,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-  addTagButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#333333',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#555555',
-  },
-  addTagButtonText: {
-    fontSize: 20,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-  tagInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  tagInput: {
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#2A2A2A',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#555555',
-    color: '#FFFFFF',
-    fontSize: 14,
-  },
-  tagInputCancel: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#FF3B30',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  tagInputCancelText: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-  navigation: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 0,
-    paddingVertical: 20,
-    marginTop: 30,
-  },
-  navigationPreview: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(26, 26, 26, 0.95)',
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    marginTop: 0,
-    borderTopWidth: 1,
-    borderTopColor: '#333333',
-  },
-  backNavButton: {
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#333333',
-    backgroundColor: '#1A1A1A',
-  },
-  backNavText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-  nextButton: {
-    flex: 1,
-    marginLeft: 12,
-    backgroundColor: '#8B5CF6',
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  nextButtonText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-  submitButton: {
-    flex: 1,
-    marginLeft: 12,
-    backgroundColor: '#8B5CF6',
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  submitButtonDisabled: {
-    opacity: 0.6,
-  },
-  submitButtonText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-  // Стили для работы с изображениями
-  imageContainer: {
-    position: 'relative',
-    marginBottom: 16,
-  },
-  selectedImage: {
-    width: '100%',
-    height: 200,
-    borderRadius: 12,
-    resizeMode: 'cover',
-  },
-  removeImageButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    borderRadius: 15,
-    width: 30,
-    height: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  removeImageText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  addPhotoButton: {
-    backgroundColor: '#8B5CF6',
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  addPhotoButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  addImageButton: {
-    borderWidth: 2,
-    borderColor: '#333333',
-    borderStyle: 'dashed',
-    borderRadius: 12,
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-    backgroundColor: '#1A1A1A',
-  },
-  addImageIcon: {
-    fontSize: 32,
-    marginBottom: 8,
-  },
-  addImageText: {
-    fontSize: 16,
-    color: '#CCCCCC',
-    fontWeight: '500',
-  },
-  imageHint: {
-    fontSize: 14,
-    color: '#999999',
-    marginBottom: 8,
-    fontStyle: 'italic',
-  },
-  previewImageContainer: {
-    marginBottom: 16,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  previewImage: {
-    width: '100%',
-    height: 150,
-    resizeMode: 'cover',
-  },
-  // Стили для селекторов даты и времени
-  dateTimeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#1A1A1A',
-    borderWidth: 1,
-    borderColor: '#333333',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginBottom: 16,
-  },
-  dateTimeButtonText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    flex: 1,
-  },
-  dateTimeButtonIcon: {
-    fontSize: 20,
-    marginLeft: 12,
-  },
-  locationContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  locationInput: {
-    flex: 1,
-    height: 50,
-    borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 8,
-    paddingHorizontal: 15,
-    fontSize: 16,
-    color: '#fff',
-    backgroundColor: '#1a1a1a',
-  },
-  locationButtons: {
-    flexDirection: 'row',
-    marginLeft: 10,
-    gap: 10,
-  },
-  locationButton: {
-    width: 50,
-    height: 50,
-    backgroundColor: '#8B5CF6',
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  locationButtonActive: {
-    backgroundColor: '#34C759',
-  },
-  suggestionsContainer: {
-    marginTop: 5,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 8,
-    backgroundColor: '#1a1a1a',
-    maxHeight: 200,
-    overflow: 'hidden',
-  },
-  suggestionItem: {
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-  },
-  suggestionName: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  suggestionDescription: {
-    color: '#999',
-    fontSize: 12,
-  },
-  locationButtonText: {
-    fontSize: 20,
-  },
-  autocompleteContainer: {
-    flex: 1,
-  },
-  autocompleteInput: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    backgroundColor: '#FFFFFF',
-    color: '#1A1A1A',
-  },
-  autocompleteList: {
-    position: 'absolute',
-    top: 60,
-    left: 0,
-    right: 0,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    maxHeight: 200,
-    zIndex: 1000,
-  },
-  pickerContainer: {
-    marginBottom: 16,
-  },
-  confirmButton: {
-    backgroundColor: '#8B5CF6',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  confirmButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  // Стили для нового шага "Участники"
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 32,
-    marginBottom: 16,
-  },
-  ageRestrictionContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  ageInputContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  ageLabel: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    minWidth: 40,
-  },
-  ageInput: {
-    flex: 1,
-  },
-  checkboxGroup: {
-    marginTop: 8,
-  },
-  checkboxRow: {
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  checkboxOption: {
-    padding: 12,
-    marginBottom: 8,
-  },
-  checkboxText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-  },
-  recurringContainer: {
-    marginTop: 12,
-    marginBottom: 16,
-  },
-  recurringOption: {
-    padding: 14,
-    marginBottom: 10,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  recurringOptionActive: {
-    backgroundColor: '#2A1A3A',
-    borderColor: '#8B5CF6',
-  },
-  recurringOptionText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-  },
-  selectedRecurringText: {
-    fontSize: 14,
-    color: '#8B5CF6',
-    marginTop: 8,
-    fontStyle: 'italic',
-  },
-  calendarContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 12,
-    gap: 8,
-  },
-  calendarDay: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#1A1A1A',
-    borderWidth: 1,
-    borderColor: '#333',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  calendarDaySelected: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
-  },
-  calendarDayText: {
-    fontSize: 14,
-    color: '#FFFFFF',
-  },
-  calendarDayTextSelected: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-  // Стили для полноценного календаря
-  calendarMonthContainer: {
-    marginBottom: 32,
-  },
-  calendarMonthHeader: {
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-  },
-  calendarMonthTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  calendarWeekDaysHeader: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginBottom: 8,
-  },
-  calendarWeekDayHeaderCell: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-  },
-  calendarWeekDayHeaderText: {
-    fontSize: 12,
-    color: '#999',
-    fontWeight: '600',
-  },
-  calendarWeekRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginBottom: 4,
-  },
-  calendarDayCell: {
-    height: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    marginHorizontal: 2,
-  },
-  calendarDayCellSelected: {
-    backgroundColor: '#8B5CF6',
-  },
-  calendarDayCellText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-  },
-  calendarDayCellTextSelected: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-  modalFriendItemSelected: {
-    backgroundColor: '#2A1A3A',
-  },
-  modalHint: {
-    fontSize: 14,
-    color: '#999',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  inviteContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  addButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: '#8B5CF6',
-    borderRadius: 8,
-  },
-  addButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  invitedAvatarsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 12,
-    gap: 8,
-  },
-  invitedAvatarContainer: {
-    position: 'relative',
-  },
-  invitedAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: '#8B5CF6',
-  },
-  removeInvitedButton: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    backgroundColor: '#FF3B30',
-    borderRadius: 10,
-    width: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  removeInvitedText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  excludedAvatarsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 12,
-    gap: 8,
-  },
-  excludedAvatarContainer: {
-    position: 'relative',
-  },
-  excludedAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#FF3B30',
-  },
-  removeExcludedButton: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    backgroundColor: '#FF3B30',
-    borderRadius: 8,
-    width: 16,
-    height: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  removeExcludedText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  targetingContainer: {
-    marginTop: 16,
-    padding: 16,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#8B5CF6',
-  },
-  targetingPriceContainer: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#2a2a2a',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  targetingPriceLabel: {
-    fontSize: 16,
-    color: '#AAA',
-    fontWeight: '500',
-  },
-  targetingPrice: {
-    fontSize: 20,
-    color: '#8B5CF6',
-    fontWeight: '700',
-  },
-  // Стили для модальных окон
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#1a1a1a',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 20,
-    paddingBottom: 40,
-    paddingHorizontal: 20,
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  modalCloseButton: {
-    fontSize: 24,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-  modalSearchInput: {
-    borderWidth: 1,
-    borderColor: '#333333',
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#2a2a2a',
-    color: '#FFFFFF',
-    marginBottom: 16,
-  },
-  modalScrollView: {
-    maxHeight: 400,
-  },
-  modalFriendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333333',
-  },
-  modalFriendAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 12,
-  },
-  modalFriendInfo: {
-    flex: 1,
-  },
-  modalFriendName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  modalFriendUsername: {
-    fontSize: 14,
-    color: '#999999',
-    marginTop: 2,
-  },
-  modalCheckbox: {
-    fontSize: 20,
-    color: '#FFFFFF',
-  },
-  modalConfirmButton: {
-    backgroundColor: '#8B5CF6',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  modalConfirmButtonDisabled: {
-    backgroundColor: '#333333',
-    opacity: 0.5,
-  },
-  modalConfirmButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-});
+const styles = createEventStyles;

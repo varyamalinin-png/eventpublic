@@ -343,6 +343,7 @@ export const en = {
     changeParameters: 'Change parameters',
     changeVisibility: 'Change visibility',
     cancelEvent: 'Cancel event',
+    transferOrganizerRole: 'Transfer organizer role',
     cancelParticipation: 'Cancel participation',
     transferOrganizerRole: 'Transfer organizer role',
     viewRequests: 'Go to "Outgoing"',
@@ -501,11 +502,17 @@ export const en = {
   // Request Item
   requestItem: {
     sentFriendRequest: 'You sent a friend request to',
-    sentJoinRequest: 'You sent a join request for the event',
+    sentJoinRequest: 'You sent a join request to',
     sentInvite: 'You invited',
     toEvent: 'to the event',
     wantsToBeFriend: 'wants to be your friend',
+    wantsToInviteYou: 'wants to invite you to',
+    wantsToJoin: 'wants to join',
     invitedYouToEvent: 'invited you to the event',
+    user: 'User',
+    accepted: 'accepted',
+    rejected: 'rejected',
+    pending: 'pending',
   },
 
   // Participants Modal
@@ -542,6 +549,8 @@ export const en = {
     searchEventsAndPeople: 'Search events and people...',
     maximum: 'Maximum',
     from: 'From',
+    tags: 'Tags:',
+    folderName: 'Folder name',
   },
 
   // Event Profile

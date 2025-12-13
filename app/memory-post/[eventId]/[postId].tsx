@@ -16,7 +16,11 @@ export default function MemoryPostScreen() {
   if (!post || !eventId) {
     return (
       <View style={styles.container}>
-        <TopBar />
+        <TopBar 
+          searchPlaceholder="Поиск..."
+          onSearchChange={() => {}}
+          searchQuery=""
+        />
         <View style={styles.emptyContainer}>
           {/* Post not found */}
         </View>
@@ -26,7 +30,11 @@ export default function MemoryPostScreen() {
 
   return (
     <View style={styles.container}>
-      <TopBar />
+      <TopBar 
+        searchPlaceholder="Поиск..."
+        onSearchChange={() => {}}
+        searchQuery=""
+      />
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         <MemoryPost post={post} />
       </ScrollView>

@@ -1,5 +1,6 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Image, Modal, ActivityIndicator } from 'react-native';
-import { useMemo, useState, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Image, Modal, ActivityIndicator, Animated, Alert } from 'react-native';
+import { PanGestureHandler, State } from 'react-native-gesture-handler';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import MessageFolders from '../../../../components/MessageFolders';
 import { useEvents } from '../../../../context/EventsContext';
 import { useRouter } from 'expo-router';
@@ -22,6 +23,12 @@ export default function MessagesTab() {
     addChatsToMessageFolder,
     removeChatFromMessageFolder,
     refreshMessageFolders,
+    cancelEventParticipation,
+    transferOrganizerRole,
+    isUserOrganizer,
+    getEventParticipants,
+    deleteChat,
+    events,
   } = useEvents();
   const currentUserId = useMemo(() => user?.id ?? null, [user]);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
@@ -33,6 +40,13 @@ export default function MessagesTab() {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [isAddingChats, setIsAddingChats] = useState(false);
   const [removingChatIds, setRemovingChatIds] = useState<string[]>([]);
+  const [swipedChatId, setSwipedChatId] = useState<string | null>(null);
+  const [showDeleteChatModal, setShowDeleteChatModal] = useState(false);
+  const [chatToDelete, setChatToDelete] = useState<Chat | null>(null);
+  const [showFolderSelectModal, setShowFolderSelectModal] = useState(false);
+  const [chatForFolder, setChatForFolder] = useState<Chat | null>(null);
+  const swipeX = useRef<Record<string, Animated.Value>>({});
+  const swipeAnimations = useRef<Record<string, { translateX: Animated.Value; opacity: Animated.Value }>>({});
 
   const defaultFolders = useMemo<MessageFolder[]>(
     () => [
@@ -248,29 +262,138 @@ export default function MessagesTab() {
           const isCustomFolder = selectedFolderData?.type === 'custom' && (selectedFolderData.chatIds ?? []).includes(chat.id);
           const isRemoving = removingChatIds.includes(chat.id);
           
+          // Инициализируем анимации для свайпа
+          if (!swipeAnimations.current[chat.id]) {
+            swipeAnimations.current[chat.id] = {
+              translateX: new Animated.Value(0),
+              opacity: new Animated.Value(1),
+            };
+          }
+          const { translateX, opacity } = swipeAnimations.current[chat.id];
+          const isSwiped = swipedChatId === chat.id;
+          
+          const handleSwipeGesture = (event: any) => {
+            const { translationX, state } = event.nativeEvent;
+            
+            if (state === State.ACTIVE) {
+              // Ограничиваем свайп вправо (положительные значения)
+              if (translationX > 0 && translationX <= 160) {
+                translateX.setValue(translationX);
+              }
+            } else if (state === State.END) {
+              if (translationX > 80) {
+                // Показываем кнопки
+                setSwipedChatId(chat.id);
+                Animated.spring(translateX, {
+                  toValue: 160,
+                  useNativeDriver: true,
+                }).start();
+              } else {
+                // Скрываем кнопки
+                setSwipedChatId(null);
+                Animated.spring(translateX, {
+                  toValue: 0,
+                  useNativeDriver: true,
+                }).start();
+              }
+            }
+          };
+          
+          const handleDeletePress = () => {
+            setChatToDelete(chat);
+            setShowDeleteChatModal(true);
+            // Закрываем свайп
+            setSwipedChatId(null);
+            Animated.spring(translateX, {
+              toValue: 0,
+              useNativeDriver: true,
+            }).start();
+          };
+          
+          const handleFolderPress = () => {
+            setChatForFolder(chat);
+            setShowFolderSelectModal(true);
+            // Закрываем свайп
+            setSwipedChatId(null);
+            Animated.spring(translateX, {
+              toValue: 0,
+              useNativeDriver: true,
+            }).start();
+          };
+          
           return (
-            <View key={chat.id} style={styles.chatRow}>
-              <TouchableOpacity style={styles.chatItem} onPress={() => handleChatPress(chat.id)}>
-                <Image source={{ uri: avatar }} style={styles.chatAvatar} />
-                <View style={styles.chatInfo}>
-                  <Text style={styles.chatName}>{chat.name}</Text>
-                  {chat.lastMessage && (
-                    <Text style={styles.lastMessage} numberOfLines={1}>
-                      {chat.lastMessage.text ?? 'Отправлено событие'}
-                    </Text>
-                  )}
-                </View>
-                {lastInteractionDate && (
-                  <Text style={styles.chatTime}>
-                    {lastInteractionDate.toLocaleTimeString('ru-RU', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </Text>
-                )}
-              </TouchableOpacity>
+            <View key={chat.id} style={styles.chatRowContainer}>
+              {/* Кнопки при свайпе - скрыты за чатом */}
+              <View style={styles.swipeButtonsContainer}>
+                <TouchableOpacity
+                  style={[styles.swipeButton, styles.swipeButtonFolder]}
+                  onPress={handleFolderPress}
+                >
+                  <Text style={styles.swipeButtonText}>📁</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.swipeButton, styles.swipeButtonDelete]}
+                  onPress={handleDeletePress}
+                >
+                  <Text style={styles.swipeButtonText}>🗑️</Text>
+                </TouchableOpacity>
+              </View>
+              
+              <PanGestureHandler
+                onGestureEvent={handleSwipeGesture}
+                onHandlerStateChange={handleSwipeGesture}
+                activeOffsetX={10}
+                failOffsetY={[-5, 5]}
+                minPointers={1}
+                shouldCancelWhenOutside={false}
+              >
+                <Animated.View
+                  style={[
+                    styles.chatRow,
+                    {
+                      transform: [{ translateX }],
+                    },
+                  ]}
+                >
+                  <TouchableOpacity 
+                    style={styles.chatItem}
+                    activeOpacity={isSwiped ? 1 : 0.7}
+                    onPress={() => {
+                      // Закрываем свайп при клике, если он открыт
+                      if (isSwiped) {
+                        setSwipedChatId(null);
+                        Animated.spring(translateX, {
+                          toValue: 0,
+                          useNativeDriver: true,
+                        }).start();
+                      } else {
+                        handleChatPress(chat.id);
+                      }
+                    }}
+                    disabled={isSwiped}
+                  >
+                    <Image source={{ uri: avatar }} style={styles.chatAvatar} />
+                    <View style={styles.chatInfo}>
+                      <Text style={styles.chatName}>{chat.name}</Text>
+                      {chat.lastMessage && (
+                        <Text style={styles.lastMessage} numberOfLines={1}>
+                          {chat.lastMessage.text ?? 'Отправлено событие'}
+                        </Text>
+                      )}
+                    </View>
+                    {lastInteractionDate && (
+                      <Text style={styles.chatTime}>
+                        {lastInteractionDate.toLocaleTimeString('ru-RU', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </Animated.View>
+              </PanGestureHandler>
 
-              {isCustomFolder && (
+              {isCustomFolder && !isSwiped && (
                 <TouchableOpacity
                   style={styles.removeChatButton}
                   onPress={() => handleRemoveChatFromFolder(chat.id)}
@@ -395,6 +518,230 @@ export default function MessagesTab() {
           </View>
         </View>
       </Modal>
+
+      {/* Модальное окно удаления чата */}
+      <Modal
+        visible={showDeleteChatModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setShowDeleteChatModal(false);
+          setChatToDelete(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Удалить чат</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowDeleteChatModal(false);
+                  setChatToDelete(null);
+                }}
+              >
+                <Text style={styles.modalCloseButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {chatToDelete && (
+              <>
+                <Text style={styles.modalDescription}>
+                  {chatToDelete.type === 'event'
+                    ? 'Выберите действие для чата события:'
+                    : 'Вы уверены, что хотите удалить этот чат?'}
+                </Text>
+                
+                {chatToDelete.type === 'event' ? (
+                  <View style={styles.deleteOptionsContainer}>
+                    <TouchableOpacity
+                      style={styles.deleteOption}
+                      onPress={async () => {
+                        try {
+                          // Удалить чат и выйти из события
+                          if (chatToDelete.eventId) {
+                            const eventId = chatToDelete.eventId;
+                            const event = events.find(e => e.id === eventId);
+                            
+                            // Проверяем, является ли пользователь организатором
+                            const isOrganizer = event && currentUserId ? isUserOrganizer(event, currentUserId) : false;
+                            const participants = getEventParticipants ? getEventParticipants(eventId) : [];
+                            const participantsCount = participants.length;
+                            
+                            if (isOrganizer && participantsCount === 1) {
+                              // Организатор единственный участник - отменяем событие
+                              await cancelEventParticipation(eventId, currentUserId || '');
+                              // Удаляем чат
+                              await deleteChat(chatToDelete.id, true);
+                            } else if (isOrganizer && participantsCount > 1) {
+                              // Организатор не единственный - показываем попап передачи роли
+                              Alert.alert(
+                                'Передача роли организатора',
+                                'Вы являетесь организатором события. Для выхода из события необходимо передать роль организатора другому участнику.',
+                                [
+                                  { text: 'Отмена', style: 'cancel' },
+                                  {
+                                    text: 'Передать роль',
+                                    onPress: () => {
+                                      // Здесь можно открыть попап передачи роли
+                                      // Пока просто выходим из события
+                                      setShowDeleteChatModal(false);
+                                      setChatToDelete(null);
+                                    },
+                                  },
+                                ]
+                              );
+                              return;
+                            } else {
+                              // Обычный участник - просто выходим из события
+                              await cancelEventParticipation(eventId, currentUserId || '');
+                              // Удаляем чат
+                              await deleteChat(chatToDelete.id, true);
+                            }
+                          } else {
+                            // Для личных чатов просто удаляем
+                            await deleteChat(chatToDelete.id, false);
+                          }
+                          
+                          setShowDeleteChatModal(false);
+                          setChatToDelete(null);
+                        } catch (error) {
+                          logger.error('Failed to delete chat and leave event', error);
+                          Alert.alert('Ошибка', 'Не удалось удалить чат и выйти из события');
+                        }
+                      }}
+                    >
+                      <Text style={styles.deleteOptionText}>Удалить чат и выйти из события</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={styles.deleteOption}
+                      onPress={async () => {
+                        try {
+                          // Только покинуть чат, событие остается
+                          // TODO: Добавить API для удаления чата без выхода из события
+                          
+                          setShowDeleteChatModal(false);
+                          setChatToDelete(null);
+                        } catch (error) {
+                          logger.error('Failed to delete chat', error);
+                          Alert.alert('Ошибка', 'Не удалось удалить чат');
+                        }
+                      }}
+                    >
+                      <Text style={styles.deleteOptionText}>Только покинуть чат</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonConfirm]}
+                    onPress={async () => {
+                      try {
+                        await deleteChat(chatToDelete.id, false);
+                        setShowDeleteChatModal(false);
+                        setChatToDelete(null);
+                      } catch (error) {
+                        logger.error('Failed to delete chat', error);
+                        Alert.alert('Ошибка', 'Не удалось удалить чат');
+                      }
+                    }}
+                  >
+                    <Text style={styles.modalButtonText}>Удалить</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            )}
+            
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalButtonCancel, { marginTop: 10 }]}
+              onPress={() => {
+                setShowDeleteChatModal(false);
+                setChatToDelete(null);
+              }}
+            >
+              <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Модальное окно выбора папки для чата */}
+      <Modal
+        visible={showFolderSelectModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setShowFolderSelectModal(false);
+          setChatForFolder(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Выберите папку</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowFolderSelectModal(false);
+                  setChatForFolder(null);
+                }}
+              >
+                <Text style={styles.modalCloseButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.modalScrollView}>
+              {allFolders
+                .filter(folder => folder.type === 'custom')
+                .map(folder => {
+                  const isInFolder = folder.chatIds?.includes(chatForFolder?.id || '') || false;
+                  return (
+                    <TouchableOpacity
+                      key={folder.id}
+                      style={styles.modalChatItem}
+                      onPress={async () => {
+                        try {
+                          if (isInFolder) {
+                            // Удаляем из папки
+                            await removeChatFromMessageFolder(folder.id, chatForFolder?.id || '');
+                          } else {
+                            // Добавляем в папку
+                            await addChatsToMessageFolder(folder.id, [chatForFolder?.id || '']);
+                          }
+                          await refreshMessageFolders();
+                          setShowFolderSelectModal(false);
+                          setChatForFolder(null);
+                        } catch (error) {
+                          logger.error('Failed to update chat folder', error);
+                          Alert.alert('Ошибка', 'Не удалось обновить папку');
+                        }
+                      }}
+                    >
+                      <View style={styles.modalCheckbox}>
+                        {isInFolder && (
+                          <Text style={styles.modalCheckmark}>✓</Text>
+                        )}
+                      </View>
+                      <Text style={styles.modalChatName}>{folder.name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              
+              {allFolders.filter(folder => folder.type === 'custom').length === 0 && (
+                <Text style={styles.modalEmptyText}>Нет пользовательских папок</Text>
+              )}
+            </ScrollView>
+            
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalButtonCancel, { marginTop: 10 }]}
+              onPress={() => {
+                setShowFolderSelectModal(false);
+                setChatForFolder(null);
+              }}
+            >
+              <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -436,11 +783,63 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 12,
   },
+  chatRowContainer: {
+    position: 'relative',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E1E1E',
+    overflow: 'hidden',
+  },
   chatRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E1E1E',
+    backgroundColor: '#121212',
+    position: 'relative',
+    zIndex: 2,
+  },
+  swipeButtonsContainer: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 1,
+  },
+  swipeButton: {
+    width: 80,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  swipeButtonDelete: {
+    backgroundColor: '#FF3B30',
+  },
+  swipeButtonFolder: {
+    backgroundColor: '#8B5CF6',
+  },
+  swipeButtonText: {
+    fontSize: 24,
+  },
+  deleteOptionsContainer: {
+    marginVertical: 20,
+  },
+  deleteOption: {
+    padding: 16,
+    backgroundColor: '#2A2A2A',
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  deleteOptionText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  modalDescription: {
+    color: '#DDD',
+    fontSize: 14,
+    marginBottom: 20,
+    lineHeight: 20,
   },
   addChatsButton: {
     padding: 10,

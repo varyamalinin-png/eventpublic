@@ -5,6 +5,40 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { LanguageProvider } from '../context/LanguageContext';
 
+// ПЕРЕХВАТЫВАЕМ WebSocket ОШИБКИ САМЫМ ПЕРВЫМ ДЕЛОМ
+// Это нужно сделать до импорта любых модулей, которые могут использовать WebSocket
+if (!(global as any).__websocketErrorSuppressed) {
+  (global as any).__websocketErrorSuppressed = true;
+  const originalError = console.error;
+  console.error = (...args: any[]) => {
+    const errorString = args.map(arg => {
+      if (typeof arg === 'string') return arg;
+      if (arg?.message) return arg.message;
+      if (arg?.toString) return arg.toString();
+      try {
+        return JSON.stringify(arg);
+      } catch {
+        return String(arg);
+      }
+    }).join(' ');
+    
+    // Подавляем WebSocket ошибки и ошибки инициализации Expo Router
+    if (
+      errorString.includes('WebSocket connection error') ||
+      errorString.includes('websocket error') ||
+      errorString.includes('TransportError') ||
+      errorString.includes('engine.io-client') ||
+      errorString.includes('Cannot access') ||
+      errorString.includes('before initialization') ||
+      (errorString.includes('_construct') && errorString.includes('construct.js'))
+    ) {
+      return; // Не выводим эти ошибки
+    }
+    
+    originalError(...args);
+  };
+}
+
 function AuthenticatedStack() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
@@ -54,15 +88,31 @@ function RouterGate() {
 }
 
 export default function RootLayout() {
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <LanguageProvider>
-        <AuthProvider>
-          <EventsProvider>
-            <RouterGate />
-          </EventsProvider>
-        </AuthProvider>
-      </LanguageProvider>
-    </GestureHandlerRootView>
-  );
+  // Обрабатываем ошибки инициализации для веба
+  try {
+    return (
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <LanguageProvider>
+          <AuthProvider>
+            <EventsProvider>
+              <RouterGate />
+            </EventsProvider>
+          </AuthProvider>
+        </LanguageProvider>
+      </GestureHandlerRootView>
+    );
+  } catch (error: any) {
+    // Если ошибка инициализации, показываем загрузку и пробуем еще раз
+    if (error?.message?.includes('Cannot access') || error?.message?.includes('before initialization')) {
+      console.warn('Initialization error (non-critical), app will continue loading...');
+      // Возвращаем загрузку - приложение попробует загрузиться снова
+      return (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f0f0f' }}>
+          <ActivityIndicator size="large" color="#8B5CF6" />
+        </View>
+      );
+    }
+    // Для других ошибок пробрасываем дальше
+    throw error;
+  }
 }

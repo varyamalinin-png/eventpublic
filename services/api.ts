@@ -12,15 +12,17 @@ const DEFAULT_API_URL =
   process.env.EXPO_PUBLIC_API_URL || 
   'http://localhost:4000';
 
-// Детальное логирование для отладки
-console.log('[API] ==========================================');
-console.log('[API] Using API URL:', DEFAULT_API_URL);
-console.log('[API] From Constants.manifest?.extra?.apiUrl:', Constants.manifest?.extra?.apiUrl);
-console.log('[API] From Constants.expoConfig?.extra?.apiUrl:', Constants.expoConfig?.extra?.apiUrl);
-console.log('[API] From process.env.EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
-console.log('[API] Constants.manifest?.extra:', JSON.stringify(Constants.manifest?.extra, null, 2));
-console.log('[API] Constants.expoConfig?.extra:', JSON.stringify(Constants.expoConfig?.extra, null, 2));
-console.log('[API] ==========================================');
+// Детальное логирование для отладки (только в development)
+if (typeof __DEV__ !== 'undefined' && __DEV__) {
+  console.log('[API] ==========================================');
+  console.log('[API] Using API URL:', DEFAULT_API_URL);
+  console.log('[API] From Constants.manifest?.extra?.apiUrl:', Constants.manifest?.extra?.apiUrl);
+  console.log('[API] From Constants.expoConfig?.extra?.apiUrl:', Constants.expoConfig?.extra?.apiUrl);
+  console.log('[API] From process.env.EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
+  console.log('[API] Constants.manifest?.extra:', JSON.stringify(Constants.manifest?.extra, null, 2));
+  console.log('[API] Constants.expoConfig?.extra:', JSON.stringify(Constants.expoConfig?.extra, null, 2));
+  console.log('[API] ==========================================');
+}
 
 export const API_BASE_URL = DEFAULT_API_URL.replace(/\/$/, '');
 
@@ -55,10 +57,31 @@ export async function apiRequest(
   options: RequestInit = {},
   token?: string | null,
 ) {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string> | undefined),
-  };
+  const headers: Record<string, string> = {};
+  
+  // Не устанавливаем Content-Type для FormData - браузер/React Native сделает это автоматически
+  // Проверяем, является ли body FormData
+  // В React Native FormData может быть не стандартным объектом, поэтому проверяем более надежно
+  const isFormData = options.body instanceof FormData || 
+                     (options.body && typeof options.body === 'object' && 'append' in options.body && typeof (options.body as any).append === 'function');
+  
+  if (!isFormData) {
+    headers['Content-Type'] = 'application/json';
+  } else {
+    // Для FormData удаляем Content-Type из пользовательских заголовков, если он там есть
+    // Это важно, чтобы браузер/React Native мог установить правильный boundary
+    if (options.headers) {
+      const userHeaders = options.headers as Record<string, string>;
+      if (userHeaders['Content-Type']) {
+        delete userHeaders['Content-Type'];
+      }
+    }
+  }
+  
+  // Добавляем пользовательские заголовки, если они есть
+  if (options.headers) {
+    Object.assign(headers, options.headers);
+  }
 
   if (token) {
     headers.Authorization = `Bearer ${token}`;
@@ -73,6 +96,9 @@ export async function apiRequest(
 
   try {
     console.log(`[API] Making request to: ${API_BASE_URL}${path}`);
+    if (isFormData) {
+      console.log(`[API] Request body is FormData, Content-Type will be set automatically`);
+    }
     const response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
       headers,

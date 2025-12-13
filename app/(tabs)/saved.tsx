@@ -76,7 +76,11 @@ export default function SavedScreen() {
   if (!authUser) {
     return (
       <View style={styles.container}>
-        <TopBar onSearch={handleSavedSearch} />
+        <TopBar 
+          searchPlaceholder="Поиск сохраненных событий..."
+          onSearchChange={handleSavedSearch}
+          searchQuery={searchQuery}
+        />
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>Авторизуйтесь, чтобы просматривать сохраненные события</Text>
         </View>
@@ -106,7 +110,11 @@ export default function SavedScreen() {
 
   return (
     <View style={styles.container}>
-      <TopBar onSearch={handleSavedSearch} />
+      <TopBar 
+        searchPlaceholder="Поиск сохраненных событий..."
+        onSearchChange={handleSavedSearch}
+        searchQuery={searchQuery}
+      />
       
       {/* Табы для переключения между событиями и меморис */}
       <View style={styles.tabsContainer}>

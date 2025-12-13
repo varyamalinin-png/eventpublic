@@ -42,6 +42,18 @@ export default function RequestItem({
   const translateX = useRef(new Animated.Value(0)).current;
   
   const event = eventId ? events.find(e => e.id === eventId) : null;
+  
+  // Отладочная информация для исходящих запросов
+  if (isOutgoing && __DEV__) {
+    console.log('[RequestItem] Outgoing request:', {
+      type,
+      eventId,
+      userId,
+      isInvite,
+      hasEvent: !!event,
+      eventTitle: event?.title,
+    });
+  }
   const user = userId ? getUserData(userId) : null;
   const currentUserId = authUser?.id ?? null;
   const currentUser = currentUserId ? getUserData(currentUserId) : null;
@@ -137,7 +149,7 @@ export default function RequestItem({
             isOutgoing
               ? () => {
                   if (currentUserId) {
-                    router.push(`/profile/${currentUserId}`);
+                    router.push('/(tabs)/profile');
                   } else {
                     router.push('/(auth)');
                   }
@@ -185,47 +197,14 @@ export default function RequestItem({
                     />
                   </TouchableOpacity>
                 ) : isInvite && user ? (
-                  <>
-                    <TouchableOpacity 
-                      style={styles.inlineAvatar}
-                      onPress={handleUserPress}
-                      activeOpacity={0.7}
-                    >
-                      <Image 
-                        source={{ uri: user.avatar }} 
-                        style={styles.inlineAvatarImage} 
-                      />
-                    </TouchableOpacity>
-                    <Text style={styles.requestText}> {t.requestItem.toEvent} </Text>
-                    {event && (
-                      <TouchableOpacity 
-                        style={styles.inlineEventIcon}
-                        onPress={handleEventPress}
-                        activeOpacity={0.7}
-                      >
-                        <Image 
-                          source={{ uri: (() => {
-                            const viewerId = currentUserId ?? '';
-                            return getEventPhotoForUser(event.id, viewerId) || event.organizerAvatar;
-                          })()}} 
-                          style={styles.inlineEventIconImage} 
-                        />
-                      </TouchableOpacity>
-                    )}
-                  </>
-                ) : type === 'event' && event ? (
-                  // Для исходящих запросов на участие в событии показываем иконку события
                   <TouchableOpacity 
-                    style={styles.inlineEventIcon}
-                    onPress={handleEventPress}
+                    style={styles.inlineAvatar}
+                    onPress={handleUserPress}
                     activeOpacity={0.7}
                   >
                     <Image 
-                      source={{ uri: (() => {
-                        const viewerId = currentUserId ?? '';
-                        return getEventPhotoForUser(event.id, viewerId) || event.organizerAvatar;
-                      })()}} 
-                      style={styles.inlineEventIconImage} 
+                      source={{ uri: user.avatar }} 
+                      style={styles.inlineAvatarImage} 
                     />
                   </TouchableOpacity>
                 ) : null}
@@ -299,16 +278,57 @@ export default function RequestItem({
             </TouchableOpacity>
           )}
 
-          {/* Статус для исходящих запросов */}
+          {/* Иконка события, время и статус для исходящих запросов - в одну колонку справа */}
           {isOutgoing && (
-            <View style={[styles.statusBadge, { backgroundColor: getStatusColor() }]}>
-              <Text style={styles.statusIcon}>{getStatusIcon()}</Text>
+            <View style={styles.rightColumnContainer}>
+              {/* Иконка события - если есть */}
+              {type === 'event' && event && (
+                <TouchableOpacity 
+                  style={styles.rightColumnEventIcon}
+                  onPress={handleEventPress}
+                  activeOpacity={0.7}
+                >
+                  <Image 
+                    source={{ uri: (() => {
+                      const viewerId = currentUserId ?? '';
+                      return getEventPhotoForUser(event.id, viewerId) || event.organizerAvatar;
+                    })()}} 
+                    style={styles.rightColumnEventIconImage} 
+                  />
+                </TouchableOpacity>
+              )}
+              {isInvite && event && (
+                <TouchableOpacity 
+                  style={styles.rightColumnEventIcon}
+                  onPress={handleEventPress}
+                  activeOpacity={0.7}
+                >
+                  <Image 
+                    source={{ uri: (() => {
+                      const viewerId = currentUserId ?? '';
+                      return getEventPhotoForUser(event.id, viewerId) || event.organizerAvatar;
+                    })()}} 
+                    style={styles.rightColumnEventIconImage} 
+                  />
+                </TouchableOpacity>
+              )}
+              {/* Время и статус */}
+              <View style={styles.timeAndStatusContainer}>
+                {createdAt && (
+                  <Text style={styles.timeAgo} numberOfLines={1}>
+                    {formatTimeAgo(createdAt)}
+                  </Text>
+                )}
+                <View style={[styles.statusBadge, { backgroundColor: getStatusColor() }]}>
+                  <Text style={styles.statusIcon}>{getStatusIcon()}</Text>
+                </View>
+              </View>
             </View>
           )}
 
-          {/* Время создания запроса - самый правый элемент */}
-          {createdAt && (
-            <Text style={styles.timeAgo}>
+          {/* Время для входящих запросов */}
+          {!isOutgoing && createdAt && (
+            <Text style={styles.timeAgo} numberOfLines={1}>
               {formatTimeAgo(createdAt)}
             </Text>
           )}
@@ -321,7 +341,7 @@ export default function RequestItem({
 const styles = StyleSheet.create({
   container: {
     position: 'relative',
-    marginHorizontal: 12,
+    marginHorizontal: 12, // Такие же отступы как у входящих
     marginBottom: 1,
   },
   swipeActions: {
@@ -355,12 +375,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    minWidth: 0, // Позволяет контейнеру сжиматься
   },
   textContainer: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     marginRight: 6,
+    minWidth: 0, // Позволяет контейнеру сжиматься
+    overflow: 'hidden', // Предотвращает наслоение
   },
   requestText: {
     fontSize: 13,
@@ -415,16 +438,16 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   statusBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginLeft: 6, // Перенесли статус к времени
   },
   statusIcon: {
     color: '#FFF',
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: 'bold',
   },
   timeAgo: {
@@ -432,6 +455,11 @@ const styles = StyleSheet.create({
     color: '#999',
     minWidth: 50,
     textAlign: 'right',
+  },
+  timeAndStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   targetUserAvatar: {
     width: 32,
@@ -448,14 +476,31 @@ const styles = StyleSheet.create({
   outgoingRequestContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'nowrap',
     flex: 1,
+    gap: 4,
+    paddingRight: 8, // Отступ справа для времени и статуса
+  },
+  rightColumnContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  rightColumnEventIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  rightColumnEventIconImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
   },
   inlineAvatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    marginHorizontal: 2,
+    marginLeft: 4,
     overflow: 'hidden',
   },
   inlineAvatarImage: {
@@ -467,8 +512,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 8,
-    marginLeft: 2,
-    marginRight: 8,
+    marginLeft: 4,
     overflow: 'hidden',
   },
   inlineEventIconImage: {

@@ -142,7 +142,11 @@ async function main() {
     console.log('🔐 Получение IAM токена из приватного ключа...\n');
     const iamToken = await getIamToken();
     console.log('✅ IAM токен получен успешно!\n');
+<<<<<<< HEAD
     console.log('📋 Добавьте эту переменную в переменные окружения на Yandex Cloud VM:\n');
+=======
+    console.log('📋 Добавьте эту переменную в .env файл на Yandex Cloud VM:\n');
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
     console.log(`YANDEX_IAM_TOKEN=${iamToken}\n`);
     console.log('⚠️ ВАЖНО: IAM токен действителен 12 часов!');
     console.log('Для продакшена лучше использовать авторизованный ключ и автоматически обновлять токен.\n');

@@ -251,7 +251,7 @@ export default function RequestsTab() {
           userId: requesterUserId,
           status: req.status, // Передаем статус для отображения
           isBusinessAccount: isBusinessAccount, // Флаг для бизнес-аккаунта
-        });
+        } as any);
       });
     
     logger.debug('incomingRequests: итоговое количество запросов', { total: requests.length, invites: requests.filter(r => r.type === 'event' && r.isInvite).length });

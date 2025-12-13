@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { apiRequest, ApiError } from '../../services/api';
 import { createLogger } from '../../utils/logger';
 import type { Event, EventRequest } from '../../types';
+import type { ServerEventRequest } from '../../types/api';
 
 const logger = createLogger('useEventRequests');
 
@@ -198,9 +199,9 @@ export const useEventRequests = ({
                 const mappedRequest = {
                   id: membership.id,
                   type: 'join' as const,
-                  eventId: membership.eventId,
-                  fromUserId: membership.userId,
-                  toUserId: event.organizerId,
+                  eventId: membership.eventId || membership.event?.id || '',
+                  fromUserId: membership.userId || '',
+                  toUserId: event.organizerId || '',
                   status,
                   createdAt: membership.createdAt ? new Date(membership.createdAt) : new Date(),
                   userId: membership.userId,
@@ -236,7 +237,7 @@ export const useEventRequests = ({
             // КРИТИЧЕСКИ ВАЖНО: для входящих приглашений
             // fromUserId = кто пригласил (invitedBy или organizerId из event)
             // toUserId = кого пригласили (userId из membership)
-            const fromUserId = membership.invitedBy || membership.event?.organizerId;
+            const fromUserId = (membership.invitedBy || membership.event?.organizerId || '') as string;
             
             logger.debug('📥 Входящее приглашение:', {
               id: membership.id,
@@ -250,12 +251,12 @@ export const useEventRequests = ({
             return {
               id: membership.id,
               type: 'invite' as const,
-              eventId: membership.eventId,
-              fromUserId,
-              toUserId: membership.userId,
+              eventId: membership.eventId || membership.event?.id || '',
+              fromUserId: fromUserId || '',
+              toUserId: membership.userId || '',
               status,
               createdAt: membership.createdAt ? new Date(membership.createdAt) : new Date(),
-              userId: membership.userId,
+              userId: membership.userId || '',
             };
           });
         
@@ -278,12 +279,12 @@ export const useEventRequests = ({
             return {
               id: membership.id,
               type: 'invite' as const,
-              eventId: membership.eventId,
-              fromUserId: membership.invitedBy || actualUserId,
-              toUserId: membership.userId,
+              eventId: membership.eventId || membership.event?.id || '',
+              fromUserId: (membership.invitedBy || actualUserId || '') as string,
+              toUserId: membership.userId || '',
               status,
               createdAt: membership.createdAt ? new Date(membership.createdAt) : new Date(),
-              userId: membership.userId,
+              userId: membership.userId || '',
             };
           });
 
@@ -303,21 +304,21 @@ export const useEventRequests = ({
             
             logger.debug('📤 Исходящий join-запрос:', {
               id: membership.id,
-              eventId: membership.eventId,
-              fromUserId: membership.userId,
-              toUserId: membership.event?.organizerId,
+              eventId: membership.eventId || membership.event?.id || '',
+              fromUserId: membership.userId || '',
+              toUserId: membership.event?.organizerId || '',
               status,
             });
             
             return {
               id: membership.id,
               type: 'join' as const,
-              eventId: membership.eventId,
-              fromUserId: membership.userId,
+              eventId: membership.eventId || membership.event?.id || '',
+              fromUserId: membership.userId || '',
               toUserId: membership.event?.organizerId || '',
               status,
               createdAt: membership.createdAt ? new Date(membership.createdAt) : new Date(),
-              userId: membership.userId,
+              userId: membership.userId || '',
             };
           });
         
@@ -423,14 +424,23 @@ export const useEventRequests = ({
         const status: EventRequest['status'] =
           statusRaw === 'accepted' || statusRaw === 'rejected' ? statusRaw : 'pending';
 
-        // ВАЖНО: Используем actualUserId для fromUserId, чтобы совпадало с resolvedUserId в getUserRelationship
-        const requestUserId = membership?.userId ?? actualUserId ?? userId;
+        // КРИТИЧЕСКИ ВАЖНО: Используем actualUserId для fromUserId, чтобы совпадало с resolvedUserId в getUserRelationship
+        // НЕ используем membership?.userId, так как он может отличаться от actualUserId
+        // Это важно для правильного определения статуса "waiting" в getUserRelationship
+        const requestUserId = actualUserId ?? userId;
+        
+        logger.debug(`[sendEventRequest] Создаем запрос для события ${eventId}:`, {
+          requestUserId,
+          actualUserId,
+          membershipUserId: membership?.userId,
+          organizerId
+        });
         
         const newRequest: EventRequest = {
           id: membership?.id ?? `${Date.now()}`,
           eventId,
           type: 'join',
-          fromUserId: requestUserId, // Используем actualUserId для совпадения с resolvedUserId
+          fromUserId: requestUserId, // КРИТИЧЕСКИ ВАЖНО: Используем actualUserId для совпадения с resolvedUserId
           toUserId: organizerId,
           status,
           createdAt: membership?.createdAt ? new Date(membership.createdAt) : new Date(),
@@ -560,10 +570,52 @@ export const useEventRequests = ({
           actualToken,
         );
 
-        // Обновляем состояние - обновляем статус приглашения на accepted
-        setEventRequests(prev => prev.map(req => 
-          req.id === requestId ? { ...req, status: 'accepted' } : req
-        ));
+        // КРИТИЧЕСКИ ВАЖНО: Удаляем приглашение из списка сразу после принятия
+        // Это нужно, чтобы кнопка "принять приглашение" исчезла в календаре
+        setEventRequests(prev => prev.filter(req => req.id !== requestId));
+        
+        // КРИТИЧЕСКИ ВАЖНО: Обновляем локальное состояние события, добавляя пользователя в participants
+        // Это нужно, чтобы событие сразу появилось в профиле после принятия приглашения
+        const event = events.find(e => e.id === request.eventId);
+        if (event && actualUserId) {
+          // Обновляем событие, добавляя пользователя в participantsList и participantsData
+          setEvents(prev => prev.map(e => {
+            if (e.id !== request.eventId) return e;
+            
+            // Проверяем, не добавлен ли уже пользователь
+            const isAlreadyParticipant = e.participantsList?.includes(actualUserId) || 
+                                        e.participantsData?.some((p: any) => 
+                                          (p.userId || p.id) === actualUserId
+                                        );
+            
+            if (isAlreadyParticipant) return e;
+            
+            // Добавляем пользователя в participantsList
+            const updatedParticipantsList = [...(e.participantsList || []), actualUserId];
+            
+            // Добавляем пользователя в participantsData (если есть getUserData)
+            const userData = getUserData?.(actualUserId);
+            const updatedParticipantsData = userData 
+              ? [...(e.participantsData || []), {
+                  id: actualUserId,
+                  userId: actualUserId,
+                  name: userData.name,
+                  username: userData.username,
+                  avatar: userData.avatar || '',
+                }]
+              : e.participantsData;
+            
+            // Увеличиваем количество участников
+            const updatedParticipants = e.participants + 1;
+            
+            return {
+              ...e,
+              participantsList: updatedParticipantsList,
+              participantsData: updatedParticipantsData,
+              participants: updatedParticipants,
+            };
+          }));
+        }
         
         // Синхронизируем события и чаты для получения обновленных данных
         // Чат события создается автоматически на сервере при принятии первого участника
@@ -579,7 +631,7 @@ export const useEventRequests = ({
         throw error;
       }
     },
-    [eventRequests, syncEventsFromServer, syncChatsFromServer, refreshPendingJoinRequests],
+    [eventRequests, syncEventsFromServer, syncChatsFromServer, refreshPendingJoinRequests, events, setEvents, getUserData],
   );
 
   // Отклонение приглашения (invited → rejected)
@@ -801,14 +853,16 @@ export const useEventRequests = ({
 
     try {
       // Используем правильный endpoint для отмены запроса
+      // На сервере endpoint: DELETE /events/requests/:membershipId (без eventId)
+      // request.id должен быть membershipId
       await apiRequest(
-        `/events/${eventId}/requests/${request.id}`,
+        `/events/requests/${request.id}`,
         { method: 'DELETE' },
         actualToken,
       );
       setEventRequests(prev => prev.filter(req => req.id !== request.id));
       await syncEventsFromServer();
-      logger.info('✅ Запрос отменен:', { eventId, userId });
+      logger.info('✅ Запрос отменен:', { eventId, userId, requestId: request.id });
     } catch (error) {
       logger.error('Failed to cancel request', error);
       // Удаляем локально даже при ошибке
@@ -832,15 +886,140 @@ export const useEventRequests = ({
     try {
       // Новый упрощенный эндпоинт: сервер сам находит membership по eventId+userId
       await apiRequest(`/events/${eventId}/participation`, { method: 'DELETE' }, actualToken);
-      // Локально чистим любой accepted membership по этому событию
-      setEventRequests(prev => prev.filter(req => !(req.eventId === eventId && req.status === 'accepted' && requestBelongsToUser(req, userId))));
       
-      await syncEventsFromServer();
-      logger.info('✅ Участие отменено:', { eventId, userId, isPastEvent });
+      // КРИТИЧЕСКИ ВАЖНО: Сразу обновляем локальное состояние события,
+      // удаляя пользователя из списка участников, чтобы событие не появилось обратно в ленте
+      // НО: НЕ удаляем событие полностью - оно должно остаться у организатора
+      setEvents(prev => prev.map(e => {
+        if (e.id !== eventId) return e;
+        
+        // Удаляем пользователя из participantsList
+        const updatedParticipantsList = e.participantsList?.filter(id => id !== userId) || [];
+        
+        // Удаляем пользователя из participantsData
+        const updatedParticipantsData = e.participantsData?.filter(p => {
+          const pUserId = (p as any).userId || (p as any).id;
+          return pUserId !== userId;
+        }) || [];
+        
+        // Уменьшаем количество участников
+        const updatedParticipants = Math.max(0, e.participants - 1);
+        
+        // КРИТИЧЕСКИ ВАЖНО: Событие остается в списке, даже если участник отменил участие
+        // Организатор должен видеть событие, пока не заполнится список участников другими участниками
+        return {
+          ...e,
+          participantsList: updatedParticipantsList,
+          participantsData: updatedParticipantsData,
+          participants: updatedParticipants,
+        };
+      }));
+      
+      // КРИТИЧЕСКИ ВАЖНО: Создаем запрос со статусом 'rejected', чтобы событие не появлялось обратно в ленте
+      // НО: Для прошедших событий это не нужно, так как они не показываются в лентах
+      // Для прошедших событий rejected статус не применяется, чтобы событие оставалось видимым для других участников
+      if (!isPastEvent) {
+        // Только для будущих событий создаем rejected запрос, чтобы скрыть событие из лент
+        setEventRequests(prev => {
+          // Удаляем accepted запросы
+          const withoutAccepted = prev.filter(req => !(req.eventId === eventId && req.status === 'accepted' && requestBelongsToUser(req, userId)));
+          
+          // Проверяем, есть ли уже rejected запрос для этого события
+          const hasRejected = withoutAccepted.some(req => 
+            req.eventId === eventId && 
+            requestBelongsToUser(req, userId) && 
+            req.status === 'rejected'
+          );
+          
+          // Если rejected запроса нет - создаем его, чтобы событие не появлялось в ленте
+          if (!hasRejected) {
+            const rejectedRequest: EventRequest = {
+              id: `rejected-${eventId}-${userId}`,
+              eventId,
+              type: 'join',
+              fromUserId: userId,
+              toUserId: event?.organizerId || '',
+              userId: userId,
+              status: 'rejected',
+              createdAt: new Date(),
+            };
+            return [...withoutAccepted, rejectedRequest];
+          }
+          
+          return withoutAccepted;
+        });
+      } else {
+        // Для прошедших событий просто удаляем accepted запросы, но НЕ создаем rejected
+        // Это позволяет событию оставаться видимым для других участников
+        setEventRequests(prev => prev.filter(req => 
+          !(req.eventId === eventId && req.status === 'accepted' && requestBelongsToUser(req, userId))
+        ));
+      }
+      
+      // Для прошедших событий также обновляем eventProfiles
+      // КРИТИЧЕСКИ ВАЖНО: Событие НЕ удаляется у других участников
+      // Только текущий пользователь удаляется из списка участников
+      if (isPastEvent) {
+        setEventProfiles(prev => prev.map(profile => {
+          if (profile.eventId === eventId) {
+            // Удаляем только текущего пользователя из списка участников
+            // Событие остается для других участников
+            const updatedParticipants = profile.participants.filter((pid: string) => pid !== userId);
+            logger.debug(`Обновлен список участников для прошедшего события ${eventId}: удален ${userId}, осталось ${updatedParticipants.length} участников`);
+            return {
+              ...profile,
+              participants: updatedParticipants,
+            };
+          }
+          return profile;
+        }));
+      }
+      
+      // КРИТИЧЕСКИ ВАЖНО: Удаляем чат события полностью, если пользователь больше не является членом события
+      // Проверяем, является ли пользователь еще членом события после удаления
+      const updatedEvent = events.find(e => e.id === eventId);
+      const isStillMember = updatedEvent && (
+        updatedEvent.organizerId === userId ||
+        updatedEvent.participantsList?.includes(userId) ||
+        updatedEvent.participantsData?.some((p: any) => {
+          const pUserId = p.userId || p.id;
+          return pUserId === userId;
+        })
+      );
+      
+      if (!isStillMember) {
+        // Пользователь больше не является членом события - удаляем чат полностью
+        setChats(prev => prev.filter(chat => !(chat.eventId === eventId && chat.type === 'event')));
+        logger.info('✅ Чат события удален, так как пользователь больше не является членом события:', { eventId, userId });
+      } else {
+        // Пользователь все еще член события - только удаляем из списка участников чата
+        setChats(prev => prev.map(chat => {
+          if (chat.eventId === eventId && chat.participants?.includes(userId)) {
+            return {
+              ...chat,
+              participants: chat.participants.filter((pid: string) => pid !== userId)
+            };
+          }
+          return chat;
+        }));
+      }
+      
+      // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий НЕ синхронизируем с сервером сразу
+      // Это может привести к тому, что событие вернется в локальное состояние
+      // Вместо этого полагаемся на WebSocket уведомления для обновления профиля
+      if (!isPastEvent) {
+        // Для будущих событий синхронизируем с сервером
+        await syncEventsFromServer();
+      } else {
+        // Для прошедших событий только обновляем профиль через WebSocket
+        // Событие остается в локальном состоянии для других участников
+        logger.info('✅ Участие отменено в прошедшем событии, событие остается для других участников');
+      }
+      logger.info('✅ Участие отменено, пользователь удален из локального состояния, событие помечено как rejected:', { eventId, userId, isPastEvent });
     } catch (error) {
       logger.error('Failed to cancel participation', error);
     }
-  }, [events, eventRequests, requestBelongsToUser, syncEventsFromServer, isEventPast]);
+  }, [events, eventRequests, requestBelongsToUser, syncEventsFromServer, isEventPast, setEvents, setEventProfiles, setChats]);
 
   // Отправка приглашения на событие (от организатора к пользователю)
   const sendEventInvite = useCallback(async (eventId: string, fromUserId: string, toUserId: string, eventParam?: Event) => {

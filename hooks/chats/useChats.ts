@@ -7,6 +7,7 @@ import { createLogger } from '../../utils/logger';
 const logger = createLogger('Chats');
 
 // Утилиты для маппинга данных с сервера
+<<<<<<< HEAD
 export const mapServerMessageToClient = (message: ServerChatMessage): ChatMessage => ({
   id: message.id,
   chatId: message.chatId || '',
@@ -15,6 +16,24 @@ export const mapServerMessageToClient = (message: ServerChatMessage): ChatMessag
   eventId: message.eventId ?? undefined,
   createdAt: message.createdAt ? new Date(message.createdAt) : new Date(),
 });
+=======
+export const mapServerMessageToClient = (message: ServerChatMessage): ChatMessage => {
+  const result: ChatMessage = {
+    id: message.id,
+    chatId: message.chatId || '',
+    fromUserId: message.senderId ?? message.fromUserId ?? '',
+    text: message.content ?? undefined,
+    createdAt: message.createdAt ? new Date(message.createdAt) : new Date(),
+  };
+  if (message.eventId) {
+    result.eventId = message.eventId;
+  }
+  if (message.postId) {
+    result.postId = message.postId;
+  }
+  return result;
+};
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
 
 export const mapServerChatToClient = (chat: ServerChat): Chat => ({
   id: chat.id,
@@ -36,6 +55,7 @@ export interface UseChatsReturn {
   createEventChatWithParticipants: (eventId: string, firstAcceptedUserId: string) => Promise<void>;
   createPersonalChat: (otherUserId: string) => Promise<string>;
   sendChatMessage: (chatId: string, text: string, eventId?: string, postId?: string) => Promise<void>;
+  deleteChat: (chatId: string, leaveEvent?: boolean) => Promise<void>;
   getChatMessages: (chatId: string) => ChatMessage[];
   getChat: (chatId: string) => Chat | null;
   getChatsForUser: (userId: string) => Chat[];
@@ -363,6 +383,7 @@ export function useChats({
         const localId = `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         return localId;
       }
+      throw new Error('Не удалось создать чат');
     } catch (error) {
       logger.warn('Failed to create personal chat on server, creating locally', error);
       // Fallback: создаем локально
@@ -526,6 +547,42 @@ export function useChats({
     logger.info('✅ Участник добавлен в чат события:', eventId);
   }, [chats]);
 
+  const deleteChat = useCallback(async (chatId: string, leaveEvent: boolean = false) => {
+    const actualToken = currentAccessTokenRef.current;
+    const actualUserId = currentUserIdRef.current;
+    
+    if (!actualToken || !actualUserId) {
+      logger.warn('Cannot delete chat: no access');
+      throw new Error('Необходима авторизация');
+    }
+
+    try {
+      const response = await apiRequest(
+        `/chats/${chatId}`,
+        {
+          method: 'DELETE',
+          body: JSON.stringify({ leaveEvent }),
+        },
+        actualToken,
+      );
+      
+      logger.info('✅ Чат удален:', { chatId, leaveEvent });
+      
+      // Удаляем чат из локального состояния
+      setChats(prev => prev.filter(chat => chat.id !== chatId));
+      setChatMessages(prev => prev.filter(msg => msg.chatId !== chatId));
+      
+      // Синхронизируем с сервером
+      await syncChatsFromServer();
+    } catch (error) {
+      if (await handleUnauthorizedError(error)) {
+        return;
+      }
+      logger.error('❌ Ошибка при удалении чата:', error);
+      throw error;
+    }
+  }, [accessToken, currentUserId, syncChatsFromServer, handleUnauthorizedError]);
+
   return {
     chats,
     chatMessages,
@@ -534,6 +591,7 @@ export function useChats({
     createEventChatWithParticipants,
     createPersonalChat,
     sendChatMessage,
+    deleteChat,
     getChatMessages,
     getChat,
     getChatsForUser,

@@ -4,6 +4,8 @@ import type { Event, EventProfile, EventRequest, Chat } from '../../types';
 import type { CreateEventInput } from '../../context/EventsContext';
 import type { ServerUser, ServerEvent } from '../../types/api';
 import { createLogger } from '../../utils/logger';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system';
 
 const logger = createLogger('EventActions');
 
@@ -37,6 +39,7 @@ export interface UseEventActionsReturn {
   deleteEvent: (id: string) => Promise<void>;
   cancelEvent: (eventId: string) => Promise<void>;
   cancelOrganizerParticipation: (eventId: string) => Promise<void>;
+  transferOrganizerRole: (eventId: string, newOrganizerId: string) => Promise<void>;
   removeParticipantFromEvent: (eventId: string, userId: string) => Promise<void>;
 }
 
@@ -104,12 +107,100 @@ export function useEventActions({
         if (input.mediaUrl && !isHttpUrl(input.mediaUrl)) {
           logger.info('📤 Начинаем загрузку локального медиа (mediaUrl)...');
           try {
+            let imageUri = input.mediaUrl;
+            
+            // Сжимаем изображение перед загрузкой, если это изображение
+            if (input.mediaType === 'image') {
+              try {
+                // Проверяем размер файла
+                const fileInfo = await FileSystem.getInfoAsync(input.mediaUrl);
+                const fileSize = fileInfo.exists && 'size' in fileInfo ? fileInfo.size : 0;
+                const fileSizeMB = fileSize / (1024 * 1024);
+                
+                logger.debug('📤 Размер исходного файла:', { sizeMB: fileSizeMB.toFixed(2), sizeBytes: fileSize });
+                
+                // Определяем параметры сжатия в зависимости от размера
+                let targetWidth = 1200;
+                let compressQuality = 0.8;
+                
+                if (fileSizeMB > 10) {
+                  // Очень большие файлы (>10 МБ) - агрессивное сжатие
+                  targetWidth = 800;
+                  compressQuality = 0.5;
+                } else if (fileSizeMB > 5) {
+                  // Большие файлы (5-10 МБ)
+                  targetWidth = 1000;
+                  compressQuality = 0.6;
+                } else if (fileSizeMB > 2) {
+                  // Средние файлы (2-5 МБ)
+                  targetWidth = 1200;
+                  compressQuality = 0.7;
+                }
+                
+                let manipResult = await ImageManipulator.manipulateAsync(
+                  input.mediaUrl,
+                  [{ resize: { width: targetWidth } }],
+                  { compress: compressQuality, format: ImageManipulator.SaveFormat.JPEG }
+                );
+                
+                // Проверяем размер после сжатия и повторяем, если нужно
+                let compressedInfo = await FileSystem.getInfoAsync(manipResult.uri);
+                let compressedSize = compressedInfo.exists && 'size' in compressedInfo ? compressedInfo.size : 0;
+                let compressedSizeMB = compressedSize / (1024 * 1024);
+                
+                // Итеративное сжатие до достижения размера < 2 МБ
+                const MAX_SIZE_MB = 2;
+                let iterations = 0;
+                while (compressedSizeMB > MAX_SIZE_MB && iterations < 5) {
+                  iterations++;
+                  logger.debug(`📤 Файл все еще большой (${compressedSizeMB.toFixed(2)} МБ), повторное сжатие #${iterations}`);
+                  
+                  targetWidth = Math.max(400, Math.floor(targetWidth * 0.7));
+                  compressQuality = Math.max(0.2, compressQuality - 0.15);
+                  
+                  manipResult = await ImageManipulator.manipulateAsync(
+                    manipResult.uri,
+                    [{ resize: { width: targetWidth } }],
+                    { compress: compressQuality, format: ImageManipulator.SaveFormat.JPEG }
+                  );
+                  
+                  compressedInfo = await FileSystem.getInfoAsync(manipResult.uri);
+                  compressedSize = compressedInfo.exists && 'size' in compressedInfo ? compressedInfo.size : 0;
+                  compressedSizeMB = compressedSize / (1024 * 1024);
+                }
+                
+                // Финальное агрессивное сжатие, если нужно
+                if (compressedSizeMB > MAX_SIZE_MB) {
+                  logger.warn(`⚠️ Файл все еще большой (${compressedSizeMB.toFixed(2)} МБ), применяю финальное агрессивное сжатие`);
+                  manipResult = await ImageManipulator.manipulateAsync(
+                    manipResult.uri,
+                    [{ resize: { width: 800 } }],
+                    { compress: 0.3, format: ImageManipulator.SaveFormat.JPEG }
+                  );
+                  compressedInfo = await FileSystem.getInfoAsync(manipResult.uri);
+                  compressedSize = compressedInfo.exists && 'size' in compressedInfo ? compressedInfo.size : 0;
+                  compressedSizeMB = compressedSize / (1024 * 1024);
+                }
+                
+                imageUri = manipResult.uri;
+                logger.debug('📤 Изображение сжато:', { 
+                  original: input.mediaUrl, 
+                  compressed: imageUri,
+                  originalSizeMB: fileSizeMB.toFixed(2),
+                  compressedSizeMB: compressedSizeMB.toFixed(2)
+                });
+              } catch (compressError) {
+                logger.warn('⚠️ Не удалось сжать изображение, используем оригинал:', compressError);
+                // Продолжаем с оригинальным изображением
+              }
+            }
+            
             const formData = new FormData();
-            const fileName = input.mediaUrl.split('/').pop() || 'image.jpg';
+            const fileName = imageUri.split('/').pop() || 'image.jpg';
             const fileType = input.mediaType === 'video' ? 'video/mp4' : 'image/jpeg';
             
             formData.append('file', {
-              uri: input.mediaUrl,
+              uri: imageUri,
               name: fileName,
               type: fileType,
             } as any);
@@ -175,12 +266,120 @@ export function useEventActions({
         if (input.originalMediaUrl && !isHttpUrl(input.originalMediaUrl)) {
           logger.info('📤 Начинаем загрузку локального медиа (originalMediaUrl)...');
           try {
+            let imageUri = input.originalMediaUrl;
+            
+            // Сжимаем изображение перед загрузкой, если это изображение
+            // КРИТИЧЕСКИ ВАЖНО: Агрессивное сжатие для избежания ошибки 413 Request Entity Too Large
+            if (input.mediaType === 'image') {
+              try {
+                // Проверяем размер файла
+                const fileInfo = await FileSystem.getInfoAsync(input.originalMediaUrl);
+                const fileSize = fileInfo.exists && 'size' in fileInfo ? fileInfo.size : 0;
+                const fileSizeMB = fileSize / (1024 * 1024);
+                
+                logger.debug('📤 Размер исходного файла (originalMediaUrl):', { sizeMB: fileSizeMB.toFixed(2), sizeBytes: fileSize });
+                
+                // Определяем параметры сжатия в зависимости от размера
+                let targetWidth = 1200;
+                let compressQuality = 0.6;
+                
+                if (fileSizeMB > 15) {
+                  // Очень большие файлы (>15 МБ) - максимально агрессивное сжатие
+                  targetWidth = 800;
+                  compressQuality = 0.4;
+                } else if (fileSizeMB > 10) {
+                  // Большие файлы (10-15 МБ) - агрессивное сжатие
+                  targetWidth = 1000;
+                  compressQuality = 0.5;
+                } else if (fileSizeMB > 5) {
+                  // Средние файлы (5-10 МБ)
+                  targetWidth = 1200;
+                  compressQuality = 0.6;
+                } else if (fileSizeMB > 2) {
+                  // Небольшие файлы (2-5 МБ)
+                  targetWidth = 1400;
+                  compressQuality = 0.7;
+                }
+                
+                let manipResult = await ImageManipulator.manipulateAsync(
+                  input.originalMediaUrl,
+                  [{ resize: { width: targetWidth } }],
+                  { compress: compressQuality, format: ImageManipulator.SaveFormat.JPEG }
+                );
+                
+                // Проверяем размер после сжатия и повторяем, если нужно
+                let compressedInfo = await FileSystem.getInfoAsync(manipResult.uri);
+                let compressedSize = compressedInfo.exists && 'size' in compressedInfo ? compressedInfo.size : 0;
+                let compressedSizeMB = compressedSize / (1024 * 1024);
+                
+                // Итеративное сжатие до достижения размера < 2 МБ (критически важно для избежания 413)
+                let iterations = 0;
+                const MAX_SIZE_MB = 2; // Максимальный размер файла 2 МБ
+                while (compressedSizeMB > MAX_SIZE_MB && iterations < 5) {
+                  iterations++;
+                  logger.debug(`📤 Файл все еще большой (${compressedSizeMB.toFixed(2)} МБ), повторное сжатие #${iterations}`);
+                  
+                  // Более агрессивное уменьшение параметров
+                  targetWidth = Math.max(400, Math.floor(targetWidth * 0.7)); // Уменьшаем на 30%
+                  compressQuality = Math.max(0.2, compressQuality - 0.15); // Уменьшаем качество на 15%
+                  
+                  manipResult = await ImageManipulator.manipulateAsync(
+                    manipResult.uri,
+                    [{ resize: { width: targetWidth } }],
+                    { compress: compressQuality, format: ImageManipulator.SaveFormat.JPEG }
+                  );
+                  
+                  compressedInfo = await FileSystem.getInfoAsync(manipResult.uri);
+                  compressedSize = compressedInfo.exists && 'size' in compressedInfo ? compressedInfo.size : 0;
+                  compressedSizeMB = compressedSize / (1024 * 1024);
+                }
+                
+                // Если файл все еще больше 2 МБ после всех итераций - финальное агрессивное сжатие
+                if (compressedSizeMB > MAX_SIZE_MB) {
+                  logger.warn(`⚠️ Файл все еще большой (${compressedSizeMB.toFixed(2)} МБ) после ${iterations} итераций, применяю финальное агрессивное сжатие`);
+                  manipResult = await ImageManipulator.manipulateAsync(
+                    manipResult.uri,
+                    [{ resize: { width: 800 } }],
+                    { compress: 0.3, format: ImageManipulator.SaveFormat.JPEG }
+                  );
+                  compressedInfo = await FileSystem.getInfoAsync(manipResult.uri);
+                  compressedSize = compressedInfo.exists && 'size' in compressedInfo ? compressedInfo.size : 0;
+                  compressedSizeMB = compressedSize / (1024 * 1024);
+                  logger.debug(`📤 Финальный размер после агрессивного сжатия: ${compressedSizeMB.toFixed(2)} МБ`);
+                }
+                
+                imageUri = manipResult.uri;
+                logger.debug('📤 Оригинальное изображение сжато:', { 
+                  original: input.originalMediaUrl, 
+                  compressed: imageUri,
+                  originalSizeMB: fileSizeMB.toFixed(2),
+                  compressedSizeMB: compressedSizeMB.toFixed(2),
+                  iterations
+                });
+              } catch (compressError) {
+                logger.warn('⚠️ Не удалось сжать оригинальное изображение, пробуем более агрессивное сжатие:', compressError);
+                // Пробуем еще более агрессивное сжатие при ошибке
+                try {
+                  const fallbackResult = await ImageManipulator.manipulateAsync(
+                    input.originalMediaUrl,
+                    [{ resize: { width: 800 } }],
+                    { compress: 0.4, format: ImageManipulator.SaveFormat.JPEG }
+                  );
+                  imageUri = fallbackResult.uri;
+                  logger.debug('📤 Оригинальное изображение сжато (fallback):', { original: input.originalMediaUrl, compressed: imageUri });
+                } catch (fallbackError) {
+                  logger.error('❌ Не удалось сжать оригинальное изображение даже с fallback:', fallbackError);
+                  // Продолжаем с оригинальным изображением, но это может привести к ошибке 413
+                }
+              }
+            }
+            
             const formData = new FormData();
-            const fileName = input.originalMediaUrl.split('/').pop() || 'image.jpg';
+            const fileName = imageUri.split('/').pop() || 'image.jpg';
             const fileType = input.mediaType === 'video' ? 'video/mp4' : 'image/jpeg';
             
             formData.append('file', {
-              uri: input.originalMediaUrl,
+              uri: imageUri,
               name: fileName,
               type: fileType,
             } as any);
@@ -326,6 +525,11 @@ export function useEventActions({
           payload.targeting = input.targeting;
         }
 
+        // Поле для массового события - КРИТИЧЕСКИ ВАЖНО
+        if (input.isMassEvent !== undefined) {
+          payload.isMassEvent = input.isMassEvent;
+        }
+
         logger.debug('Creating event with payload:', JSON.stringify(payload, null, 2));
 
         // Выполняем запрос с обработкой ошибки 401 (автоматическое обновление токена)
@@ -397,6 +601,7 @@ export function useEventActions({
             location: response.location || '',
             price: response.price || '0₽',
             participants: response.memberships?.filter((m: any) => m.status === 'ACCEPTED').length || 0,
+            createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
             maxParticipants: response.maxParticipants || 0,
             organizerId: response.organizerId || response.organizer?.id || '',
             organizerAvatar: response.organizer?.avatarUrl || '',
@@ -491,9 +696,25 @@ export function useEventActions({
       setEvents(prev => {
         const existingEvent = prev.find(e => e.id === id);
         if (existingEvent) {
-          return prev.map(event => 
-            event.id === id ? { ...event, ...updates } : event
-          );
+          // Проверяем, действительно ли событие изменилось
+          const hasChanges = Object.keys(updates).some(key => {
+            const updateValue = (updates as any)[key];
+            const existingValue = (existingEvent as any)[key];
+            // Сравниваем значения, учитывая массивы и объекты
+            if (Array.isArray(updateValue) && Array.isArray(existingValue)) {
+              return JSON.stringify(updateValue) !== JSON.stringify(existingValue);
+            }
+            return updateValue !== existingValue;
+          });
+          
+          // Обновляем только если есть реальные изменения
+          if (hasChanges) {
+            return prev.map(event => 
+              event.id === id ? { ...event, ...updates } : event
+            );
+          }
+          // Нет изменений - возвращаем тот же массив (не вызываем перерендер)
+          return prev;
         } else {
           return [...prev, { ...updates, id } as Event];
         }
@@ -618,35 +839,46 @@ export function useEventActions({
           eventDeleted = true;
         }
       } catch (error) {
-        // Для прошедших событий ошибка "Membership not found" может быть нормальной
-        if (error instanceof ApiError && error.status === 400 && error.message?.includes('Membership not found')) {
-          logger.warn(`⚠️ Membership not found на сервере для события ${id}, проверяем профиль...`);
-          if (fetchEventProfile && isPastEvent) {
-            try {
-              const updatedProfile = await fetchEventProfile(id);
-              if (updatedProfile) {
-                const isStillParticipant = updatedProfile.participants.includes(actualUserId);
-                if (!isStillParticipant) {
-                  logger.info(`Пользователь удален из профиля на сервере`);
-                  serverSuccess = true;
+        // Обрабатываем ошибки удаления
+        if (error instanceof ApiError) {
+          // Если событие не найдено на сервере - это может быть нормально (уже удалено)
+          if (error.status === 404 || error.message?.includes('not found') || error.message?.includes('Event not found')) {
+            logger.warn(`⚠️ Событие ${id} не найдено на сервере, считаем удаление успешным`);
+            serverSuccess = true;
+            eventDeleted = true;
+          } 
+          // Для прошедших событий ошибка "Membership not found" может быть нормальной
+          else if (error.status === 400 && error.message?.includes('Membership not found')) {
+            logger.warn(`⚠️ Membership not found на сервере для события ${id}, проверяем профиль...`);
+            if (fetchEventProfile && isPastEvent) {
+              try {
+                const updatedProfile = await fetchEventProfile(id);
+                if (updatedProfile) {
+                  const isStillParticipant = updatedProfile.participants.includes(actualUserId);
+                  if (!isStillParticipant) {
+                    logger.info(`Пользователь удален из профиля на сервере`);
+                    serverSuccess = true;
+                  } else {
+                    logger.warn(`Пользователь все еще в профиле на сервере`);
+                    serverSuccess = false;
+                  }
                 } else {
-                  logger.warn(`Пользователь все еще в профиле на сервере`);
-                  serverSuccess = false;
+                  logger.warn(`Профиль не найден - возможно событие удалено`);
+                  serverSuccess = true;
+                  const eventExists = events.find(e => e.id === id);
+                  if (!eventExists) {
+                    eventDeleted = true;
+                  }
                 }
-              } else {
-                logger.warn(`Профиль не найден - возможно событие удалено`);
-                serverSuccess = true;
-                const eventExists = events.find(e => e.id === id);
-                if (!eventExists) {
-                  eventDeleted = true;
-                }
+              } catch (profileError) {
+                logger.warn(`Не удалось загрузить профиль с сервера:`, profileError);
               }
-            } catch (profileError) {
-              logger.warn(`Не удалось загрузить профиль с сервера:`, profileError);
             }
+          } else {
+            logger.warn(`Ошибка при удалении на сервере для события ${id}:`, error);
           }
         } else {
-          logger.warn(`Ошибка при удалении на сервере для события ${id}:`, error);
+          logger.warn(`Неизвестная ошибка при удалении на сервере для события ${id}:`, error);
         }
       }
     }
@@ -662,11 +894,13 @@ export function useEventActions({
 
     // Если удаление на сервере успешно, но событие не удалено полностью - обновляем локальное состояние
     if (serverSuccess) {
-      logger.info(`Удаление на сервере успешно - удаляем событие из локального состояния`);
-      setEvents(prev => prev.filter(e => e.id !== id));
-      setEventRequests(prev => prev.filter(req => req.eventId !== id));
+      logger.info(`Удаление на сервере успешно - обновляем локальное состояние`);
       
+      // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий НЕ удаляем событие из локального состояния
+      // Событие должно остаться для других участников
+      // Только обновляем список участников в профиле события
       if (isPastEvent) {
+        logger.info(`Прошедшее событие - обновляем только профиль, событие остается в списке`);
         if (fetchEventProfile) {
           try {
             const updatedProfile = await fetchEventProfile(id);
@@ -678,24 +912,63 @@ export function useEventActions({
                   participants: updatedProfile.participants
                 } : p
               ));
+              // КРИТИЧЕСКИ ВАЖНО: НЕ удаляем событие из events - оно должно остаться для других участников
+              // Только удаляем из eventRequests, если пользователь больше не участник
+              setEventRequests(prev => prev.filter(req => 
+                !(req.eventId === id && req.status === 'accepted' && 
+                  (req.fromUserId === actualUserId || req.toUserId === actualUserId))
+              ));
             } else {
-              logger.warn(`Профиль не найден - пользователь не участник, удаляем профиль`);
-              setEventProfiles(prev => prev.filter(p => p.eventId !== id));
+              // Профиль должен существовать для всех событий - если не найден, это ошибка
+              logger.error(`Профиль не найден для события ${id} - это не должно происходить`);
+              setEventRequests(prev => prev.filter(req => 
+                !(req.eventId === id && req.status === 'accepted' && 
+                  (req.fromUserId === actualUserId || req.toUserId === actualUserId))
+              ));
             }
           } catch (error) {
             logger.warn(`Не удалось обновить профиль с сервера:`, error);
-            setEventProfiles(prev => prev.filter(p => p.eventId !== id));
+            // Не удаляем событие даже при ошибке - оно должно остаться для других участников
           }
-        } else {
-          setEventProfiles(prev => prev.filter(p => p.eventId !== id));
         }
+        // КРИТИЧЕСКИ ВАЖНО: Удаляем чат события полностью, если пользователь больше не является членом события
+        // Проверяем, является ли пользователь еще членом события после удаления
+        const updatedEvent = events.find(e => e.id === id);
+        const isStillMember = updatedEvent && (
+          updatedEvent.organizerId === actualUserId ||
+          updatedEvent.participantsList?.includes(actualUserId || '') ||
+          updatedEvent.participantsData?.some((p: any) => {
+            const pUserId = p.userId || p.id;
+            return pUserId === actualUserId;
+          })
+        );
+        
+        if (!isStillMember) {
+          // Пользователь больше не является членом события - удаляем чат полностью
+          setChats(prev => prev.filter(chat => !(chat.eventId === id && chat.type === 'event')));
+          logger.info('✅ Чат события удален, так как пользователь больше не является членом события:', { eventId: id, userId: actualUserId });
+        } else {
+          // Пользователь все еще член события - только удаляем из списка участников чата
+          setChats(prev => prev.map(chat => {
+            if (chat.eventId === id && chat.participants?.includes(actualUserId || '')) {
+              return {
+                ...chat,
+                participants: chat.participants.filter((pid: string) => pid !== actualUserId)
+              };
+            }
+            return chat;
+          }));
+        }
+        return;
       } else {
+        // Для будущих событий удаляем полностью
+        logger.info(`Будущее событие - удаляем полностью из локального состояния`);
+        setEvents(prev => prev.filter(e => e.id !== id));
+        setEventRequests(prev => prev.filter(req => req.eventId !== id));
         setEventProfiles(prev => prev.filter(p => p.eventId !== id));
+        setChats(prev => prev.filter(c => c.eventId !== id));
+        return;
       }
-      
-      // Удаляем из чатов
-      setChats(prev => prev.filter(c => c.eventId !== id));
-      return;
     }
 
     // Если удаление на сервере не удалось - делаем локальное удаление (fallback)
@@ -746,44 +1019,74 @@ export function useEventActions({
       }
     }
     
-    if (participantsCount <= 2) {
-      // ≤2 участников - полная отмена события
+    if (participantsCount === 1) {
+      // Организатор единственный участник - полная отмена события
       try {
         await apiRequest(
           `/events/${eventId}`,
           { method: 'DELETE' },
           actualToken,
         );
-        if (deleteEventRef.current) {
-          await deleteEventRef.current(eventId);
-        }
+        
+        // КРИТИЧЕСКИ ВАЖНО: Сразу удаляем событие из локального состояния
+        // Это нужно для немедленного обновления UI, особенно счетчиков в шапке профиля
+        // При отмене события (DELETE /events/:id) событие полностью удаляется с сервера,
+        // поэтому мы должны удалить его из всех локальных состояний
+        setEvents(prev => prev.filter(e => e.id !== eventId));
+        setEventProfiles(prev => prev.filter(p => p.eventId !== eventId));
+        setEventRequests(prev => prev.filter(req => req.eventId !== eventId));
+        setChats(prev => prev.filter(c => c.eventId !== eventId));
+        
+        // Синхронизируем с сервером для обновления остальных данных
         if (syncEventsFromServer) {
           await syncEventsFromServer();
         }
-        logger.info('✅ Событие отменено:', eventId);
+        logger.info('✅ Событие отменено и удалено из локального состояния:', eventId);
       } catch (error) {
         logger.error('❌ Ошибка при отмене события:', error);
         throw error;
       }
     } else {
-      // >2 участников - отмена участия организатора
-      try {
-        await apiRequest(
-          `/events/${eventId}/organizer-participation`,
-          { method: 'DELETE' },
-          actualToken,
-        );
-        if (syncEventsFromServer) {
-          await syncEventsFromServer();
-        }
-        await refreshPendingJoinRequests();
-        logger.info('✅ Участие организатора отменено:', eventId);
-      } catch (error) {
-        logger.error('❌ Ошибка при отмене участия организатора:', error);
-        throw error;
-      }
+      // Организатор не единственный участник - показываем попап для передачи роли
+      // Это обрабатывается в EventCard через модальное окно
+      logger.warn('Cannot cancel event with multiple participants, use transfer organizer role instead');
+      throw new Error('Для отмены участия передайте роль организатора другому участнику');
     }
   }, [accessToken, currentUserId, events, getEventParticipants, syncEventsFromServer, refreshPendingJoinRequests]);
+
+  const transferOrganizerRole = useCallback(async (eventId: string, newOrganizerId: string) => {
+    const actualToken = currentAccessTokenRef.current;
+    const actualUserId = currentUserIdRef.current;
+    
+    if (!actualToken || !actualUserId) {
+      logger.warn('Cannot transfer organizer role: no access');
+      throw new Error('Необходима авторизация');
+    }
+
+    try {
+      const response = await apiRequest(
+        `/events/${eventId}/transfer-organizer`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ newOrganizerId }),
+        },
+        actualToken,
+      );
+      
+      logger.info('✅ Роль организатора передана:', { eventId, newOrganizerId });
+      
+      // Синхронизируем с сервером для обновления данных
+      if (syncEventsFromServer) {
+        await syncEventsFromServer();
+      }
+      if (refreshPendingJoinRequests) {
+        await refreshPendingJoinRequests();
+      }
+    } catch (error) {
+      logger.error('❌ Ошибка при передаче роли организатора:', error);
+      throw error;
+    }
+  }, [accessToken, currentUserId, syncEventsFromServer, refreshPendingJoinRequests]);
 
   const cancelOrganizerParticipation = useCallback(async (eventId: string) => {
     const actualToken = currentAccessTokenRef.current;
@@ -826,11 +1129,10 @@ export function useEventActions({
       }
       return;
     }
-    const participantsCount = getEventParticipants(eventId).length;
-    if (participantsCount <= 2) {
-      logger.warn('Use cancelEvent for events with ≤2 participants');
-      return cancelEvent(eventId);
-    }
+    // cancelOrganizerParticipation больше не используется - вместо этого используется transferOrganizerRole
+    // Оставляем для обратной совместимости, но перенаправляем на transferOrganizerRole
+    logger.warn('cancelOrganizerParticipation is deprecated, use transferOrganizerRole instead');
+    throw new Error('Используйте передачу роли организатора вместо отмены участия');
 
     try {
       await apiRequest(
@@ -879,6 +1181,7 @@ export function useEventActions({
     deleteEvent,
     cancelEvent,
     cancelOrganizerParticipation,
+    transferOrganizerRole,
     removeParticipantFromEvent,
   };
 }

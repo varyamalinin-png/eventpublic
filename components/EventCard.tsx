@@ -11,6 +11,10 @@ import { useAuth } from '../context/AuthContext';
 import { formatRecurringEventDate } from '../utils/dateHelpers';
 import { createLogger } from '../utils/logger';
 import { getAllRecurringDates } from '../utils/recurringEventUtils';
+import { eventCardStyles } from './EventCard/EventCard.styles';
+import { useEventCardActions } from '../hooks/events/useEventCardActions';
+import EventCardActionsModal from './EventCard/EventCardActionsModal';
+import EventCardMiniature from './EventCard/EventCardMiniature';
 
 const logger = createLogger('EventCard');
 
@@ -37,10 +41,12 @@ type EventCardProps = {
   showSwipeAction?: boolean; // показывать ли свайп-действие
   showOrganizerAvatar?: boolean; // показывать ли аватарку организатора
   onMiniaturePress?: () => void; // кастомный обработчик клика для мини-карточек
+  onLongPress?: () => void; // обработчик долгого нажатия
   onLayout?: (height: number) => void; // колбэк для передачи высоты карточки
   viewerUserId?: string; // ID участника, через профиль которого смотрят событие (для третьих лиц)
-  context?: 'explore' | 'memories' | 'other_profile' | 'own_profile';
+  context?: 'explore' | 'memories' | 'other_profile' | 'own_profile' | 'folder'; // folder - событие внутри папки
   tags?: string[]; // Метки (теги) события
+  folderId?: string; // ID папки, в которой находится событие (если есть)
 };
 
 export default function EventCard({
@@ -66,15 +72,18 @@ export default function EventCard({
   showSwipeAction = true,
   showOrganizerAvatar = true,
   onMiniaturePress,
+  onLongPress,
   onLayout,
   viewerUserId,
   context = 'explore', // По умолчанию контекст explore
   tags = [],
+  folderId,
 }: EventCardProps) {
   const router = useRouter();
   const { user: authUser } = useAuth();
   const currentUserId = authUser?.id ?? null;
-  const [tagsVisible, setTagsVisible] = useState(true); // Состояние для видимости меток в memories
+  // Теги всегда видимы, кроме контекста memories (там есть переключатель)
+  const [tagsVisible, setTagsVisible] = useState<boolean>(true); // Состояние для видимости меток в memories
   const { 
     updateEvent, 
     getUserData, 
@@ -93,22 +102,30 @@ export default function EventCard({
     events,
     cancelEvent,
     cancelOrganizerParticipation,
+    transferOrganizerRole,
     deleteEvent,
     removeParticipantFromEvent,
     eventRequests,
     respondToEventRequest,
     getChatsForUser,
+    getChat,
     getFriendsList,
+    eventFolders,
+    removeEventFromFolder,
+    addEventToFolder,
     sendEventToChats,
     createPersonalChat,
     saveEvent,
     removeSavedEvent,
     isEventSaved,
     rejectInvitation,
-    updateEventProfile
+    updateEventProfile,
+    eventProfiles,
+    fetchEventProfile
   } = useEvents();
   
   // Получаем событие из контекста
+<<<<<<< HEAD
   const event = useMemo(() => events.find(e => e.id === id), [events, id]);
   
   // Загружаем из профиля события при монтировании
@@ -116,21 +133,67 @@ export default function EventCard({
     const foundEvent = events.find(e => e.id === id);
     return foundEvent ? getEventProfile(id) : null;
   }, [events, id, getEventProfile]);
+=======
+  const event = useMemo(() => {
+    return events.find(e => e.id === id);
+  }, [events, id]);
+  
+  // Получаем профиль события из контекста (более надежно, чем getEventProfile)
+  const eventProfile = useMemo(() => {
+    return eventProfiles.find(p => p.eventId === id) || null;
+  }, [eventProfiles, id]);
+  
+  // Загружаем профиль события автоматически, если его нет
+  // НЕ загружаем профиль для preview-событий (они временные и не имеют профиля на сервере)
+  const loadingProfileRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    // Загружаем профиль только если:
+    // 1. Событие существует
+    // 2. Профиль еще не загружен
+    // 3. fetchEventProfile доступен
+    // 4. Профиль еще не загружается
+    // 5. Это НЕ preview-событие (временное событие)
+    const isPreviewEvent = id && (id.includes('-temp') || id.startsWith('preview-'));
+    if (event && !eventProfile && fetchEventProfile && id && !loadingProfileRef.current.has(id) && !isPreviewEvent) {
+      loadingProfileRef.current.add(id);
+      fetchEventProfile(id)
+        .then((profile: any) => {
+          if (profile) {
+            logger.debug(`[EventCard] Профиль загружен для события ${id}`, { postsCount: profile.posts?.length || 0 });
+          }
+          loadingProfileRef.current.delete(id);
+        })
+        .catch((error: any) => {
+          logger.error(`[EventCard] Ошибка загрузки профиля для события ${id}:`, error);
+          loadingProfileRef.current.delete(id);
+        });
+    }
+  }, [event, eventProfile, fetchEventProfile, id]);
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   
   const [showParticipants, setShowParticipants] = useState(false);
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
   const [showEventActionsModal, setShowEventActionsModal] = useState(false);
   const [showComplaintForm, setShowComplaintForm] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showAddToFolderModal, setShowAddToFolderModal] = useState(false);
+  const [selectedFolderIds, setSelectedFolderIds] = useState<Set<string>>(new Set());
   const [shareSearchQuery, setShareSearchQuery] = useState('');
   const [selectedShareChats, setSelectedShareChats] = useState<string[]>([]);
   const [showRecurringDatesModal, setShowRecurringDatesModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
+  const [showTransferOrganizerModal, setShowTransferOrganizerModal] = useState(false);
+  const [selectedNewOrganizerId, setSelectedNewOrganizerId] = useState<string | null>(null);
   // Состояние для режима редактирования видимости параметров (только для прошедших событий в меморис)
   const [isEditingParameterVisibility, setIsEditingParameterVisibility] = useState(false);
+<<<<<<< HEAD
   const [hiddenParameters, setHiddenParameters] = useState<Record<string, boolean>>(
     (eventProfile as any)?.hiddenParameters || {}
   );
+=======
+  const initialHiddenParameters = useMemo(() => (eventProfile as any)?.hiddenParameters || {}, [eventProfile]);
+  const [hiddenParameters, setHiddenParameters] = useState<Record<string, boolean>>(initialHiddenParameters);
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   
   // Синхронизируем скрытые параметры при изменении профиля события
   useEffect(() => {
@@ -142,14 +205,35 @@ export default function EventCard({
   const [isJoined, setIsJoined] = useState(false);
   const [showSwipeButtons, setShowSwipeButtons] = useState(false);
   const swipeX = useRef(0); // Отслеживаем текущее значение свайпа
+<<<<<<< HEAD
   
+=======
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   const { t, language } = useLanguage();
   
   // Отладочная информация для тегов
   const allTags = tags && tags.length > 0 ? tags : (event?.tags && event.tags.length > 0 ? event.tags : []);
+<<<<<<< HEAD
   if (allTags.length > 0 && (typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production')) {
     logger.debug(`Tags for event ${id}:`, { allTags, tagsProp: tags, eventTags: event?.tags });
   }
+=======
+  
+  // Явно добавляем метку "массовое" если событие массовое, но тег отсутствует
+  // Проверяем как из контекста (event?.isMassEvent), так и из тегов
+  const hasMassEvent = event?.isMassEvent || false;
+  const hasMassEventTag = allTags.some(t => 
+    t.toLowerCase().includes('массовое') || 
+    t.toLowerCase().includes('mass')
+  );
+  
+  // Если событие массовое, но тег отсутствует - добавляем его
+  // Это важно для preview-событий, где событие может быть не в контексте
+  const finalTags = hasMassEvent && !hasMassEventTag 
+    ? [...allTags, 'массовое']
+    : allTags;
+  
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   
   // Используем новую функцию getUserRelationship для определения отношений
   const relationship = event && currentUserId ? getUserRelationship(event, currentUserId) : 'non_member';
@@ -174,222 +258,19 @@ export default function EventCard({
   // Определяем время события (предстоящее/прошедшее)
   const isPast = event ? isEventPast(event) : false;
   
-  // Функция для получения текста кнопки сохранения
-  const getSaveButtonLabel = () => {
-    return isEventSaved(id) ? t.events.removeFromSaved : t.events.save;
-  };
-  
-  // Определяем список действий для меню трех точек
-  const getEventActions = () => {
-    if (!event) return [];
-    
-    const actions: Array<{ id: string; label: string; action?: () => void; isClickable?: boolean }> = [];
-    
-    // ЛЕНТЫ EXPLORE (GLOB/FRIENDS)
-    if (context === 'explore') {
-      if (isPast) {
-        // Прошедшее время - не может быть в explore
-        return [];
-      }
-      
-      // Предстоящее время
-      // 🎯 ПРИОРИТЕТ 1: Приглашение (invited)
-      if (relationship === 'invited') {
-        actions.push({ id: 'accept_invite', label: t.events.acceptInvitation, isClickable: true });
-        actions.push({ id: 'cancel_invite', label: t.events.cancelInvitation, isClickable: true });
-        actions.push({ id: 'share', label: t.events.share, isClickable: true });
-        actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-        actions.push({ id: 'report', label: t.events.report, isClickable: true });
-      }
-      // ПРИОРИТЕТ 2: В ожидании (waiting)
-      else if (relationship === 'waiting') {
-        actions.push({ id: 'view_requests', label: t.events.viewRequests });
-        actions.push({ id: 'cancel_request', label: t.events.cancelRequest });
-        actions.push({ id: 'report', label: t.events.report, isClickable: true });
-        actions.push({ id: 'share', label: t.events.share, isClickable: true });
-        actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-      }
-      // ПРИОРИТЕТ 3: Участник (accepted) - не может быть в explore (скрыто)
-      else if (relationship === 'accepted') {
-        return [];
-      }
-      // ПРИОРИТЕТ 4: Организатор (organizer)
-        else if (relationship === 'organizer') {
-          actions.push({ id: 'change_parameters', label: t.events.changeParameters, isClickable: true });
-        if (participantsCount <= 2) {
-            actions.push({ id: 'change_visibility', label: t.events.changeVisibility, isClickable: true });
-            actions.push({ id: 'cancel_event', label: t.events.cancelEvent, isClickable: true });
-        } else {
-            actions.push({ id: 'change_visibility', label: t.events.changeVisibility, isClickable: true });
-            actions.push({ id: 'cancel_organizer_participation', label: t.events.cancelParticipation, isClickable: true });
-        }
-        // Действие "продлить" для регулярных событий
-        if (event.isRecurring) {
-          actions.push({ id: 'extend_recurring', label: t.events.extendRecurring || 'Продлить', isClickable: true });
-        }
-        actions.push({ id: 'share', label: t.events.share, isClickable: true });
-        actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-      }
-      // ПРИОРИТЕТ 5: Не член (non_member)
-      else if (relationship === 'non_member') {
-        actions.push({ id: 'schedule', label: t.events.schedule });
-        actions.push({ id: 'share', label: t.events.share, isClickable: true });
-        actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-        actions.push({ id: 'report', label: t.events.report, isClickable: true });
-      }
-      // ПРИОРИТЕТ 6: Отклонен (rejected) - не показываем действия
-      else if (relationship === 'rejected') {
-        return [];
-      }
-    }
-    
-    // ПРОФИЛЬ ДРУГОГО ЧЕЛОВЕКА
-    else if (context === 'other_profile') {
-      if (isPast) {
-        // Прошедшее время (раздел Memories) - БЕЗ КНОПОК ПО СВАЙПУ
-        if (relationship === 'accepted') {
-          // Я участник
-          actions.push({ id: 'hide_parameters', label: t.events.hideParameters, isClickable: true });
-          actions.push({ id: 'change_visibility', label: t.events.changeVisibility });
-          actions.push({ id: 'change_photo', label: t.events.changePhoto, isClickable: true });
-          actions.push({ id: 'share', label: t.events.share, isClickable: true });
-          actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-          actions.push({ id: 'report', label: t.events.report, isClickable: true });
-        } else if (relationship === 'organizer') {
-          // Я организатор
-          actions.push({ id: 'hide_parameters', label: 'Скрыть параметры', isClickable: true });
-          actions.push({ id: 'change_visibility', label: 'Изменить видимость' });
-          actions.push({ id: 'change_photo', label: 'Изменить фото для себя', isClickable: true });
-          actions.push({ id: 'share', label: 'Поделиться', isClickable: true });
-          actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-        } else {
-          // Я не член
-          actions.push({ id: 'share', label: t.events.share, isClickable: true });
-          actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-          actions.push({ id: 'report', label: t.events.report, isClickable: true });
-        }
-      } else {
-        // Предстоящее время
-        // 🎯 ПРИОРИТЕТ 1: Приглашение (invited)
-        if (relationship === 'invited') {
-          actions.push({ id: 'accept_invite', label: t.events.acceptInvitation, isClickable: true });
-          actions.push({ id: 'cancel_invite', label: t.events.cancelInvitation, isClickable: true });
-          actions.push({ id: 'share', label: t.events.share, isClickable: true });
-          actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-          actions.push({ id: 'report', label: t.events.report, isClickable: true });
-        }
-        // ПРИОРИТЕТ 2: В ожидании (waiting)
-        else if (relationship === 'waiting') {
-          actions.push({ id: 'view_requests', label: t.events.viewRequests });
-          actions.push({ id: 'cancel_request', label: t.events.cancelRequest });
-          actions.push({ id: 'share', label: t.events.share, isClickable: true });
-          actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-          actions.push({ id: 'report', label: t.events.report, isClickable: true });
-        }
-        // ПРИОРИТЕТ 3: Участник (accepted)
-        else if (relationship === 'accepted') {
-          actions.push({ id: 'cancel_participation', label: t.events.cancelParticipation });
-          actions.push({ id: 'share', label: t.events.share, isClickable: true });
-          actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-          actions.push({ id: 'report', label: t.events.report, isClickable: true });
-        }
-        // ПРИОРИТЕТ 4: Организатор (organizer)
-        else if (relationship === 'organizer') {
-          actions.push({ id: 'change_parameters', label: t.events.changeParameters, isClickable: true });
-          if (participantsCount <= 2) {
-            actions.push({ id: 'cancel_event', label: t.events.cancelEvent, isClickable: true });
-          } else {
-            actions.push({ id: 'cancel_organizer_participation', label: t.events.cancelParticipation, isClickable: true });
-          }
-          actions.push({ id: 'remove_participant', label: t.events.removeParticipant, isClickable: true });
-          actions.push({ id: 'share', label: t.events.share, isClickable: true });
-          actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-        }
-        // ПРИОРИТЕТ 5: Не член (non_member)
-        else if (relationship === 'non_member') {
-          actions.push({ id: 'schedule', label: t.events.schedule });
-          actions.push({ id: 'share', label: t.events.share, isClickable: true });
-          actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-          actions.push({ id: 'report', label: t.events.report, isClickable: true });
-        }
-        // ПРИОРИТЕТ 6: Отклонен (rejected) - не показываем действия
-        else if (relationship === 'rejected') {
-          return [];
-        }
-      }
-    }
-    
-    // МОЙ ПРОФИЛЬ
-    else if (context === 'own_profile') {
-      if (isPast) {
-        // Прошедшее время (раздел Memories) - БЕЗ КНОПОК ПО СВАЙПУ
-        if (relationship === 'accepted') {
-          // Раздел Участник
-          actions.push({ id: 'hide_parameters', label: 'Скрыть параметры', isClickable: true });
-          actions.push({ id: 'change_photo', label: 'Изменить фото для себя', isClickable: true });
-          actions.push({ id: 'change_visibility', label: 'Изменить видимость' });
-          actions.push({ id: 'delete_event', label: t.events.deleteEvent || 'Удалить', isClickable: true });
-          actions.push({ id: 'share', label: 'Поделиться', isClickable: true });
-          actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-        } else if (relationship === 'organizer') {
-          // Раздел Организатор
-          actions.push({ id: 'hide_parameters', label: 'Скрыть параметры', isClickable: true });
-          actions.push({ id: 'change_photo', label: 'Изменить фото для себя', isClickable: true });
-          actions.push({ id: 'change_visibility', label: 'Изменить видимость' });
-          actions.push({ id: 'delete_event', label: t.events.deleteEvent || 'Удалить', isClickable: true });
-          actions.push({ id: 'share', label: 'Поделиться', isClickable: true });
-          actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-        }
-      } else {
-        // Предстоящее время
-        // Раздел Участник
-        if (relationship === 'accepted') {
-          actions.push({ id: 'cancel_participation', label: t.events.cancelParticipation });
-          actions.push({ id: 'change_visibility', label: t.events.changeVisibility });
-          actions.push({ id: 'share', label: t.events.share, isClickable: true });
-          actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-        }
-        // Раздел Организатор
-        else if (relationship === 'organizer') {
-          actions.push({ id: 'change_parameters', label: t.events.changeParameters, isClickable: true });
-          if (participantsCount <= 2) {
-            actions.push({ id: 'cancel_event', label: t.events.cancelEvent, isClickable: true });
-          } else {
-            actions.push({ id: 'cancel_organizer_participation', label: t.events.cancelParticipation, isClickable: true });
-          }
-          actions.push({ id: 'change_visibility', label: t.events.changeVisibility, isClickable: true });
-          actions.push({ id: 'share', label: t.events.share, isClickable: true });
-          actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-        }
-      }
-    }
-    
-    // РАЗДЕЛ MEMORIES (прошедшие события)
-    else if (context === 'memories') {
-      if (isPast) {
-        // Прошедшее время в разделе Memories
-        actions.push({ 
-          id: 'toggle_tags', 
-          label: tagsVisible ? (t.events.hideTags || 'Скрыть метки') : (t.events.showTags || 'Показать метки'), 
-          isClickable: true 
-        });
-        // Удалить событие (только если я организатор или участник)
-        if (relationship === 'organizer' || relationship === 'accepted') {
-          actions.push({ 
-            id: 'delete_event', 
-            label: t.events.deleteEvent || 'Удалить', 
-            isClickable: true 
-          });
-        }
-        actions.push({ id: 'share', label: t.events.share, isClickable: true });
-        actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
-      }
-    }
-    
-    return actions;
-  };
-  
-  const eventActions = getEventActions();
+  // Используем хук для получения списка действий
+  const eventActions = useEventCardActions({
+    event,
+    context,
+    relationship,
+    isPast,
+    participantsCount,
+    isEventSaved,
+    eventId: id,
+    tagsVisible,
+    hasEventFolders: eventFolders && Array.isArray(eventFolders) && eventFolders.length > 0,
+    folderId,
+  });
   
   // Определяем, нужно ли показывать три точки (если есть хотя бы одно действие)
   // В режиме редактирования видимости параметров показываем кнопку "Сохранить" вместо трех точек
@@ -398,6 +279,19 @@ export default function EventCard({
   
   // Определяем какие кнопки показывать в зависимости от контекста, роли и статуса
   const getSwipeButtons = () => {
+    // Если событие в папке и прошедшее - показываем кнопку "удалить из папки"
+    if (context === 'folder' && folderId && isPast) {
+      return {
+        primary: {
+          type: 'remove_from_folder',
+          label: 'Удалить из папки',
+          color: '#FF3B30',
+          icon: '🗑️'
+        },
+        secondary: null
+      };
+    }
+    
     // Если событие прошедшее - не показываем кнопки
     if (!shouldShowSwipeButtons || !event || isEventPast(event)) return { primary: null, secondary: null };
     
@@ -422,8 +316,8 @@ export default function EventCard({
     // ПРИОРИТЕТ 2: Организатор
     if (relationship === 'organizer') {
       if (context === 'explore') {
-        if (participantsCount <= 2) {
-          // Отменить событие (красная кнопка)
+        if (participantsCount === 1) {
+          // Отменить событие (красная кнопка) - организатор единственный участник
           return {
             primary: {
               type: 'cancel_event',
@@ -434,22 +328,22 @@ export default function EventCard({
             secondary: null
           };
         } else {
-          // Отменить участие (красная кнопка)
+          // Передать роль организатора (красная кнопка)
           return {
             primary: {
-              type: 'cancel_organizer_participation',
-              label: t.events.cancelParticipation,
+              type: 'transfer_organizer_role',
+              label: t.events.transferOrganizerRole || 'Передать роль организатора',
               color: '#FF3B30',
-              icon: '✕'
+              icon: '👤'
             },
             secondary: null
           };
         }
       } else if (context === 'other_profile') {
         // В профиле другого человека (раздел участник) - две кнопки
-        // Первая: отменить событие или отменить участие (в зависимости от количества)
+        // Первая: отменить событие или передать роль (в зависимости от количества участников)
         // Вторая: удалить участника
-        const primaryButton = participantsCount <= 2
+        const primaryButton = participantsCount === 1
           ? {
               type: 'cancel_event',
               label: t.events.cancelEvent,
@@ -457,10 +351,10 @@ export default function EventCard({
               icon: '✕'
             }
           : {
-              type: 'cancel_organizer_participation',
-              label: t.events.cancelParticipation,
+              type: 'transfer_organizer_role',
+              label: t.events.transferOrganizerRole || 'Передать роль организатора',
               color: '#FF3B30',
-              icon: '✕'
+              icon: '👤'
             };
         
         return {
@@ -474,7 +368,7 @@ export default function EventCard({
         };
       } else if (context === 'own_profile') {
         // В своем профиле - одна кнопка в зависимости от количества участников
-        if (participantsCount <= 2) {
+        if (participantsCount === 1) {
           return {
             primary: {
               type: 'cancel_event',
@@ -487,10 +381,10 @@ export default function EventCard({
         } else {
           return {
             primary: {
-              type: 'cancel_organizer_participation',
-              label: t.events.cancelParticipation,
+              type: 'transfer_organizer_role',
+              label: t.events.transferOrganizerRole || 'Передать роль организатора',
               color: '#FF3B30',
-              icon: '✕'
+              icon: '👤'
             },
             secondary: null
           };
@@ -718,6 +612,198 @@ export default function EventCard({
     }
   };
 
+  // Обработчик действий из модального окна
+  const handleActionPress = useCallback((actionId: string) => {
+    if (actionId === 'share') {
+      setSelectedShareChats([]);
+      setShareSearchQuery('');
+      setShowShareModal(true);
+      setShowEventActionsModal(false);
+    } else if (actionId === 'change_photo') {
+      handleChangePhotoFromModal();
+    } else if (actionId === 'accept_invite') {
+      const isoDateTime = `${date}T${time}:00`;
+      const inviteId = inviteRequest?.id;
+      router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${id}${inviteId ? `&inviteId=${inviteId}` : ''}`);
+      setShowEventActionsModal(false);
+    } else if (actionId === 'cancel_invite') {
+      if (inviteRequest) {
+        rejectInvitation(inviteRequest.id).catch(error => {
+          logger.error('Ошибка при отклонении приглашения:', error);
+          Alert.alert(t.common.error, t.events.failedToDeclineInvitation || 'Failed to decline invitation');
+        });
+      }
+      setShowEventActionsModal(false);
+    } else if (actionId === 'cancel_request') {
+      if (currentUserId) {
+        cancelEventRequest(id, currentUserId);
+      }
+      setShowEventActionsModal(false);
+    } else if (actionId === 'cancel_participation') {
+      if (currentUserId) {
+        cancelEventParticipation(id, currentUserId);
+      }
+      setShowEventActionsModal(false);
+    } else if (actionId === 'cancel_event') {
+      // Если участников больше 1, показываем попап с transfer organizer role
+      if (participantsCount > 1) {
+        setShowTransferOrganizerModal(true);
+        setShowEventActionsModal(false);
+      } else {
+        // Если участник только организатор, просто отменяем событие
+        cancelEvent(id);
+        setShowEventActionsModal(false);
+      }
+    } else if (actionId === 'transfer_organizer_role') {
+      setShowTransferOrganizerModal(true);
+      setShowEventActionsModal(false);
+    } else if (actionId === 'view_requests') {
+      router.push('/(tabs)/inbox');
+      setShowEventActionsModal(false);
+    } else if (actionId === 'go_to_chat') {
+      const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === id && c.type === 'event');
+      if (eventChat) {
+        router.push(`/(tabs)/inbox/${eventChat.id}`);
+        setShowEventActionsModal(false);
+      }
+    } else if (actionId === 'schedule') {
+      if (event?.isRecurring) {
+        setShowRecurringDatesModal(true);
+        setShowEventActionsModal(false);
+      } else {
+        const isoDateTime = `${date}T${time}:00`;
+        router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${id}`);
+        setShowEventActionsModal(false);
+      }
+    } else if (actionId === 'extend_recurring') {
+      setShowEventActionsModal(false);
+      router.push(`/(tabs)/create?eventId=${id}`);
+    } else if (actionId === 'change_parameters') {
+      router.push(`/create?eventId=${id}`);
+      setShowEventActionsModal(false);
+    } else if (actionId === 'remove_participant') {
+      if (viewerUserId) {
+        removeParticipantFromEvent(id, viewerUserId);
+      }
+      setShowEventActionsModal(false);
+    } else if (actionId === 'hide_parameters') {
+      setIsEditingParameterVisibility(true);
+      setShowEventActionsModal(false);
+    } else if (actionId === 'save') {
+      if (isEventSaved(id)) {
+        removeSavedEvent(id);
+        Alert.alert('Готово', 'Событие удалено из сохраненных');
+      } else {
+        saveEvent(id);
+        Alert.alert('Готово', 'Событие сохранено');
+      }
+      setShowEventActionsModal(false);
+    } else if (actionId === 'report') {
+      setShowEventActionsModal(false);
+      setShowComplaintForm(true);
+    } else if (actionId === 'toggle_tags') {
+      setTagsVisible(!tagsVisible);
+      setShowEventActionsModal(false);
+    } else if (actionId === 'remove_from_folder') {
+      if (folderId) {
+        Alert.alert(
+          'Удалить из папки',
+          'Вы уверены, что хотите удалить это событие из папки?',
+          [
+            { text: 'Отмена', style: 'cancel' },
+            {
+              text: 'Удалить',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await removeEventFromFolder(folderId, id);
+                  Alert.alert('Готово', 'Событие удалено из папки');
+                } catch (error) {
+                  Alert.alert('Ошибка', 'Не удалось удалить событие из папки');
+                }
+              },
+            },
+          ]
+        );
+      }
+      setShowEventActionsModal(false);
+    } else if (actionId === 'add_to_folder') {
+      setShowAddToFolderModal(true);
+      setShowEventActionsModal(false);
+    } else if (actionId === 'delete_event') {
+      Alert.alert(
+        t.events.deleteEvent || 'Удалить событие',
+        t.events.deleteEventConfirm || 'Вы уверены, что хотите удалить это событие?',
+        [
+          {
+            text: t.common.cancel || 'Отмена',
+            style: 'cancel',
+            onPress: () => setShowEventActionsModal(false),
+          },
+          {
+            text: t.events.deleteEvent || 'Удалить',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const event = events.find(e => e.id === id);
+                if (event && isEventPast(event)) {
+                  logger.debug(`Отменяем участие в прошедшем событии ${id} (событие остается для других участников)`);
+                  if (currentUserId) {
+                    await cancelEventParticipation(id, currentUserId);
+                  }
+                  setShowEventActionsModal(false);
+                } else {
+                  await deleteEvent(id);
+                  setShowEventActionsModal(false);
+                }
+              } catch (error) {
+                logger.error('Error deleting event:', error);
+                Alert.alert(t.common.error || 'Ошибка', (t.events as any).deleteError || 'Не удалось удалить событие');
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      setShowEventActionsModal(false);
+    }
+  }, [
+    id,
+    date,
+    time,
+    inviteRequest,
+    currentUserId,
+    event,
+    viewerUserId,
+    folderId,
+    tagsVisible,
+    router,
+    t,
+    events,
+    isEventPast,
+    isEventSaved,
+    cancelEventRequest,
+    cancelEventParticipation,
+    cancelEvent,
+    removeParticipantFromEvent,
+    rejectInvitation,
+    removeEventFromFolder,
+    deleteEvent,
+    saveEvent,
+    removeSavedEvent,
+    getChatsForUser,
+    setTagsVisible,
+    setIsEditingParameterVisibility,
+    setShowEventActionsModal,
+    setShowShareModal,
+    setShowComplaintForm,
+    setShowAddToFolderModal,
+    setShowTransferOrganizerModal,
+    setShowRecurringDatesModal,
+    setSelectedShareChats,
+    setShareSearchQuery,
+  ]);
+
   // Обработка изменения фото события (обернута в useCallback для стабильности)
   const handleChangeEventPhoto = useCallback(async () => {
     logger.debug('handleChangeEventPhoto вызван - открываем галерею');
@@ -768,7 +854,7 @@ export default function EventCard({
   }, [id, currentUserId, setPersonalEventPhoto]);
 
   // Обработчик нажатия на "Изменить фото для себя" в модальном окне
-  const handleChangePhotoFromModal = () => {
+  const handleChangePhotoFromModal = useCallback(() => {
     logger.debug('Кнопка "Изменить фото для себя" нажата, закрываем модальное окно');
     // Закрываем модальное окно
     setShowEventActionsModal(false);
@@ -783,7 +869,16 @@ export default function EventCard({
         });
       }, 800);
     });
-  };
+  }, [handleChangeEventPhoto, setShowEventActionsModal]);
+
+  // Обновляем handleActionPress чтобы использовать handleChangePhotoFromModal
+  const handleActionPressWithPhoto = useCallback((actionId: string) => {
+    if (actionId === 'change_photo') {
+      handleChangePhotoFromModal();
+    } else {
+      handleActionPress(actionId);
+    }
+  }, [handleChangePhotoFromModal, handleActionPress]);
 
 
   // Получаем список участников - это драйвер для отображения везде
@@ -806,6 +901,60 @@ export default function EventCard({
     if (!swipeButtons.primary) return;
     
     switch (swipeButtons.primary.type) {
+      case 'remove_from_folder':
+        // Удаление события из папки
+        if (folderId) {
+          Alert.alert(
+            'Удалить из папки',
+            'Удалить это событие из папки?',
+            [
+              { 
+                text: 'Отмена', 
+                style: 'cancel',
+                onPress: () => {
+                  setShowSwipeButtons(false);
+                  Animated.spring(translateX, {
+                    toValue: 0,
+                    useNativeDriver: true,
+                  }).start();
+                }
+              },
+              {
+                text: 'Удалить',
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    if (!folderId) return;
+                    await removeEventFromFolder(folderId, id);
+                    // Если это было последнее событие, папка будет автоматически удалена на сервере
+                    // Обновление состояния произойдет через refreshFolders в контексте
+                    Alert.alert('Готово', 'Событие удалено из папки');
+                  } catch (error: any) {
+                    // Если папка не найдена (404), значит она была автоматически удалена
+                    if (error?.status === 404 || error?.message?.includes('404')) {
+                      Alert.alert('Папка удалена', 'Папка была удалена, так как в ней не осталось событий');
+                    } else {
+                      Alert.alert('Ошибка', 'Не удалось удалить событие из папки');
+                    }
+                  } finally {
+                    setShowSwipeButtons(false);
+                    Animated.spring(translateX, {
+                      toValue: 0,
+                      useNativeDriver: true,
+                    }).start();
+                  }
+                },
+              },
+            ]
+          );
+          return;
+        }
+        setShowSwipeButtons(false);
+        Animated.spring(translateX, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+        break;
       case 'go':
         // Для регулярных событий показываем модальное окно со списком дат
         if (event?.isRecurring) {
@@ -1042,9 +1191,9 @@ export default function EventCard({
   };
 
   // Для миниатюрных вариантов не показываем свайп
-  if (variant !== 'default' || !showSwipeAction) {
-    // console.log('🟢 Rendering miniature card:', { variant, showSwipeAction, id, title });
+  if (variant !== 'default') {
     return (
+<<<<<<< HEAD
       <TouchableOpacity onPress={() => {
         logger.debug('Miniature card clicked', { hasOnMiniaturePress: !!onMiniaturePress, variant });
         if (onMiniaturePress) {
@@ -1139,6 +1288,22 @@ export default function EventCard({
           )}
         </View>
       </TouchableOpacity>
+=======
+      <EventCardMiniature
+        id={id}
+        title={title}
+        organizerId={organizerId}
+        organizerAvatar={organizerAvatar}
+        mediaUrl={mediaUrl}
+        mediaType={mediaType}
+        variant={variant}
+        showOrganizerAvatar={showOrganizerAvatar}
+        onMiniaturePress={onMiniaturePress}
+        onLongPress={onLongPress}
+        participantsData={displayParticipants}
+        viewerUserId={viewerUserId}
+      />
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
     );
   }
 
@@ -1218,7 +1383,7 @@ export default function EventCard({
               // Вычисляем количество скрытых параметров (без title)
               const hiddenParamsCount = Object.entries(hiddenParameters)
                 .filter(([key, value]) => key !== 'title' && value === true).length;
-              const photoHeightPercent = hiddenParamsCount > 0 
+              const photoHeightPercent: string = hiddenParamsCount > 0 
                 ? `${100 + (hiddenParamsCount * 10)}%` 
                 : '100%';
               
@@ -1243,9 +1408,9 @@ export default function EventCard({
                         style={styles.mediaImageHorizontal} 
                       />
                       {/* Метки (теги) - поверх фото сверху слева */}
-                      {allTags.length > 0 && tagsVisible && (
+                      {finalTags.length > 0 && (context !== 'memories' || tagsVisible) && (
                         <View style={styles.tagsContainerOverlay}>
-                          {allTags.map((tag, index) => (
+                          {finalTags.map((tag, index) => (
                             <View key={index} style={styles.tagBadge}>
                               <Text style={styles.tagText}>{tag}</Text>
                             </View>
@@ -1268,9 +1433,19 @@ export default function EventCard({
                         : `/event-profile/${id}`;
                       router.push(url);
                     }} style={styles.titleContainer}>
-                      <Text style={styles.title} numberOfLines={1}>
-                        {title || 'Название события'}
-                      </Text>
+                      <View style={styles.titleWithPostsContainer}>
+                        <Text style={styles.title} numberOfLines={1}>
+                          {title || 'Название события'}
+                        </Text>
+                        {(() => {
+                          const postsCount = eventProfile?.posts?.length || 0;
+                          return (
+                            <Text style={styles.postsCount}>
+                              {postsCount} {postsCount === 1 ? 'post' : 'posts'}
+                            </Text>
+                          );
+                        })()}
+                      </View>
                     </TouchableOpacity>
                     
                     {renderParameterWithOverlay('description', (
@@ -1404,9 +1579,9 @@ export default function EventCard({
                         style={styles.mediaImageVertical} 
                       />
                       {/* Метки (теги) - поверх фото сверху слева */}
-                      {allTags.length > 0 && tagsVisible && (
+                      {finalTags.length > 0 && (context !== 'memories' || tagsVisible) && (
                         <View style={styles.tagsContainerOverlay}>
-                          {allTags.map((tag, index) => (
+                          {finalTags.map((tag, index) => (
                             <View key={index} style={styles.tagBadge}>
                               <Text style={styles.tagText}>{tag}</Text>
                             </View>
@@ -1429,9 +1604,19 @@ export default function EventCard({
                         : `/event-profile/${id}`;
                       router.push(url);
                     }} style={styles.titleContainer}>
-                      <Text style={styles.title} numberOfLines={1}>
-                        {title || 'Название события'}
-                      </Text>
+                      <View style={styles.titleWithPostsContainer}>
+                        <Text style={styles.title} numberOfLines={1}>
+                          {title || 'Название события'}
+                        </Text>
+                        {(() => {
+                          const postsCount = eventProfile?.posts?.length || 0;
+                          return (
+                            <Text style={styles.postsCount}>
+                              {postsCount} {postsCount === 1 ? 'post' : 'posts'}
+                            </Text>
+                          );
+                        })()}
+                      </View>
                     </TouchableOpacity>
                     
                     {renderParameterWithOverlay('description', (
@@ -1620,8 +1805,9 @@ export default function EventCard({
       />
 
       {/* Модальное окно действий с событием */}
-      <Modal
+      <EventCardActionsModal
         visible={showEventActionsModal}
+<<<<<<< HEAD
         transparent={true}
         animationType="fade"
         onRequestClose={() => setShowEventActionsModal(false)}
@@ -1799,6 +1985,12 @@ export default function EventCard({
           </View>
         </View>
       </Modal>
+=======
+        actions={eventActions}
+        onClose={() => setShowEventActionsModal(false)}
+        onActionPress={handleActionPressWithPhoto}
+      />
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
 
       {/* Модальное окно для выбора чатов и друзей для отправки события */}
       <Modal
@@ -1829,7 +2021,11 @@ export default function EventCard({
             <ScrollView style={styles.shareModalScrollView}>
               {/* Чаты */}
               <Text style={styles.shareModalSectionTitle}>Чаты</Text>
+<<<<<<< HEAD
               {(currentUserId ? getChatsForUser(currentUserId) : [])
+=======
+              {getChatsForUser(currentUserId || '')
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
                 .filter(chat => 
                   chat.name.toLowerCase().includes(shareSearchQuery.toLowerCase())
                 )
@@ -1881,7 +2077,11 @@ export default function EventCard({
                 )
                 .map(friend => {
                   // Находим существующий личный чат
+<<<<<<< HEAD
                   const existingChat = currentUserId ? getChatsForUser(currentUserId).find(
+=======
+                  const existingChat = getChatsForUser(currentUserId || '').find(
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
                     chat => chat.type === 'personal' && chat.participants.includes(friend.id)
                   ) : undefined;
                   const chatId = existingChat ? existingChat.id : null;
@@ -1913,7 +2113,9 @@ export default function EventCard({
                           setSelectedShareChats(prev => prev.filter(id => id !== targetChatId && id !== friendKey));
                         } else {
                           // Добавляем chatId (удаляем friendKey, если он был)
-                          setSelectedShareChats(prev => [...prev.filter(id => id !== friendKey), targetChatId]);
+                          if (targetChatId) {
+                            setSelectedShareChats(prev => [...prev.filter(id => id !== friendKey), targetChatId]);
+                          }
                         }
                       }}
                     >
@@ -1959,6 +2161,110 @@ export default function EventCard({
         </View>
       </Modal>
 
+      {/* Модальное окно для добавления события в папку */}
+      <Modal
+        visible={showAddToFolderModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setShowAddToFolderModal(false);
+          setSelectedFolderIds(new Set());
+        }}
+      >
+        <View style={styles.shareModalOverlay}>
+          <View style={styles.shareModalContent}>
+            <View style={styles.shareModalHeader}>
+              <Text style={styles.shareModalTitle}>Добавить в папку</Text>
+              <TouchableOpacity onPress={() => {
+                setShowAddToFolderModal(false);
+                setSelectedFolderIds(new Set());
+              }}>
+                <Text style={styles.shareModalCloseButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {/* Список папок */}
+            <ScrollView style={styles.shareModalScrollView}>
+              {eventFolders && Array.isArray(eventFolders) && eventFolders.length > 0 ? (
+                eventFolders.map((folder: any) => {
+                  const isSelected = selectedFolderIds.has(folder.id);
+                  // Проверяем, не находится ли уже событие в этой папке
+                  const isEventInFolder = folder.events?.some((e: any) => e.id === id) || false;
+                  
+                  return (
+                    <TouchableOpacity
+                      key={folder.id}
+                      style={[
+                        styles.shareModalItem,
+                        isEventInFolder && styles.shareModalItemDisabled
+                      ]}
+                      onPress={() => {
+                        if (!isEventInFolder) {
+                          const newSelected = new Set(selectedFolderIds);
+                          if (newSelected.has(folder.id)) {
+                            newSelected.delete(folder.id);
+                          } else {
+                            newSelected.add(folder.id);
+                          }
+                          setSelectedFolderIds(newSelected);
+                        }
+                      }}
+                      disabled={isEventInFolder}
+                    >
+                      <Image
+                        source={{ 
+                          uri: folder.coverPhotoUrl || folder.events?.[0]?.mediaUrl || 'https://via.placeholder.com/40'
+                        }}
+                        style={styles.shareModalAvatar}
+                      />
+                      <View style={styles.shareModalItemInfo}>
+                        <Text style={styles.shareModalItemName}>{folder.name}</Text>
+                        <Text style={styles.shareModalItemSubtext}>
+                          {folder.eventCount || folder.events?.length || 0} {folder.eventCount === 1 || folder.events?.length === 1 ? 'событие' : 'событий'}
+                          {isEventInFolder && ' • Уже в папке'}
+                        </Text>
+                      </View>
+                      <Text style={styles.shareModalCheckbox}>
+                        {isEventInFolder ? '✓' : (isSelected ? '☑' : '☐')}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <Text style={styles.shareModalEmptyText}>У вас пока нет папок</Text>
+              )}
+            </ScrollView>
+            
+            {/* Кнопка подтверждения */}
+            <TouchableOpacity
+              style={[
+                styles.shareModalSendButton,
+                selectedFolderIds.size === 0 && styles.shareModalSendButtonDisabled
+              ]}
+              onPress={async () => {
+                if (selectedFolderIds.size > 0) {
+                  try {
+                    for (const folderId of selectedFolderIds) {
+                      await addEventToFolder(folderId, id);
+                    }
+                    Alert.alert('Готово', `Событие добавлено в ${selectedFolderIds.size} ${selectedFolderIds.size === 1 ? 'папку' : 'папок'}`);
+                    setShowAddToFolderModal(false);
+                    setSelectedFolderIds(new Set());
+                  } catch (error) {
+                    Alert.alert('Ошибка', 'Не удалось добавить событие в папку');
+                  }
+                }
+              }}
+              disabled={selectedFolderIds.size === 0}
+            >
+              <Text style={styles.shareModalSendButtonText}>
+                Добавить ({selectedFolderIds.size})
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Модальное окно для выбора дат регулярного события */}
       <Modal
         visible={showRecurringDatesModal}
@@ -1969,7 +2275,7 @@ export default function EventCard({
         <View style={styles.shareModalOverlay}>
           <View style={styles.shareModalContent}>
             <View style={styles.shareModalHeader}>
-              <Text style={styles.shareModalTitle}>{t.events.selectDate || 'Выберите дату'}</Text>
+              <Text style={styles.shareModalTitle}>{(t.events as any).selectDate || 'Выберите дату'}</Text>
               <TouchableOpacity
                 onPress={() => setShowRecurringDatesModal(false)}
               >
@@ -1988,7 +2294,7 @@ export default function EventCard({
                     {/* Будущие даты */}
                     {futureDates.length > 0 && (
                       <>
-                        <Text style={styles.recurringDatesSectionTitle}>{t.events.upcomingDates || 'Предстоящие даты'}</Text>
+                        <Text style={styles.recurringDatesSectionTitle}>{(t.events as any).upcomingDates || 'Предстоящие даты'}</Text>
                         {futureDates.map((dateItem, index) => {
                           const dateObj = new Date(dateItem.date);
                           const day = dateObj.getDate().toString().padStart(2, '0');
@@ -2012,13 +2318,18 @@ export default function EventCard({
                                   return;
                                 }
                                 try {
+<<<<<<< HEAD
                                   if (currentUserId) {
                                     await sendEventRequest(id, currentUserId);
                                     Alert.alert(t.common.success || 'Успешно', t.events.requestSent || 'Запрос отправлен');
                                   }
+=======
+                                  await sendEventRequest(id, currentUserId);
+                                  Alert.alert(t.common.success || 'Успешно', (t.events as any).requestSent || 'Запрос отправлен');
+>>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
                                 } catch (error) {
                                   logger.error('Failed to send event request', error);
-                                  Alert.alert(t.common.error || 'Ошибка', t.events.failedToSendRequest || 'Не удалось отправить запрос');
+                                  Alert.alert(t.common.error || 'Ошибка', (t.events as any).failedToSendRequest || 'Не удалось отправить запрос');
                                 }
                               }}
                               disabled={isScheduled}
@@ -2026,7 +2337,7 @@ export default function EventCard({
                               <Text style={styles.recurringDateText}>{formattedDate}</Text>
                               <Text style={styles.recurringDateTime}>{time}</Text>
                               {isScheduled ? (
-                                <Text style={styles.recurringDateStatus}>⏱ {t.events.requestPending || 'Запрос отправлен'}</Text>
+                                <Text style={styles.recurringDateStatus}>⏱ {(t.events as any).requestPending || 'Запрос отправлен'}</Text>
                               ) : (
                                 <Text style={styles.recurringDateButton}>{t.events.schedule || 'Запланировать'}</Text>
                               )}
@@ -2054,16 +2365,16 @@ export default function EventCard({
                                     logger.warn(`Failed to send request for date ${dateItem.date}`, error);
                                   }
                                 }
-                                Alert.alert(t.common.success || 'Успешно', t.events.allRequestsSent || 'Запросы на все даты отправлены');
+                                Alert.alert(t.common.success || 'Успешно', (t.events as any).allRequestsSent || 'Запросы на все даты отправлены');
                                 setShowRecurringDatesModal(false);
                               } catch (error) {
                                 logger.error('Failed to send all event requests', error);
-                                Alert.alert(t.common.error || 'Ошибка', t.events.failedToSendRequests || 'Не удалось отправить запросы');
+                                Alert.alert(t.common.error || 'Ошибка', (t.events as any).failedToSendRequests || 'Не удалось отправить запросы');
                               }
                             }}
                           >
                             <Text style={styles.scheduleAllButtonText}>
-                              {t.events.scheduleAllDates || 'Запланировать все даты'} ({futureDates.length})
+                              {(t.events as any).scheduleAllDates || 'Запланировать все даты'} ({futureDates.length})
                             </Text>
                           </TouchableOpacity>
                         )}
@@ -2073,8 +2384,8 @@ export default function EventCard({
                     {/* Прошедшие даты (опционально, для информации) */}
                     {pastDates.length > 0 && (typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production') && (
                       <>
-                        <Text style={[styles.recurringDatesSectionTitle, { opacity: 0.5, marginTop: 20 }]}>
-                          {t.events.pastDates || 'Прошедшие даты'} ({pastDates.length})
+                        <Text style={[styles.recurringDatesSectionTitle, { opacity: 0.5, marginTop: 20 } as any]}>
+                          {(t.events as any).pastDates || 'Прошедшие даты'} ({pastDates.length})
                         </Text>
                       </>
                     )}
@@ -2082,6 +2393,156 @@ export default function EventCard({
                 );
               })()}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Модальное окно для передачи роли организатора */}
+      <Modal
+        visible={showTransferOrganizerModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowTransferOrganizerModal(false)}
+      >
+        <View style={styles.shareModalOverlay}>
+          <View style={styles.shareModalContent}>
+            <View style={styles.shareModalHeader}>
+              <Text style={styles.shareModalTitle}>Передать роль организатора</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowTransferOrganizerModal(false);
+                  setSelectedNewOrganizerId(null);
+                }}
+              >
+                <Text style={styles.shareModalCloseButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.transferOrganizerDescription}>
+              Выберите участника, которому хотите передать роль организатора. После передачи вы больше не будете организатором этого события.
+            </Text>
+            
+            {/* Кнопка для отмены события без передачи роли */}
+            <TouchableOpacity
+              style={[styles.shareModalSendButton, styles.cancelEventButton]}
+              onPress={() => {
+                Alert.alert(
+                  t.events.cancelEvent || 'Отменить событие',
+                  'Вы уверены, что хотите отменить это событие?',
+                  [
+                    {
+                      text: t.common.cancel || 'Отмена',
+                      style: 'cancel'
+                    },
+                    {
+                      text: t.events.cancelEvent || 'Отменить',
+                      style: 'destructive',
+                      onPress: () => {
+                        cancelEvent(id);
+                        setShowTransferOrganizerModal(false);
+                        setSelectedNewOrganizerId(null);
+                      }
+                    }
+                  ]
+                );
+              }}
+            >
+              <Text style={styles.shareModalSendButtonText}>
+                {t.events.cancelEvent || 'Отменить событие'}
+              </Text>
+            </TouchableOpacity>
+            
+            <ScrollView style={styles.shareModalList}>
+              {(() => {
+                // Получаем список участников (исключая текущего организатора)
+                const participants = getEventParticipants ? getEventParticipants(id) : [];
+                const otherParticipants = participants.filter(pId => pId !== organizerId && pId !== currentUserId);
+                
+                if (otherParticipants.length === 0) {
+                  return (
+                    <View style={styles.emptyParticipantsContainer}>
+                      <Text style={styles.emptyParticipantsText}>
+                        Нет других участников для передачи роли
+                      </Text>
+                    </View>
+                  );
+                }
+                
+                return otherParticipants.map((participantId) => {
+                  const participantData = getUserData(participantId);
+                  const isSelected = selectedNewOrganizerId === participantId;
+                  
+                  return (
+                    <TouchableOpacity
+                      key={participantId}
+                      style={[
+                        styles.shareModalItem,
+                        isSelected && styles.shareModalItemSelected
+                      ]}
+                      onPress={() => setSelectedNewOrganizerId(participantId)}
+                    >
+                      <Image
+                        source={{ uri: participantData?.avatar || 'https://randomuser.me/api/portraits/women/68.jpg' }}
+                        style={styles.shareModalAvatar}
+                      />
+                      <View style={styles.shareModalItemInfo}>
+                        <Text style={styles.shareModalItemName}>
+                          {participantData?.name || participantData?.username || 'Пользователь'}
+                        </Text>
+                        {participantData?.username && participantData.username !== participantData?.name && (
+                          <Text style={styles.shareModalItemSubtext}>
+                            @{participantData.username}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.shareModalCheckbox}>
+                        <Text style={styles.shareModalCheckboxText}>{isSelected ? '☑' : '☐'}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                });
+              })()}
+            </ScrollView>
+            
+            <TouchableOpacity
+              style={[
+                styles.shareModalSendButton,
+                !selectedNewOrganizerId && styles.shareModalSendButtonDisabled
+              ]}
+              onPress={async () => {
+                if (!selectedNewOrganizerId) return;
+                
+                try {
+                  // Вызываем функцию передачи роли организатора
+                  if (transferOrganizerRole) {
+                    await transferOrganizerRole(id, selectedNewOrganizerId);
+                    Alert.alert(
+                      'Успешно',
+                      'Роль организатора успешно передана',
+                      [
+                        {
+                          text: 'OK',
+                          onPress: () => {
+                            setShowTransferOrganizerModal(false);
+                            setSelectedNewOrganizerId(null);
+                          }
+                        }
+                      ]
+                    );
+                  } else {
+                    Alert.alert('Ошибка', 'Функция передачи роли не доступна');
+                  }
+                } catch (error) {
+                  logger.error('Failed to transfer organizer role', error);
+                  Alert.alert('Ошибка', 'Не удалось передать роль организатора');
+                }
+              }}
+              disabled={!selectedNewOrganizerId}
+            >
+              <Text style={styles.shareModalSendButtonText}>
+                Передать роль
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -2123,417 +2584,10 @@ export default function EventCard({
   );
 }
 
-const styles = StyleSheet.create({
-  swipeContainer: {
-    position: 'relative',
-    marginBottom: 12,
-  },
-  swipeButtonContainer: {
-    position: 'absolute',
-    right: 16,
-    top: '50%',
-    transform: [{ translateY: -30 }],
-    zIndex: 1,
-    alignItems: 'center',
-  },
-  swipeButtonContainerWithSecondary: {
-    transform: [{ translateY: -60 }], // Смещаем вверх, если две кнопки
-  },
-  swipeButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-    marginBottom: 10, // Отступ между кнопками
-  },
-  swipeButtonSecondary: {
-    marginBottom: 0, // Для нижней кнопки отступ не нужен
-  },
-  swipeButtonIcon: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  swipeButtonLabel: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '600',
-    marginTop: 2,
-    textAlign: 'center',
-  },
-  goButtonContainer: {
-    position: 'absolute',
-    right: 16,
-    top: '50%',
-    transform: [{ translateY: -30 }],
-    zIndex: 1,
-  },
-  goButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#8B5CF6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#8B5CF6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  goButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  card: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    padding: 0,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#333333',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    position: 'relative',
-    overflow: 'visible', // Аватарка теперь снаружи карточки
-    minHeight: 350, // Минимальная высота для лучшего отображения контента
-  },
-  organizerAvatarContainer: {
-    position: 'absolute',
-    top: -15, // Слегка выходим за пределы карточки вверх
-    right: -15, // Слегка выходим за пределы карточки вправо
-    zIndex: 10,
-  },
-  organizerAvatar: {
-    width: 80, // Уменьшаем в 1.5 раза: 120 / 1.5 = 80
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 0, // Убираем белую рамку
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  horizontalLayout: {
-    flexDirection: 'row',
-    paddingTop: 40,
-    paddingBottom: 15,
-    paddingLeft: 140, // Отступ для фото слева
-    position: 'relative',
-  },
-  verticalLayout: {
-    flexDirection: 'column',
-    paddingTop: 170,
-    paddingBottom: 15,
-    position: 'relative',
-  },
-  mediaContainerHorizontal: {
-    width: 120,
-    height: '100%',
-    marginRight: 12,
-    borderRadius: 0,
-    overflow: 'hidden',
-    borderTopLeftRadius: 12,
-    borderBottomLeftRadius: 12,
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-  },
-  mediaContainerVertical: {
-    width: '100%',
-    height: 160,
-    marginBottom: 0,
-    borderRadius: 0,
-    overflow: 'hidden',
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-  },
-  mediaImageHorizontal: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  mediaImageVertical: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  contentContainer: {
-    paddingLeft: 15,
-    paddingRight: 15,
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 6,
-  },
-  description: {
-    fontSize: 14,
-    color: '#CCCCCC',
-    lineHeight: 18,
-    marginBottom: 8,
-  },
-  parametersContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 8,
-  },
-  parameterItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#2a2a2a',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 6,
-    marginBottom: 4,
-  },
-  parameterEmoji: {
-    fontSize: 12,
-    marginRight: 4,
-  },
-  parameterText: {
-    fontSize: 12,
-    color: '#DDDDDD',
-    fontWeight: '500',
-  },
-  participantsAvatars: {
-    flexDirection: 'row',
-    marginTop: 8,
-    flexWrap: 'wrap',
-  },
-  participantAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginRight: 4,
-    marginBottom: 4,
-  },
-  participantAvatarContainer: {
-    alignItems: 'center',
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  participantName: {
-    fontSize: 10,
-    color: '#AAAAAA',
-    marginTop: 2,
-    textAlign: 'center',
-    maxWidth: 60,
-  },
-  moreParticipants: {
-    fontSize: 12,
-    color: '#AAAAAA',
-    alignSelf: 'center',
-    marginLeft: 4,
-  },
-  // Стили для мини-аватаров участников в параметрах
-  participantsParameterItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#2a2a2a',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 6,
-    marginBottom: 4,
-  },
-  participantsMiniAvatars: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 6,
-  },
-  participantMiniAvatar: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 0.5,
-    borderColor: '#FFFFFF',
-  },
-  participantMoreMini: {
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  participantMoreMiniText: {
-    color: '#FFFFFF',
-    fontSize: 8,
-    fontWeight: 'bold',
-  },
-  participantsCountText: {
-    fontSize: 12,
-    color: '#DDDDDD',
-    fontWeight: '500',
-  },
-  playButton: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -20 }, { translateY: -20 }],
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    borderRadius: 25,
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  playIcon: {
-    fontSize: 16,
-    color: '#FFFFFF',
-  },
-  // Миниатюрные варианты для профилей
-  miniatureCard1: {
-    width: '100%', // Ширина задается динамически через родительский View
-    height: 110, // Фиксированная высота
-    borderRadius: 12,
-    overflow: 'visible', // Изменяем на visible для больших аватарок
-    position: 'relative',
-    backgroundColor: '#2a2a2a',
-    marginBottom: 10,
-    marginTop: 5,
-  },
-  miniatureCard2: {
-    width: 100, // Уменьшил с 140 до 100 для трех колонок
-    height: 100, // Уменьшил с 140 до 100 для трех колонок
-    borderRadius: 12,
-    overflow: 'visible', // Изменяем на visible для больших аватарок
-    position: 'relative',
-    backgroundColor: '#2a2a2a',
-    marginBottom: 10,
-    marginTop: 5,
-  },
-  chatPreview: {
-    width: '100%',
-    minWidth: 200,
-    height: 100,
-    minHeight: 100,
-    borderRadius: 12,
-    overflow: 'hidden',
-    position: 'relative',
-    backgroundColor: '#2a2a2a',
-    borderWidth: 1,
-    borderColor: '#3a3a3a',
-  },
-  chatPreviewTitleContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
-  },
-  chatPreviewTitle: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  // Стили для фонового изображения мини-карточки
-  miniatureBackgroundContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: 12, // Скругление углов как у карточки
-    overflow: 'hidden', // Обрезаем содержимое по скругленным углам
-  },
-  miniatureBackgroundImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-    borderRadius: 12, // Скругление углов изображения
-  },
-  miniatureOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    borderRadius: 12, // Скругление углов как у карточки
-  },
-  miniaturePlayButton: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -15 }, { translateY: -15 }],
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    borderRadius: 20,
-    width: 30,
-    height: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  miniaturePlayIcon: {
-    fontSize: 12,
-    color: '#FFFFFF',
-  },
-  // Аватарка организатора для мини-карточки
-  miniatureOrganizerAvatarContainer: {
-    position: 'absolute',
-    top: -8, // Слегка выходим за пределы мини-карточки вверх
-    right: -8, // Слегка выходим за пределы мини-карточки вправо
-    zIndex: 10,
-  },
-  miniatureOrganizerAvatar: {
-    width: 32, // Уменьшил с 48 до 32 пропорционально
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 0, // Убираем белую рамку
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
-    elevation: 4,
-  },
-  // Участники для мини-карточки
-  miniatureParticipantsContainer: {
-    position: 'absolute',
-    bottom: 8,
-    right: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  miniatureParticipantAvatar: {
-    width: 18, // Одинаковый размер с обычной карточкой
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 0.5, // Более тонкая обводка
-    borderColor: '#FFFFFF',
-  },
-  miniatureMoreParticipants: {
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  miniatureMoreText: {
-    color: '#FFFFFF',
-    fontSize: 8, // Меньший шрифт для "+n" на мини-карточке
-    fontWeight: 'bold',
-  },
+// Используем стили из отдельного файла и добавляем стили для модальных окон
+const styles = {
+  ...eventCardStyles,
+  ...StyleSheet.create({
   // Стили для модального окна участников
   modalOverlay: {
     flex: 1,
@@ -2625,12 +2679,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 4,
     elevation: 10,
+    padding: 8,
   },
   eventActionsButtonText: {
-    color: '#FFF',
     fontSize: 20,
+    color: '#999999',
     fontWeight: 'bold',
-    lineHeight: 20,
   },
   actionsModalContent: {
     // legacy (no longer used)
@@ -2751,6 +2805,26 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     textTransform: 'uppercase',
   },
+  transferOrganizerDescription: {
+    color: '#DDD',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  emptyParticipantsContainer: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  emptyParticipantsText: {
+    color: '#999',
+    fontSize: 14,
+  },
+  shareModalItemSelected: {
+    backgroundColor: '#2A2A2A',
+    borderColor: '#8B5CF6',
+    borderWidth: 2,
+  },
   shareModalItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2778,6 +2852,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   shareModalCheckbox: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  shareModalCheckboxText: {
     fontSize: 20,
     color: '#FFFFFF',
   },
@@ -2796,6 +2876,19 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  cancelEventButton: {
+    backgroundColor: '#FF3B30',
+    marginBottom: 12,
+  },
+  shareModalEmptyText: {
+    color: '#999999',
+    fontSize: 14,
+    textAlign: 'center',
+    padding: 20,
+  },
+  shareModalItemDisabled: {
+    opacity: 0.5,
   },
   shareModalList: {
     maxHeight: 400,
@@ -2920,6 +3013,21 @@ const styles = StyleSheet.create({
   },
   titleContainer: {
     marginBottom: 8,
+    backgroundColor: '#2a2a2a',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  titleWithPostsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  postsCount: {
+    fontSize: 11,
+    color: '#AAAAAA',
+    fontStyle: 'italic',
   },
   hiddenElement: {
     display: 'none',
@@ -2953,4 +3061,5 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '500',
   },
-});
+  }),
+};

@@ -18,7 +18,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export default function OtherProfileScreen() {
   const { id, eventId } = useLocalSearchParams();
   const router = useRouter();
-  const { events, getUserData: contextGetUserData, getOrganizerStats, getFriendsList, getEventProfile, createEventProfile, eventProfiles, sendFriendRequest, removeFriend, isFriend, userFolders, addUserToFolder, removeUserFromFolder, createPersonalChat, getChatsForUser, isUserParticipant, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember, friendRequests, respondToFriendRequest, getUserRequestStatus, fetchEventProfile, getUserFriendsList } = useEvents();
+  const { events, eventProfiles, getUserData: contextGetUserData, getOrganizerStats, getFriendsList, getEventProfile, createEventProfile, fetchEventProfile, sendFriendRequest, removeFriend, isFriend, userFolders, addUserToFolder, removeUserFromFolder, createPersonalChat, getChatsForUser, isUserParticipant, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember, friendRequests, respondToFriendRequest, getUserRequestStatus, getUserFriendsList } = useEvents();
   const { user: authUser } = useAuth();
   const { t } = useLanguage();
   const [showEventFeed, setShowEventFeed] = useState(false);
@@ -36,6 +36,13 @@ export default function OtherProfileScreen() {
   const currentUserId = authUser?.id ?? null;
   const userId = rawUserId ?? currentUserId ?? 'organizer-1';
   const userData = contextGetUserData(userId);
+
+  // Перенаправляем на свой профиль, если открывается профиль текущего пользователя
+  useEffect(() => {
+    if (rawUserId && currentUserId && rawUserId === currentUserId) {
+      router.replace('/(tabs)/profile');
+    }
+  }, [rawUserId, currentUserId, router]);
 
   // Загружаем статистику при монтировании и обновлении
   useEffect(() => {
@@ -155,25 +162,28 @@ export default function OtherProfileScreen() {
   );
 
   // МЕМОРИ: прошедшее && я_член_события (организатор или принятый участник)
-  // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий проверяем через eventProfiles,
-  // чтобы правильно учитывать удаление пользователя из профиля события
+  // Используем те же признаки, что и для предстоящих событий
   const pastEvents = events.filter(event => {
     if (!isEventPast(event)) return false;
     
-    // Проверяем через профиль события - если пользователь удален из профиля, событие не показывается
+    // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий проверяем участие через eventProfiles
+    // ВСЕ события имеют профиль - проверяем участие через профиль
     const profile = eventProfiles.find(p => p.eventId === event.id);
-    if (profile) {
-      // Если есть профиль - проверяем, есть ли пользователь в participants
-      // Если пользователь удален (participants не включает userId) - не показываем событие
-      const isParticipant = profile.participants.includes(userId);
-      return isParticipant;
+    if (!profile) {
+      // Профиль должен существовать для всех событий
+      logger.debug('pastEvents: профиль не найден для события', { eventId: event.id, title: event.title });
+      return false;
     }
     
-    // КРИТИЧЕСКИ ВАЖНО: Если профиля нет - НЕ показываем событие
-    // Это предотвращает показ событий, где пользователь был удален, но профиль еще не загружен
-    // Профиль должен быть загружен через useFocusEffect или fetchEventProfile
-    // Если профиль не найден, значит либо он еще не создан, либо пользователь был удален
-    return false;
+    // Проверяем, что пользователь в списке участников профиля
+    const isParticipantInProfile = profile.participants.includes(userId);
+    if (!isParticipantInProfile) {
+      // Пользователь не в списке участников профиля - не показываем событие
+      return false;
+    }
+    
+    // Пользователь в списке участников профиля - показываем событие
+    return true;
   }).sort((a, b) => {
     // Сортируем по дате+времени события: самое последнее прошедшее первым
     const dateA = new Date(a.date + 'T' + a.time + ':00').getTime();
@@ -188,28 +198,41 @@ export default function OtherProfileScreen() {
   
   // Загружаем профили для прошедших событий при открытии профиля
   // Это нужно, чтобы правильно определить, какие события показывать в разделе "меморис"
+  // Используем ref для отслеживания уже загруженных профилей
+  const loadedProfilesRef = useRef<Set<string>>(new Set());
+  
   useFocusEffect(
     useCallback(() => {
       if (!fetchEventProfile) return;
       
       const loadProfilesForPastEvents = async () => {
         const pastEvents = events.filter(event => isEventPast(event));
-        logger.debug('Загружаем профили для прошедших событий в профиле другого пользователя', { count: pastEvents.length, userId });
+        const eventsToLoad = pastEvents.filter(event => !loadedProfilesRef.current.has(event.id));
         
-        for (const event of pastEvents) {
-          const existingProfile = eventProfiles.find(p => p.eventId === event.id);
-          if (!existingProfile) {
+        if (eventsToLoad.length === 0) {
+          return; // Все профили уже загружены
+        }
+        
+        logger.debug('Загружаем профили для прошедших событий в профиле другого пользователя', { 
+          count: eventsToLoad.length, 
+          total: pastEvents.length,
+          userId 
+        });
+        
+        for (const event of eventsToLoad) {
+          // Профили событий загружаются автоматически при открытии event-profile/[id]
+          // Для фильтрации событий они больше не нужны - используем те же признаки, что и для предстоящих событий
             try {
               await fetchEventProfile(event.id);
+            loadedProfilesRef.current.add(event.id);
             } catch (error) {
-              logger.warn(`Не удалось загрузить профиль для события ${event.id}:`, error);
-            }
+            logger.debug(`Не удалось загрузить профиль для события ${event.id}:`, error);
           }
         }
       };
       
       loadProfilesForPastEvents();
-    }, [events, eventProfiles, isEventPast, fetchEventProfile, userId])
+    }, [events, isEventPast, fetchEventProfile, userId])
   );
   
   // useEffect для автоматического открытия ленты при наличии eventId в URL (как в my-events.tsx)
@@ -509,7 +532,7 @@ export default function OtherProfileScreen() {
           {/* Второй ряд - всегда видимый */}
           <View style={styles.statsRow}>
             <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/organized-events/${userId}`)}>
-              <Text style={styles.statNumber}>{allOrganizedEvents.length}</Text>
+              <Text style={styles.statNumber}>{organizedEvents.length + pastEvents.filter(e => isUserOrganizer(e, userId)).length}</Text>
               <Text style={styles.statLabel}>{t.profile.statsOrganized}</Text>
             </TouchableOpacity>
             
@@ -1204,7 +1227,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   feedContentContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 12, // Соответствует marginHorizontal в MemoryPost
     paddingTop: 10,
     paddingBottom: 200,
   },

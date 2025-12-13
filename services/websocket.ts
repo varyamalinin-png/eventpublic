@@ -122,6 +122,42 @@ export function createSocketConnection(token: string, refreshTokenCallback?: () 
     reconnectionAttempts: 5,
   });
 
+  // Перехватываем и подавляем вывод ошибок WebSocket в консоль
+  // Ошибки WebSocket не критичны - socket.io автоматически переподключается
+  // Сохраняем оригинальный console.error только один раз (глобально)
+  if (!(global as any).__originalConsoleError) {
+    (global as any).__originalConsoleError = console.error;
+    console.error = (...args: any[]) => {
+      // Подавляем только ошибки WebSocket
+      const errorString = args.map(arg => {
+        if (typeof arg === 'string') return arg;
+        if (arg?.message) return arg.message;
+        if (arg?.toString) return arg.toString();
+        try {
+          return JSON.stringify(arg);
+        } catch {
+          return String(arg);
+        }
+      }).join(' ');
+      
+      // Проверяем на различные варианты ошибок WebSocket
+      const isWebSocketError = 
+        errorString.includes('WebSocket connection error') || 
+        errorString.includes('websocket error') ||
+        errorString.includes('TransportError') ||
+        errorString.includes('engine.io-client') ||
+        errorString.includes('_construct') && errorString.includes('construct.js') ||
+        (args[0] && typeof args[0] === 'object' && args[0]?.message?.includes('websocket'));
+      
+      if (isWebSocketError) {
+        // Не выводим эти ошибки в консоль - они не критичны, socket.io автоматически переподключается
+        return;
+      }
+      // Все остальные ошибки выводим как обычно
+      (global as any).__originalConsoleError(...args);
+    };
+  }
+
   // Добавляем обработчики событий подключения
   // socket.io-client создает новый экземпляр при каждом вызове io(), 
   // поэтому обработчики нужно добавлять каждый раз
@@ -163,16 +199,21 @@ export function createSocketConnection(token: string, refreshTokenCallback?: () 
   });
 
   socket.on('connect_error', (error: any) => {
+    try {
+      // Безопасно извлекаем информацию об ошибке
+      const errorMessage = error?.message || String(error) || 'Unknown error';
+      const errorData = error?.data || {};
+      
     // Проверяем, не связана ли ошибка с истекшим токеном
-    const isTokenError = error?.message?.includes('jwt expired') || 
-                         error?.message?.includes('TokenExpiredError') ||
-                         error?.message?.includes('token expired') ||
-                         error?.data?.type === 'TokenExpiredError' ||
-                         error?.data?.message?.includes('token expired');
+      const isTokenError = errorMessage?.includes('jwt expired') || 
+                           errorMessage?.includes('TokenExpiredError') ||
+                           errorMessage?.includes('token expired') ||
+                           errorData?.type === 'TokenExpiredError' ||
+                           errorData?.message?.includes('token expired');
     
     if (isTokenError) {
       reconnectAttempts++;
-      console.warn(`⚠️ WebSocket connection error: token expired (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+        logger.warn(`WebSocket connection error: token expired (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
       
       // Если есть callback для обновления токена, пытаемся обновить
       if (refreshTokenCallback && reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
@@ -186,20 +227,27 @@ export function createSocketConnection(token: string, refreshTokenCallback?: () 
         refreshTokenCallback().then(newToken => {
           if (newToken && !isTokenExpired(newToken)) {
             // Переподключаемся с новым токеном
-            console.log('✅ WebSocket: Token refreshed, reconnecting...');
+              logger.info('WebSocket: Token refreshed, reconnecting...');
             reconnectAttempts = 0;
             createSocketConnection(newToken, refreshTokenCallback);
           } else {
-            console.warn('⚠️ WebSocket: Failed to refresh token or new token is also expired');
+              logger.warn('WebSocket: Failed to refresh token or new token is also expired');
           }
         }).catch(refreshError => {
-          console.warn('⚠️ WebSocket: Error refreshing token:', refreshError);
+            logger.warn('WebSocket: Error refreshing token:', refreshError);
         });
+        } else {
+          logger.warn('WebSocket: Max reconnect attempts reached or no refresh callback');
+        }
       } else {
-        console.warn('⚠️ WebSocket: Max reconnect attempts reached or no refresh callback');
+        // Для обычных ошибок WebSocket (сеть, таймаут и т.д.) - не логируем как ERROR
+        // Socket.io сам попытается переподключиться автоматически
+        // Логируем только на уровне debug, чтобы не засорять консоль
+        logger.debug('WebSocket connection error (will retry automatically):', errorMessage);
       }
-    } else {
-      console.error('❌ WebSocket connection error:', error);
+    } catch (handlerError) {
+      // Если обработчик ошибок сам упал, просто логируем это на уровне debug
+      logger.debug('Error in WebSocket connect_error handler:', handlerError);
     }
   });
 

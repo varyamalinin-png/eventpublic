@@ -56,24 +56,31 @@
           <key>NSExceptionAllowsInsecureHTTPLoads</key>
           <true/>
         </dict>
-        <key>unsqueamish-nondemonstratively-mammie.ngrok-free.dev</key>
+        <key>iventapp.ru</key>
         <dict>
           <key>NSExceptionAllowsInsecureHTTPLoads</key>
           <false/>
           <key>NSIncludesSubdomains</key>
           <true/>
         </dict>
-        <key>trycloudflare.com</key>
+        <key>89.169.173.152</key>
         <dict>
           <key>NSExceptionAllowsInsecureHTTPLoads</key>
-          <false/>
+          <true/>
           <key>NSIncludesSubdomains</key>
           <true/>
         </dict>
-        <key>mrna-monitor-bears-proposed.trycloudflare.com</key>
+        <key>100.114.37.214</key>
         <dict>
           <key>NSExceptionAllowsInsecureHTTPLoads</key>
-          <false/>
+          <true/>
+          <key>NSIncludesSubdomains</key>
+          <true/>
+        </dict>
+        <key>100.114.32.1</key>
+        <dict>
+          <key>NSExceptionAllowsInsecureHTTPLoads</key>
+          <true/>
           <key>NSIncludesSubdomains</key>
           <true/>
         </dict>
@@ -81,6 +88,8 @@
     </dict>
     <key>NSCameraUsageDescription</key>
     <string>Приложение использует доступ к камере для добавления фотографий к событиям.</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Приложение использует ваше местоположение для отображения событий на карте.</string>
     <key>NSLocationAlwaysUsageDescription</key>
