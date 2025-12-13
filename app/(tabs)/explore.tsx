@@ -535,8 +535,23 @@ export default function ExploreScreen() {
   }, [events]);
   
   // Базовые события для табов
-  const baseGlobEvents = futureEvents;
-  const baseFriendsEvents = useMemo(() => getFriendsForEvents(), [getFriendsForEvents]);
+  const baseGlobEvents = useMemo(() => {
+    try {
+      return Array.isArray(futureEvents) ? futureEvents : [];
+    } catch (error) {
+      console.error('[Explore] Error in baseGlobEvents:', error);
+      return [];
+    }
+  }, [futureEvents]);
+  const baseFriendsEvents = useMemo(() => {
+    try {
+      const friendsEvents = getFriendsForEvents();
+      return Array.isArray(friendsEvents) ? friendsEvents : [];
+    } catch (error) {
+      console.error('[Explore] Error getting friends events:', error);
+      return [];
+    }
+  }, [getFriendsForEvents]);
   
   // Применяем фильтры и поиск с мемоизацией
   const globEvents = useMemo(() => {
@@ -634,10 +649,15 @@ export default function ExploreScreen() {
 
   // Получаем события для текущего таба (те же что отображаются)
   const getCurrentTabEvents = (): Event[] => {
-    if (activeTab === 'GLOB') {
-      return globEvents || [];
-    } else {
-      return folderEvents || [];
+    try {
+      if (activeTab === 'GLOB') {
+        return Array.isArray(globEvents) ? globEvents : [];
+      } else {
+        return Array.isArray(folderEvents) ? folderEvents : [];
+      }
+    } catch (error) {
+      console.error('[Explore] Error in getCurrentTabEvents:', error);
+      return [];
     }
   };
 
