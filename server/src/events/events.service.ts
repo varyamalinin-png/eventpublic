@@ -251,11 +251,33 @@ export class EventsService {
   }
 
   findAll(params: { upcoming?: boolean; organizerId?: string; currentUserId?: string }) {
+    // Если organizerId не указан, но указан currentUserId, возвращаем события где пользователь организатор или участник
+    const whereCondition: any = {};
+    
+    if (params.organizerId) {
+      // Если указан конкретный organizerId, фильтруем по нему
+      whereCondition.organizerId = params.organizerId;
+    } else if (params.currentUserId) {
+      // Если organizerId не указан, но есть currentUserId, возвращаем события где пользователь организатор или участник
+      whereCondition.OR = [
+        { organizerId: params.currentUserId },
+        {
+          memberships: {
+            some: {
+              userId: params.currentUserId,
+            },
+          },
+        },
+      ];
+    }
+    
+    // Добавляем фильтр по времени для upcoming
+    if (params.upcoming) {
+      whereCondition.startTime = { gte: new Date() };
+    }
+    
     return this.prisma.event.findMany({
-      where: {
-        organizerId: params.organizerId,
-        ...(params.upcoming ? { startTime: { gte: new Date() } } : {}),
-      },
+      where: whereCondition,
       orderBy: { startTime: 'asc' },
       include: {
         organizer: {
@@ -782,11 +804,12 @@ export class EventsService {
       throw new BadRequestException('Membership not found for this event');
     }
 
-    // Проверяем количество участников ДО обновления статуса
+    // Проверяем количество участников ДО обновления статуса (организатор не считается)
     const acceptedCountBefore = await this.prisma.eventMembership.count({
       where: {
         eventId,
         status: MembershipStatus.ACCEPTED,
+        userId: { not: organizerId }, // Исключаем организатора
       },
     });
 
@@ -1126,6 +1149,9 @@ export class EventsService {
       },
     );
 
+    // Удаляем пользователя из чата события с системным сообщением
+    await this.removeUserFromEventChat(eventId, userId, user.name || user.username || 'Пользователь');
+
     // Удаляем membership
     return this.prisma.eventMembership.delete({
       where: { id: membershipId },
@@ -1344,6 +1370,9 @@ export class EventsService {
       },
     );
     }
+
+    // Удаляем пользователя из чата события с системным сообщением
+    await this.removeUserFromEventChat(eventId, userId, user.name || user.username || 'Пользователь');
 
     return this.prisma.eventMembership.delete({ where: { id: membership.id } });
   }
@@ -2102,5 +2131,59 @@ export class EventsService {
     await this.recurringEventsService.cancelParticipation(eventId, userId);
 
     return { success: true };
+  }
+
+  // 🚪 УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ ИЗ ЧАТА СОБЫТИЯ С СИСТЕМНЫМ СООБЩЕНИЕМ
+  private async removeUserFromEventChat(eventId: string, userId: string, userName: string) {
+    try {
+      const chat = await this.prisma.chat.findUnique({
+        where: { eventId },
+        include: { participants: true },
+      });
+
+      if (!chat) {
+        logger.debug(`Chat not found for event ${eventId}, skipping chat removal`);
+        return;
+      }
+
+      const participant = chat.participants.find(p => p.userId === userId);
+      if (!participant) {
+        logger.debug(`User ${userId} is not a participant of chat ${chat.id}`);
+        return;
+      }
+
+      // Создаем системное сообщение о выходе из события
+      const systemMessage = await this.prisma.message.create({
+        data: {
+          chatId: chat.id,
+          senderId: userId,
+          content: `${userName} покинул(а) событие`,
+        },
+        include: { sender: true },
+      });
+
+      await this.prisma.chat.update({
+        where: { id: chat.id },
+        data: { lastMessageId: systemMessage.id, updatedAt: new Date() },
+      });
+
+      // Удаляем пользователя из участников чата
+      await this.prisma.chatParticipant.delete({
+        where: { chatId_userId: { chatId: chat.id, userId: userId } },
+      });
+
+      const remainingParticipantIds = chat.participants
+        .filter(p => p.userId !== userId)
+        .map(p => p.userId);
+      
+      if (remainingParticipantIds.length > 0) {
+        this.websocketService.emitToChat(chat.id, 'message:new', systemMessage);
+        this.websocketService.emitToUsers(remainingParticipantIds, 'chats:update', {});
+      }
+
+      logger.info(`User ${userId} removed from event chat ${chat.id}, system message sent`);
+    } catch (error) {
+      logger.error(`Error removing user from event chat:`, error);
+    }
   }
 }

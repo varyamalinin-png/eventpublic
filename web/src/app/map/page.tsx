@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { Providers } from '../providers';
+import DesktopThreeColumnLayout from '../../components/DesktopThreeColumnLayout';
 
 const MapScreen = dynamic(
   () => import('@/client/app/map').then(mod => ({ default: mod.default })),
@@ -28,11 +28,18 @@ function LoadingScreen() {
 
 export default function MapPage() {
   return (
-    <Providers>
-      <div style={{ width: '100%', height: '100vh' }}>
-        <MapScreen />
+    <>
+      {/* Десктопный layout - показывается через CSS media queries на экранах >= 768px */}
+      <div className="desktop-three-column-layout" style={{ display: 'none' }}>
+        <DesktopThreeColumnLayout />
       </div>
-    </Providers>
+      
+      {/* Мобильный layout - показывается по умолчанию, скрывается через CSS на десктопе */}
+      <div className="mobile-layout">
+        <div style={{ width: '100%', height: '100vh' }}>
+          <MapScreen />
+        </div>
+      </div>
+    </>
   );
 }
-

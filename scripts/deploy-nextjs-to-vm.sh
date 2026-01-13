@@ -7,9 +7,9 @@ echo "🚀 Деплой Next.js приложения на VM..."
 
 # Переменные
 VM_USER="ubuntu"
-VM_HOST="89.169.173.152"
+VM_HOST="158.160.67.4"
 VM_PATH="/home/ubuntu/iventapp-nextjs"
-SSH_KEY="~/.ssh/yandex-cloud"
+SSH_KEY="$HOME/.ssh/yandex-cloud"
 SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10"
 
 cd web

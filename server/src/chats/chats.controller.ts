@@ -10,8 +10,17 @@ export class ChatsController {
   constructor(private readonly chatsService: ChatsService) {}
 
   @Get()
-  list(@RequestUser('userId') userId: string) {
-    return this.chatsService.listChatsForUser(userId);
+  async list(@RequestUser('userId') userId: string) {
+    console.log(`[ChatsController] GET /chats called for userId: ${userId}`);
+    console.log(`[ChatsController] Calling listChatsForUser...`);
+    try {
+      const result = await this.chatsService.listChatsForUser(userId);
+      console.log(`[ChatsController] listChatsForUser returned, result length: ${Array.isArray(result) ? result.length : 'not array'}`);
+      return result;
+    } catch (error) {
+      console.error(`[ChatsController] Error in listChatsForUser:`, error);
+      throw error;
+    }
   }
 
   @Get(':chatId/messages')

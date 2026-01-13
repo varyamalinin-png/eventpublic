@@ -1,0 +1,74 @@
+# Dependencies - исключаем из индексации Cursor
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+build/
+.next/
+web-build/
+.expo/
+*.tsbuildinfo
+
+# iOS/Android builds
+ios/build/
+ios/Pods/
+android/.gradle/
+android/app/build/
+android/build/
+*.apk
+*.aab
+*.ipa
+
+# Cache directories
+.cache/
+.npm/
+.yarn/
+.pnpm-store/
+.metro-health-check*
+
+# Large binary files
+*.webp
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.pdf
+*.zip
+*.tar.gz
+
+# Database dumps
+*.rdb
+*.sql
+dump.rdb
+
+# Logs
+*.log
+logs/
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Docker
+docker-compose.override.yml
+
+# Server dist
+server/dist/
+
+

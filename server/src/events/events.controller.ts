@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards, Patch, Delete, Put, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards, Patch, Delete, Put, UseInterceptors, UploadedFile, BadRequestException, ValidationPipe, Req } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { EventsService } from './events.service';
@@ -22,13 +22,23 @@ export class EventsController {
 
   @UseGuards(JwtAuthGuard)
   @Post()
-  async create(@RequestUser('userId') userId: string, @Body() createEventDto: CreateEventDto) {
+  async create(
+    @RequestUser('userId') userId: string,
+    @Body(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: false, transform: true })) createEventDto: CreateEventDto
+  ) {
     try {
-      logger.info(`Creating event for user: ${userId}`);
-      logger.debug(`DTO received: ${JSON.stringify(createEventDto, null, 2)}`);
-      return await this.eventsService.create(userId, createEventDto);
-    } catch (error) {
-      logger.error(`Error creating event: ${error?.message}`, error?.stack);
+      logger.info(`📥 POST /events - Creating event for user: ${userId}`);
+      logger.info(`DTO keys: ${Object.keys(createEventDto).join(', ')}`);
+      logger.info(`DTO mediaUrl: ${createEventDto.mediaUrl ? (createEventDto.mediaUrl.substring(0, 50) + '...') : 'NOT SET'}`);
+      logger.info(`DTO originalMediaUrl: ${createEventDto.originalMediaUrl ? (createEventDto.originalMediaUrl.substring(0, 50) + '...') : 'NOT SET'}`);
+      logger.debug(`Full DTO: ${JSON.stringify(createEventDto, null, 2)}`);
+      const result = await this.eventsService.create(userId, createEventDto);
+      logger.info(`✅ Event created successfully: ${result?.id}`);
+      return result;
+    } catch (error: any) {
+      logger.error(`❌ Error creating event: ${error?.message}`);
+      logger.error(`Error stack: ${error?.stack}`);
+      logger.error(`Error details: ${JSON.stringify(error, null, 2)}`);
       throw error;
     }
   }
@@ -364,18 +374,45 @@ export class EventsController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+      preservePath: false,
     }),
   )
-  async uploadMedia(@UploadedFile() file: Express.Multer.File, @RequestUser('userId') userId: string) {
+  async uploadMedia(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @RequestUser('userId') userId: string,
+    @Req() req: any,
+  ) {
     try {
       logger.info(`📤 POST upload media, userId: ${userId}`);
-      if (!file) {
-        logger.error(`No file provided`);
-        throw new Error('No file provided');
+      const contentType = req.headers['content-type'] || 'not set';
+      logger.info(`📥 Request Content-Type: ${contentType}`);
+      logger.info(`📥 Request method: ${req.method}`);
+      logger.info(`📥 Request url: ${req.url}`);
+      logger.info(`📥 Multer file: ${file ? `yes (${file.mimetype}, ${file.size} bytes, ${file.originalname})` : 'no'}`);
+      logger.info(`📥 Request body keys: ${Object.keys(req.body || {}).join(', ')}`);
+      
+      // КРИТИЧЕСКИ ВАЖНО: Проверяем, что body parser не обработал multipart
+      if (req.body && Object.keys(req.body).length > 0 && contentType.includes('multipart/form-data')) {
+        logger.error(`❌ Body parser обработал multipart/form-data! Body keys: ${Object.keys(req.body).join(', ')}, Body: ${JSON.stringify(req.body)}`);
+        logger.error(`❌ Это означает, что body parser сработал ДО Multer. Файл потерян!`);
       }
-      logger.debug(`File received: ${file.mimetype}, ${file.size} bytes`);
+      
+      if (!file) {
+        const bodyKeys = Object.keys(req.body || {});
+        logger.error(`❌ No file provided. Content-Type: ${contentType}, Body keys: [${bodyKeys.join(', ')}]`);
+        logger.error(`❌ Multer не получил файл. Возможные причины:`);
+        logger.error(`   1. Body parser обработал multipart/form-data до Multer`);
+        logger.error(`   2. Файл не был отправлен клиентом`);
+        logger.error(`   3. Неправильное имя поля (ожидается 'file')`);
+        throw new BadRequestException('No file provided');
+      }
+      
+      logger.debug(`File received: ${file.mimetype}, ${file.size} bytes, ${file.originalname}`);
 
-      const buffer = Buffer.from(file.buffer);
+      // КРИТИЧЕСКИ ВАЖНО: file.buffer уже является Buffer от Multer, не нужно Buffer.from()
+      // Buffer.from() может создать проблемы с подписью S3/MinIO
+      const buffer = file.buffer instanceof Buffer ? file.buffer : Buffer.from(file.buffer);
       const publicUrl = await this.storageService.uploadEventMedia(userId, {
         buffer,
         mimetype: file.mimetype,

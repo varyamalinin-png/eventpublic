@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useSafeRouter } from '../utils/safeRouter';
 import { EventProfilePost } from '../context/EventsContext';
 import { useEvents } from '../context/EventsContext';
 
@@ -10,7 +10,7 @@ interface MemoryMiniCardProps {
 }
 
 export default function MemoryMiniCard({ post, onPress }: MemoryMiniCardProps) {
-  const router = useRouter();
+  const router = useSafeRouter();
   const { getUserData } = useEvents();
   
   const author = getUserData(post.authorId);

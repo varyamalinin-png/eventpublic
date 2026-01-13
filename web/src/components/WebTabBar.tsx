@@ -35,20 +35,31 @@ export function WebTabBar() {
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      height: '60px',
-      backgroundColor: '#121212',
-      borderTop: '1px solid #2a2a2a',
-      display: 'flex',
-      justifyContent: 'space-around',
-      alignItems: 'center',
-      zIndex: 1000,
-      paddingBottom: 'env(safe-area-inset-bottom)',
-    }}>
+    <nav 
+      className="web-tab-bar"
+      role="tablist"
+      style={{
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: '60px',
+        backgroundColor: '#121212',
+        borderTop: '1px solid #2a2a2a',
+        display: 'flex',
+        justifyContent: 'space-around',
+        alignItems: 'center',
+        zIndex: 99999,
+        paddingBottom: 'max(env(safe-area-inset-bottom), 0px)',
+        width: '100%',
+        maxWidth: '500px',
+        margin: '0 auto',
+        boxSizing: 'border-box',
+        WebkitTransform: 'translateZ(0)',
+        transform: 'translateZ(0)',
+        WebkitBackfaceVisibility: 'hidden',
+        backfaceVisibility: 'hidden',
+      }}>
       {tabs.map((tab) => {
         const active = isActive(tab.path);
         return (
@@ -114,7 +125,7 @@ export function WebTabBar() {
           </button>
         );
       })}
-    </div>
+    </nav>
   );
 }
 

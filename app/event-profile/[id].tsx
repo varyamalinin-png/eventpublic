@@ -1,12 +1,13 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Modal, TextInput, Alert, Dimensions } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useSafeRouter } from '../../utils/safeRouter';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useEvents } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import * as ImagePicker from 'expo-image-picker';
 import { Audio } from 'expo-av';
-import MemoryPost from '../../components/MemoryPost';
+import MemoryPost from '../../client/components/MemoryPost';
 import ParticipantsModal from '../../components/ParticipantsModal';
 import { createLogger } from '../../utils/logger';
 
@@ -14,7 +15,12 @@ const logger = createLogger('EventProfile');
 
 export default function EventProfileScreen() {
   const { id, viewerUserId } = useLocalSearchParams();
-  const router = useRouter();
+  const router = useSafeRouter();
+  
+  // Функция навигации для передачи в MemoryPost
+  const handleNavigate = (path: string) => {
+    router.push(path);
+  };
   const { t } = useLanguage();
   const { 
     events,
@@ -806,6 +812,7 @@ export default function EventProfileScreen() {
                 key={post.id}
                 post={post}
                 showOptions={true}
+                onNavigate={handleNavigate}
               />
             ))}
           </ScrollView>

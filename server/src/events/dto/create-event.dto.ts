@@ -54,11 +54,11 @@ export class CreateEventDto {
   coordinates?: CoordinatesDto | null;
 
   @IsOptional()
-  @IsUrl({ require_protocol: true })
+  @IsUrl({ require_protocol: true, require_tld: false }, { message: 'mediaUrl must be a valid URL' })
   mediaUrl?: string; // Обрезанное фото для карточки
 
   @IsOptional()
-  @IsUrl({ require_protocol: true })
+  @IsUrl({ require_protocol: true, require_tld: false }, { message: 'originalMediaUrl must be a valid URL' })
   originalMediaUrl?: string; // Оригинальное фото для профиля
 
   @IsInt()

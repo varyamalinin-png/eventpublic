@@ -1,9 +1,9 @@
 'use client';
 
-import dynamic from 'next/dynamic';
-import { Providers } from '../../providers';
+import dynamicImport from 'next/dynamic';
+import DesktopThreeColumnLayout from '../../../components/DesktopThreeColumnLayout';
 
-const SavedScreen = dynamic(
+const SavedScreen = dynamicImport(
   () => import('@/client/app/(tabs)/saved').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <LoadingScreen /> }
 );
@@ -26,13 +26,20 @@ function LoadingScreen() {
   );
 }
 
+export const dynamic = 'force-dynamic';
+
 export default function SavedPage() {
   return (
-    <Providers>
-      <div style={{ width: '100%', height: '100vh' }}>
+    <>
+      {/* Десктопный layout - показывается через CSS media queries на экранах >= 768px */}
+      <div className="desktop-three-column-layout" style={{ display: 'none' }}>
+        <DesktopThreeColumnLayout />
+      </div>
+      
+      {/* Мобильный layout - показывается по умолчанию, скрывается через CSS на десктопе */}
+      <div className="mobile-layout">
         <SavedScreen />
       </div>
-    </Providers>
+    </>
   );
 }
-

@@ -4,9 +4,11 @@ import { Text } from 'react-native';
 
 // Создаем простые заглушки для иконок
 const createIconStub = (name) => {
-  return React.forwardRef((props, ref) => {
+  const IconComponent = React.forwardRef((props, ref) => {
     return <Text ref={ref} {...props}>{name}</Text>;
   });
+  IconComponent.displayName = name;
+  return IconComponent;
 };
 
 export const Ionicons = createIconStub('Ionicons');

@@ -1,16 +1,25 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import TopBar from '../../components/TopBar';
-import MemoryPost from '../../components/MemoryPost';
+import MemoryPost from '../../client/components/MemoryPost';
 import { useEvents } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { useFocusEffect } from 'expo-router';
+import { useSafeRouter } from '../../utils/safeRouter';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('Memories');
 
 export default function MemoriesScreen() {
+  // Безопасное получение router
+  const router = useSafeRouter();
+  
+  // Функция навигации для передачи в MemoryPost
+  const handleNavigate = (path: string) => {
+    router.push(path);
+  };
+  
   const { eventProfiles, getUserData, friends, events, isEventPast, isUserEventMember, fetchEventProfile, isFriend } = useEvents();
   const { user: authUser } = useAuth();
   const { t } = useLanguage();
@@ -403,6 +412,7 @@ export default function MemoriesScreen() {
                   key={`${eventId}-${post.id}`}
                   post={post}
                   showOptions={true}
+                  onNavigate={handleNavigate}
                 />
               );
             })

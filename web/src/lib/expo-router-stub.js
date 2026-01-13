@@ -1,9 +1,36 @@
 // Заглушка для expo-router в Next.js
 const React = require('react');
-const { useRouter: nextUseRouter, usePathname, useParams } = require('next/navigation');
-const { useSearchParams } = require('next/navigation');
-const { redirect: nextRedirect } = require('next/navigation');
-const NextLink = require('next/link').default;
+
+// Безопасный импорт Next.js модулей с обработкой ошибок
+let nextUseRouter, usePathname, useParams, useSearchParams, nextRedirect, NextLink;
+
+try {
+  const nextNavigation = require('next/navigation');
+  nextUseRouter = nextNavigation.useRouter;
+  usePathname = nextNavigation.usePathname;
+  useParams = nextNavigation.useParams;
+  useSearchParams = nextNavigation.useSearchParams;
+  nextRedirect = nextNavigation.redirect;
+  NextLink = require('next/link').default;
+} catch (error) {
+  console.warn('[expo-router-stub] Failed to load next/navigation, using fallbacks:', error);
+  // Fallback функции
+  nextUseRouter = () => ({
+    push: () => {},
+    replace: () => {},
+    back: () => {},
+  });
+  usePathname = () => '/';
+  useParams = () => ({});
+  useSearchParams = () => ({
+    get: () => null,
+    forEach: () => {},
+  });
+  nextRedirect = () => {};
+  NextLink = function NextLink({ href, children, ...props }) {
+    return React.createElement('a', { href, ...props }, children);
+  };
+}
 
 // Конвертирует expo-router href в Next.js href
 function convertHref(href) {
@@ -33,18 +60,111 @@ function convertHref(href) {
 }
 
 export const useRouter = () => {
-  const router = nextUseRouter();
-  return {
-    push: (href) => {
-      const nextHref = convertHref(href);
-      router.push(nextHref);
-    },
-    replace: (href) => {
-      const nextHref = convertHref(href);
-      router.replace(nextHref);
-    },
-    back: () => router.back(),
-  };
+  try {
+    const router = nextUseRouter();
+    if (!router) {
+      throw new Error('Router not initialized');
+    }
+    
+    // Функция для установки параметров через query string
+    const setParams = (params) => {
+      try {
+        if (typeof window === 'undefined') return;
+        
+        const url = new URL(window.location.href);
+        Object.keys(params).forEach(key => {
+          if (params[key] === undefined || params[key] === null) {
+            url.searchParams.delete(key);
+          } else {
+            url.searchParams.set(key, String(params[key]));
+          }
+        });
+        
+        // Обновляем URL без перезагрузки страницы
+        window.history.replaceState({}, '', url.toString());
+        
+        // Вызываем событие для обновления компонентов, которые используют query параметры
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      } catch (error) {
+        console.warn('[expo-router-stub] Error in router.setParams:', error);
+      }
+    };
+    
+    return {
+      push: (href) => {
+        try {
+          const nextHref = convertHref(href);
+          if (router.push) {
+            router.push(nextHref);
+          }
+        } catch (error) {
+          console.warn('[expo-router-stub] Error in router.push:', error);
+          if (typeof window !== 'undefined') {
+            window.location.href = convertHref(href);
+          }
+        }
+      },
+      replace: (href) => {
+        try {
+          const nextHref = convertHref(href);
+          if (router.replace) {
+            router.replace(nextHref);
+          }
+        } catch (error) {
+          console.warn('[expo-router-stub] Error in router.replace:', error);
+          if (typeof window !== 'undefined') {
+            window.location.replace(convertHref(href));
+          }
+        }
+      },
+      back: () => {
+        try {
+          if (router.back) {
+            router.back();
+          } else if (typeof window !== 'undefined') {
+            window.history.back();
+          }
+        } catch (error) {
+          console.warn('[expo-router-stub] Error in router.back:', error);
+          if (typeof window !== 'undefined') {
+            window.history.back();
+          }
+        }
+      },
+      setParams: setParams,
+      canGoBack: () => {
+        if (typeof window !== 'undefined') {
+          return window.history.length > 1;
+        }
+        return false;
+      },
+    };
+  } catch (error) {
+    console.warn('[expo-router-stub] Error initializing router, using fallback:', error);
+    // Fallback router
+    return {
+      push: (href) => {
+        if (typeof window !== 'undefined') {
+          window.location.href = convertHref(href);
+        }
+      },
+      replace: (href) => {
+        if (typeof window !== 'undefined') {
+          window.location.replace(convertHref(href));
+        }
+      },
+      back: () => {
+        if (typeof window !== 'undefined') {
+          window.history.back();
+        }
+      },
+      setParams: (params) => {
+        // Заглушка для setParams - не поддерживается в Next.js напрямую
+        console.warn('[expo-router-stub] setParams is not supported in Next.js fallback');
+      },
+      canGoBack: () => false,
+    };
+  }
 };
 
 export const useLocalSearchParams = () => {

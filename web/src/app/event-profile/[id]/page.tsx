@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import DesktopThreeColumnLayout from '../../../components/DesktopThreeColumnLayout';
 import { Providers } from '../../providers';
 
 const EventProfileScreen = dynamic(
@@ -29,8 +30,16 @@ function LoadingScreen() {
 export default function EventProfilePage() {
   return (
     <Providers>
+      {/* Десктопный layout - показывается через CSS media queries на экранах >= 768px */}
+      <div className="desktop-three-column-layout" style={{ display: 'none' }}>
+        <DesktopThreeColumnLayout />
+      </div>
+      
+      {/* Мобильный layout - показывается по умолчанию, скрывается через CSS на десктопе */}
+      <div className="mobile-layout">
       <div style={{ width: '100%', height: '100vh' }}>
         <EventProfileScreen />
+        </div>
       </div>
     </Providers>
   );

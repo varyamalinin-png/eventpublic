@@ -1,9 +1,15 @@
 import type { Metadata } from 'next';
 import '../styles/globals.css';
+import { Providers } from './providers';
 
 export const metadata: Metadata = {
   title: 'Event App',
   description: 'Event management application',
+  icons: {
+    icon: '/favicon.svg',
+    shortcut: '/favicon.svg',
+    apple: '/favicon.svg',
+  },
 };
 
 export default function RootLayout({
@@ -18,6 +24,7 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
         {/* Определяем __DEV__ глобально ДО загрузки других скриптов */}
         <script
           dangerouslySetInnerHTML={{
@@ -32,8 +39,11 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body style={{ margin: 0, padding: 0, overflow: 'hidden' }}>{children}</body>
+      <body style={{ margin: 0, padding: 0, overflow: 'hidden' }}>
+        <Providers>
+          {children}
+        </Providers>
+      </body>
     </html>
   );
 }
-

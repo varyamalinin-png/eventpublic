@@ -23,11 +23,23 @@ export class RedisIoAdapter extends IoAdapter {
       ...options,
     });
 
-    const pubClient = this.redisService.getPubClient();
-    const subClient = this.redisService.getSubClient();
+    try {
+      const pubClient = this.redisService.getPubClient();
+      const subClient = this.redisService.getSubClient();
 
-    this.adapterConstructor = createAdapter(pubClient, subClient);
-    server.adapter(this.adapterConstructor);
+      // Проверяем, что клиенты Redis готовы перед созданием адаптера
+      if (pubClient && subClient && pubClient.status === 'ready' && subClient.status === 'ready') {
+        this.adapterConstructor = createAdapter(pubClient, subClient);
+        server.adapter(this.adapterConstructor);
+        console.log('[RedisIoAdapter] Redis adapter initialized successfully');
+      } else {
+        console.warn('[RedisIoAdapter] Redis clients not ready, using default adapter');
+      }
+    } catch (error) {
+      console.error('[RedisIoAdapter] Failed to initialize Redis adapter, using default:', error);
+      // Продолжаем работу без Redis адаптера
+    }
+
     return server;
   }
 }

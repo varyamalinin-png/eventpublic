@@ -8,7 +8,9 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "setup-icon": "bash scripts/setup-app-icon.sh",
+    "prebuild": "expo prebuild"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -55,6 +57,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "^19.2.2",
+    "dotenv": "^17.2.3",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
     "typescript": "~5.8.3"

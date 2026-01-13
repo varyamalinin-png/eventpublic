@@ -60,11 +60,12 @@ export class TagsService {
     }
 
     // Mass event (массовое событие)
-    if (event.isMassEvent) {
+    const isMassEvent = (event as any).isMassEvent;
+    if (isMassEvent) {
       autoTags.push('массовое');
       console.log(`[TagsService] Event ${eventId} is mass event, added "массовое" tag`);
     } else {
-      console.log(`[TagsService] Event ${eventId} isMassEvent: ${event.isMassEvent}`);
+      console.log(`[TagsService] Event ${eventId} isMassEvent: ${isMassEvent}`);
     }
 
     // Обновляем метки в базе данных

@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { Providers } from '../../../providers';
+import DesktopThreeColumnLayout from '../../../../components/DesktopThreeColumnLayout';
 
 const RequestsScreen = dynamic(
   () => import('@/client/app/(tabs)/inbox/requests/index').then(mod => ({ default: mod.default })),
@@ -28,11 +28,19 @@ function LoadingScreen() {
 
 export default function RequestsPage() {
   return (
-    <Providers>
+    <>
+      {/* Десктопный layout - показывается через CSS media queries на экранах >= 768px */}
+      <div className="desktop-three-column-layout" style={{ display: 'none' }}>
+        <DesktopThreeColumnLayout />
+      </div>
+      
+      {/* Мобильный layout - показывается по умолчанию, скрывается через CSS на десктопе */}
+      <div className="mobile-layout">
       <div style={{ width: '100%', height: '100vh' }}>
         <RequestsScreen />
+        </div>
       </div>
-    </Providers>
+    </>
   );
 }
 

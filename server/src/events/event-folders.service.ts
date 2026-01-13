@@ -13,11 +13,17 @@ export class EventFoldersService {
     let coverPhotoUrl: string | null = null;
 
     if (coverPhotoFile && coverPhotoFile.buffer) {
-      coverPhotoUrl = await this.storage.uploadEventMedia(ownerId, {
-        buffer: coverPhotoFile.buffer,
-        mimetype: coverPhotoFile.mimetype || 'image/jpeg',
-        originalName: coverPhotoFile.originalname || 'cover.jpg',
-      });
+      try {
+        coverPhotoUrl = await this.storage.uploadEventMedia(ownerId, {
+          buffer: coverPhotoFile.buffer,
+          mimetype: coverPhotoFile.mimetype || 'image/jpeg',
+          originalName: coverPhotoFile.originalname || 'cover.jpg',
+        });
+      } catch (error: any) {
+        // Если ошибка при загрузке, создаем папку без обложки
+        console.error('Failed to upload cover photo, creating folder without it:', error?.message || error);
+        // НЕ бросаем ошибку - создаем папку без обложки
+      }
     }
 
     return this.prisma.eventFolder.create({
