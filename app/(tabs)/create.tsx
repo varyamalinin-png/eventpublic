@@ -4,6 +4,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEvents, Event } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
+import { API_BASE_URL } from '../../services/api';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { suggestAddresses, geocodeAddress } from '../../utils/yandexGeocoder';
@@ -11,6 +12,7 @@ import { getSelectedLocation, clearSelectedLocation } from '../select-location';
 import EventCard from '../../components/EventCard';
 import { createLogger } from '../../utils/logger';
 import { createEventStyles } from './create.styles';
+import { usePathname } from 'expo-router';
 
 const logger = createLogger('CreateEvent');
 
@@ -32,6 +34,7 @@ interface EventFormData {
   originalMediaUrl: string; // Оригинальное фото для профиля
   mediaType: 'image' | 'video';
   selectedImage: string | null;
+  selectedFile?: File | null; // File объект для веба
   // Новые поля для системы приглашений и фильтров
   ageRestriction?: {
     min: number;
@@ -65,12 +68,13 @@ export default function CreateEventScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { createEvent, updateEvent, deleteEvent, events, getFriendsList, eventRequests, user: eventsAuthUser } = useEvents() as any;
-  const { user: authUser } = useAuth();
+  const { user: authUser, accessToken } = useAuth();
   const { t } = useLanguage();
   const [currentStep, setCurrentStep] = useState(1);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false); // КРИТИЧЕСКИ ВАЖНО: Ref для защиты от повторных вызовов
   const [showRecurringOptions, setShowRecurringOptions] = useState(false);
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [selectedCustomDates, setSelectedCustomDates] = useState<Date[]>([]);
@@ -146,6 +150,7 @@ export default function CreateEventScreen() {
     originalMediaUrl: '',
     mediaType: 'image',
     selectedImage: null,
+    selectedFile: null, // КРИТИЧЕСКИ ВАЖНО: Инициализируем selectedFile для веба
     // Инициализация новых полей
     ageRestriction: undefined,
     genderRestriction: undefined,
@@ -218,6 +223,7 @@ export default function CreateEventScreen() {
       originalMediaUrl: '',
       mediaType: 'image',
       selectedImage: null,
+      selectedFile: null, // КРИТИЧЕСКИ ВАЖНО: Очищаем selectedFile при сбросе формы
       ageRestriction: undefined,
       genderRestriction: undefined,
       visibility: {
@@ -422,6 +428,16 @@ export default function CreateEventScreen() {
         location = formData.coordinates ? 'Место проведения' : 'Онлайн';
       }
       
+      // КРИТИЧЕСКИ ВАЖНО: Создаем Date объект безопасно для избежания ошибки _construct
+      const previewCreatedAt = (() => {
+        try {
+          return new Date();
+        } catch (e) {
+          // Fallback если new Date() не работает
+          return new Date(Date.now());
+        }
+      })();
+
       const previewData = {
         id: previewEventId,
         title: formData.title || t.createEvent.defaultEventTitle || 'Новое событие',
@@ -442,7 +458,7 @@ export default function CreateEventScreen() {
         mediaAspectRatio: finalMediaUrl ? 1.33 : 1,
         participantsList: [],
         participantsData: [],
-        createdAt: new Date(),
+        createdAt: previewCreatedAt,
         isRecurring: formData.isRecurring || false,
         recurringType: formData.recurringType || null,
         recurringDays: formData.recurringDays || [],
@@ -503,7 +519,13 @@ export default function CreateEventScreen() {
         mediaAspectRatio: 1.33,
         participantsList: [],
         participantsData: [],
-        createdAt: new Date(),
+        createdAt: (() => {
+          try {
+            return new Date();
+          } catch (e) {
+            return new Date(Date.now());
+          }
+        })(),
         isRecurring: false,
         isMassEvent: formData.isMassEvent || false,
         // Генерируем теги для preview даже в fallback случае
@@ -683,6 +705,75 @@ export default function CreateEventScreen() {
   const pickImage = async () => {
     try {
       logger.debug('Начинаем выбор изображения...');
+
+      if (Platform.OS === 'web') {
+        // Для веба используем input type="file"
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async (event) => {
+          const file = (event.target as HTMLInputElement).files?.[0];
+          if (file) {
+            // КРИТИЧЕСКИ ВАЖНО: Сначала сохраняем File объект, потом читаем для превью
+            // Это гарантирует, что File объект не потеряется
+            logger.debug('📥 Файл выбран:', { 
+              name: file.name, 
+              size: file.size, 
+              type: file.type,
+              isFile: file instanceof File 
+            });
+            
+            // КРИТИЧЕСКИ ВАЖНО: Сохраняем File объект СРАЗУ в отдельном setState
+            // Это гарантирует, что File объект не потеряется при следующем обновлении state
+            setFormData(prev => {
+              const updated = {
+                ...prev,
+                selectedFile: file, // File объект для загрузки - КРИТИЧЕСКИ ВАЖНО
+                mediaType: 'image' as const
+              };
+              logger.debug('✅ File объект сохранен в state:', { 
+                hasSelectedFile: !!updated.selectedFile,
+                selectedFileType: updated.selectedFile instanceof File ? 'File' : typeof updated.selectedFile,
+                fileName: (updated.selectedFile as File)?.name,
+                fileSize: (updated.selectedFile as File)?.size
+              });
+              return updated;
+            });
+            
+            // Читаем файл для превью ПОСЛЕ сохранения File объекта
+            // КРИТИЧЕСКИ ВАЖНО: Для веба используем data URL ТОЛЬКО для превью (selectedImage)
+            // НЕ сохраняем data URL в mediaUrl/originalMediaUrl - это создает очень длинные строки
+            // Для загрузки используем только selectedFile
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const uri = e.target?.result as string;
+              // Обновляем только превью (selectedImage), НЕ устанавливаем mediaUrl/originalMediaUrl
+              setFormData(prev => {
+                const updated = {
+                  ...prev,
+                  selectedImage: uri, // Data URL ТОЛЬКО для превью
+                  // НЕ устанавливаем mediaUrl и originalMediaUrl - они будут установлены после загрузки файла на сервер
+                  // НЕ трогаем selectedFile - он уже сохранен
+                };
+                logger.debug('✅ Превью обновлено (data URL только для превью):', { 
+                  uriLength: uri.length,
+                  hasSelectedFile: !!updated.selectedFile,
+                  selectedFileType: updated.selectedFile instanceof File ? 'File' : typeof updated.selectedFile
+                });
+                return updated;
+              });
+            };
+            reader.onerror = (error) => {
+              logger.error('❌ Ошибка чтения файла:', error);
+            };
+            reader.readAsDataURL(file);
+          }
+        };
+        input.click();
+        return;
+      }
+
+      // Для нативных платформ используем expo-image-picker
       const hasPermission = await requestPermissions();
       if (!hasPermission) {
         logger.warn('Нет разрешения на доступ к медиатеке');
@@ -824,12 +915,20 @@ export default function CreateEventScreen() {
     setFormData(prev => ({ 
       ...prev, 
       selectedImage: null,
+      selectedFile: null, // Очищаем File объект для веба
       mediaUrl: '',
       originalMediaUrl: ''
     }));
   };
 
   const showMediaOptions = () => {
+    if (Platform.OS === 'web') {
+      // На вебе сразу вызываем pickImage (который использует input type="file")
+      pickImage();
+      return;
+    }
+    
+    // На мобильных показываем Alert с опциями
     Alert.alert(
       'Добавить медиа',
       'Выберите тип медиа и источник:',
@@ -876,6 +975,19 @@ export default function CreateEventScreen() {
 
 
   const handleSubmit = async () => {
+    // КРИТИЧЕСКИ ВАЖНО: Защита от повторных вызовов используя ref (синхронная проверка)
+    if (submittingRef.current) {
+      logger.warn('⚠️ handleSubmit уже выполняется (ref), игнорируем повторный вызов');
+      return;
+    }
+    if (submitting) {
+      logger.warn('⚠️ handleSubmit уже выполняется (state), игнорируем повторный вызов');
+      return;
+    }
+    
+    // Устанавливаем флаг ДО любых асинхронных операций
+    submittingRef.current = true;
+
     if (!formData.title || !formData.description || !formData.location) {
       Alert.alert(t.createEvent.error, t.createEvent.fillRequiredFields);
       return;
@@ -972,6 +1084,124 @@ export default function CreateEventScreen() {
 
     setSubmitting(true);
     try {
+      logger.info('🚀 handleSubmit начал выполнение');
+      // КРИТИЧЕСКИ ВАЖНО: Разная логика для веба и мобильного приложения
+      // Для веба: загружаем файл на сервер перед созданием события
+      // Для мобильного: передаем локальные URI в payload, useEventActions.ts загрузит их
+      let finalMediaUrl: string | undefined = undefined;
+      let finalOriginalMediaUrl: string | undefined = undefined;
+      
+      logger.debug('📸 Проверка медиа перед созданием события:', {
+        platform: Platform.OS,
+        hasSelectedFile: !!formData.selectedFile,
+        selectedFileName: formData.selectedFile?.name,
+        hasMediaUrl: !!formData.mediaUrl,
+        mediaUrlType: formData.mediaUrl ? (formData.mediaUrl.startsWith('http') ? 'HTTP' : formData.mediaUrl.startsWith('data:') ? 'DATA' : 'LOCAL') : 'NONE',
+        hasAccessToken: !!accessToken,
+      });
+      
+      if (Platform.OS === 'web' && formData.selectedFile) {
+        // Для веба: загружаем файл на сервер перед созданием события
+        try {
+          logger.info('📤 Начинаем загрузку файла для веба:', {
+            fileName: formData.selectedFile.name,
+            fileSize: formData.selectedFile.size,
+            fileType: formData.selectedFile.type,
+            hasAccessToken: !!accessToken,
+            accessTokenLength: accessToken?.length || 0,
+          });
+          
+          if (!accessToken) {
+            logger.error('❌ Нет accessToken для загрузки файла!');
+            throw new Error('No access token');
+          }
+          
+          const uploadFormData = new FormData();
+          uploadFormData.append('file', formData.selectedFile);
+          
+          logger.debug('📤 Отправляем FormData на сервер:', {
+            formDataKeys: Array.from(uploadFormData.keys()),
+            apiUrl: `${API_BASE_URL}/events/media`,
+          });
+          
+          const uploadResponse = await fetch(`${API_BASE_URL}/events/media`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: uploadFormData,
+          });
+          
+          logger.debug('📥 Получен ответ от сервера при загрузке файла:', {
+            ok: uploadResponse.ok,
+            status: uploadResponse.status,
+            statusText: uploadResponse.statusText,
+          });
+          
+          if (uploadResponse.ok) {
+            const uploadData = await uploadResponse.json();
+            logger.debug('📥 Данные ответа сервера:', uploadData);
+            finalMediaUrl = uploadData.url || uploadData.mediaUrl || uploadData.publicUrl;
+            finalOriginalMediaUrl = uploadData.url || uploadData.mediaUrl || uploadData.publicUrl;
+            logger.info('✅ Файл загружен на сервер для веба:', {
+              finalMediaUrl,
+              finalOriginalMediaUrl,
+              startsWithHttp: finalMediaUrl?.startsWith('http'),
+            });
+            
+            if (!finalMediaUrl || !finalMediaUrl.startsWith('http')) {
+              logger.error('❌ КРИТИЧЕСКАЯ ОШИБКА: URL не начинается с http!', {
+                finalMediaUrl,
+                uploadData,
+              });
+            }
+          } else {
+            const errorText = await uploadResponse.text();
+            logger.error('❌ Ошибка загрузки файла на сервер:', {
+              status: uploadResponse.status,
+              statusText: uploadResponse.statusText,
+              error: errorText
+            });
+            finalMediaUrl = undefined;
+            finalOriginalMediaUrl = undefined;
+          }
+        } catch (uploadError: any) {
+          logger.error('❌ Исключение при загрузке файла на сервер:', {
+            error: uploadError?.message || uploadError,
+            stack: uploadError?.stack,
+          });
+          finalMediaUrl = undefined;
+          finalOriginalMediaUrl = undefined;
+        }
+      } else if (Platform.OS === 'web') {
+        logger.warn('⚠️ Для веба нет selectedFile, но возможно есть mediaUrl:', {
+          hasMediaUrl: !!formData.mediaUrl,
+          mediaUrl: formData.mediaUrl?.substring(0, 50),
+        });
+        // Если для веба нет selectedFile, но есть mediaUrl (data URL), используем его
+        // Но для веба лучше загружать файл на сервер
+        if (formData.mediaUrl && formData.mediaUrl.startsWith('http')) {
+          finalMediaUrl = formData.mediaUrl;
+          finalOriginalMediaUrl = formData.originalMediaUrl;
+        }
+      } else {
+        // Для мобильного приложения: передаем локальные URI в payload
+        // useEventActions.ts загрузит их на сервер
+        if (formData.mediaUrl) {
+          finalMediaUrl = formData.mediaUrl;
+        }
+        if (formData.originalMediaUrl) {
+          finalOriginalMediaUrl = formData.originalMediaUrl;
+        }
+      }
+      
+      logger.debug('📸 Итоговые URL медиа после загрузки:', {
+        finalMediaUrl,
+        finalOriginalMediaUrl,
+        finalMediaUrlStartsWithHttp: finalMediaUrl?.startsWith('http'),
+        finalOriginalMediaUrlStartsWithHttp: finalOriginalMediaUrl?.startsWith('http'),
+      });
+      
       const payload = {
         title: formData.title,
         description: formData.description,
@@ -981,8 +1211,15 @@ export default function CreateEventScreen() {
         location: formData.location || (formData.coordinates ? 'Место проведения' : 'Онлайн'),
         price: formData.price || 'Бесплатно',
         maxParticipants: maxParticipants,
-        mediaUrl: formData.mediaUrl || undefined,
-        originalMediaUrl: formData.originalMediaUrl || undefined,
+        // КРИТИЧЕСКИ ВАЖНО: 
+        // Для веба: отправляем только HTTP URL (уже загруженные на сервер)
+        // Для мобильного: отправляем локальные URI (file://...), useEventActions.ts загрузит их
+        mediaUrl: Platform.OS === 'web' 
+          ? (finalMediaUrl && finalMediaUrl.startsWith('http') ? finalMediaUrl : undefined)
+          : finalMediaUrl,
+        originalMediaUrl: Platform.OS === 'web'
+          ? (finalOriginalMediaUrl && finalOriginalMediaUrl.startsWith('http') ? finalOriginalMediaUrl : undefined)
+          : finalOriginalMediaUrl,
         mediaType: formData.mediaType,
         mediaAspectRatio,
         coordinates: formData.coordinates,
@@ -1003,7 +1240,17 @@ export default function CreateEventScreen() {
         tags: formData.tags || [],
       };
 
-      logger.debug('Payload для создания события', { ...payload, mediaUrl: payload.mediaUrl ? 'SET' : 'NOT SET', originalMediaUrl: payload.originalMediaUrl ? 'SET' : 'NOT SET' });
+      logger.info('📤 Payload для создания события:', { 
+        title: payload.title,
+        hasMediaUrl: !!payload.mediaUrl,
+        mediaUrl: payload.mediaUrl ? (payload.mediaUrl.startsWith('http') ? payload.mediaUrl.substring(0, 100) + '...' : 'DATA URL') : 'NOT SET', 
+        hasOriginalMediaUrl: !!payload.originalMediaUrl,
+        originalMediaUrl: payload.originalMediaUrl ? (payload.originalMediaUrl.startsWith('http') ? payload.originalMediaUrl.substring(0, 100) + '...' : 'DATA URL') : 'NOT SET',
+        finalMediaUrl: finalMediaUrl ? (finalMediaUrl.substring(0, 100) + '...') : 'NOT SET',
+        finalOriginalMediaUrl: finalOriginalMediaUrl ? (finalOriginalMediaUrl.substring(0, 100) + '...') : 'NOT SET',
+        platform: Platform.OS,
+        willIncludeMediaUrl: Platform.OS === 'web' ? (finalMediaUrl && finalMediaUrl.startsWith('http') ? 'YES' : 'NO') : 'YES (mobile)',
+      });
 
       if (isEditMode && editingEventId) {
         // Режим редактирования: вызываем updateEvent
@@ -1030,28 +1277,79 @@ export default function CreateEventScreen() {
         ]);
       } else {
         // Создание нового события
-        await createEvent(payload);
+        try {
+          logger.info('📤 Начинаем создание события...');
+          const createdEvent = await createEvent(payload);
+          logger.info('✅ Событие успешно создано:', createdEvent?.id);
+          
+          // КРИТИЧЕСКИ ВАЖНО: Ждем завершения синхронизации перед редиректом
+          // syncEventsFromServer вызывается внутри createEvent, но нужно убедиться что он завершился
+          logger.info('⏳ Ожидание завершения синхронизации...');
+          
+          // Даем время на завершение всех асинхронных операций (syncEventsFromServer и т.д.)
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          logger.info('✅ Синхронизация завершена, можно переходить');
+        } catch (createError) {
+          logger.error('❌ Ошибка при создании события:', createError);
+          // На вебе показываем ошибку через console, так как Alert.alert не работает
+          if (Platform.OS === 'web') {
+            console.error('Ошибка создания события:', createError);
+            // Все равно переходим в explore, чтобы пользователь мог увидеть другие события
+            router.push('/explore');
+            return;
+          } else {
+            Alert.alert(t.createEvent.error, isEditMode ? t.createEvent.failedToSave : t.createEvent.failedToCreate);
+            return;
+          }
+        }
+        
         // КРИТИЧЕСКИ ВАЖНО: Удаляем preview-событие после успешного создания реального события
         try {
           deleteEvent('preview-event-temp');
         } catch (error) {
           logger.warn('Failed to delete preview event after creation', error);
         }
-        Alert.alert(
-          t.createEvent.success,
-          t.createEvent.eventCreated,
-          [
-            { text: t.createEvent.goToFeed, onPress: () => router.push('/(tabs)/explore') },
-            { text: t.createEvent.createAnother, onPress: () => resetForm() },
-          ],
-          { cancelable: false }
-        );
+        
+        if (Platform.OS === 'web') {
+          // КРИТИЧЕСКИ ВАЖНО: На вебе НЕ используем router.push сразу, чтобы не размонтировать компонент
+          // Используем window.location или setTimeout для навигации после завершения всех операций
+          logger.debug('Переход в explore на вебе (с задержкой для завершения синхронизации)');
+          setTimeout(() => {
+            if (typeof window !== 'undefined') {
+              window.location.href = '/explore';
+            } else {
+              router.push('/explore');
+            }
+          }, 500);
+        } else {
+          // На мобильных показываем Alert с опциями
+          Alert.alert(
+            t.createEvent.success,
+            t.createEvent.eventCreated,
+            [
+              { text: t.createEvent.goToFeed, onPress: () => router.push('/(tabs)/explore') },
+              { text: t.createEvent.createAnother, onPress: () => resetForm() },
+            ],
+            { cancelable: false }
+          );
+        }
       }
-    } catch (error) {
-      logger.error('Failed to create event', error);
-      Alert.alert(t.createEvent.error, isEditMode ? t.createEvent.failedToSave : t.createEvent.failedToCreate);
-    } finally {
+    } 
+    catch (error) {
+      logger.error('Failed to create event (outer catch):', error);
+      if (Platform.OS === 'web') {
+        console.error('Ошибка создания события:', error);
+        // На вебе переходим в explore даже при ошибке
+        router.push('/explore');
+      } else {
+        Alert.alert(t.createEvent.error, isEditMode ? t.createEvent.failedToSave : t.createEvent.failedToCreate);
+      }
+    } 
+    finally {
       setSubmitting(false);
+      submittingRef.current = false; // КРИТИЧЕСКИ ВАЖНО: Сбрасываем ref в finally
+      logger.info('✅ handleSubmit завершил выполнение');
     }
   };
 
@@ -1223,6 +1521,29 @@ export default function CreateEventScreen() {
 
             {showDatePicker && (
               <View style={styles.pickerContainer}>
+                {Platform.OS === 'web' ? (
+                  <input
+                    type="date"
+                    value={formData.date.toISOString().split('T')[0]}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        const selectedDate = new Date(e.target.value);
+                        setFormData(prev => ({ ...prev, date: selectedDate }));
+                        setShowDatePicker(false);
+                      }
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      fontSize: '16px',
+                      backgroundColor: '#1a1a1a',
+                      color: '#FFFFFF',
+                      border: '1px solid #333',
+                      borderRadius: '8px',
+                      outline: 'none',
+                    }}
+                  />
+                ) : (
                 <DateTimePicker
                   value={formData.date}
                   mode="date"
@@ -1241,6 +1562,7 @@ export default function CreateEventScreen() {
                   textColor="#FFFFFF"
                   accentColor="#8B5CF6"
                 />
+                )}
                 {Platform.OS === 'ios' && (
                   <TouchableOpacity
                     style={styles.confirmButton}
@@ -1265,6 +1587,31 @@ export default function CreateEventScreen() {
 
             {showTimePicker && (
               <View style={styles.pickerContainer}>
+                {Platform.OS === 'web' ? (
+                  <input
+                    type="time"
+                    value={`${String(formData.time.getHours()).padStart(2, '0')}:${String(formData.time.getMinutes()).padStart(2, '0')}`}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        const [hours, minutes] = e.target.value.split(':').map(Number);
+                        const selectedTime = new Date(formData.time);
+                        selectedTime.setHours(hours, minutes);
+                        setFormData(prev => ({ ...prev, time: selectedTime }));
+                        setShowTimePicker(false);
+                      }
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      fontSize: '16px',
+                      backgroundColor: '#1a1a1a',
+                      color: '#FFFFFF',
+                      border: '1px solid #333',
+                      borderRadius: '8px',
+                      outline: 'none',
+                    }}
+                  />
+                ) : (
                 <DateTimePicker
                   value={formData.time}
                   mode="time"
@@ -1282,6 +1629,7 @@ export default function CreateEventScreen() {
                   textColor="#FFFFFF"
                   accentColor="#8B5CF6"
                 />
+                )}
                 {Platform.OS === 'ios' && (
                   <TouchableOpacity
                     style={styles.confirmButton}
