@@ -9,6 +9,7 @@ import {
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuid } from 'uuid';
+import * as path from 'path';
 
 type UploadParams = {
   buffer: Buffer;
@@ -19,8 +20,8 @@ type UploadParams = {
 @Injectable()
 export class StorageService {
   private readonly logger = new Logger(StorageService.name);
-  private readonly s3: S3Client;
-  private readonly bucket: string;
+  public readonly s3: S3Client; // Изменено на public для доступа из контроллера
+  public readonly bucket: string; // Изменено на public для доступа из контроллера
   private readonly publicBaseUrl?: string;
   private readonly maxFileSizeBytes: number;
   private readonly region: string;
@@ -117,21 +118,24 @@ export class StorageService {
   }
 
   async uploadEventMedia(userId: string, { buffer, mimetype, originalName }: UploadParams) {
-    const key = `events/${userId}/${uuid()}-${originalName}`;
+    const extension = path.extname(originalName) || '.jpg';
+    const key = `events/${userId}/${uuid()}${extension}`;
+    
+    this.logger.log(`📤 Starting uploadEventMedia: key=${key}, size=${buffer.length} bytes, mimetype=${mimetype}`);
+
+    // КРИТИЧЕСКИ ВАЖНО: Не ждем ensureBucketExists - если bucket уже существует, просто продолжаем
+    // ensureBucketExists может вернуть ошибку 403, но это не критично
+    try {
+      this.logger.debug(`Checking bucket exists: ${this.bucket}`);
+      await this.ensureBucketExists();
+      this.logger.debug(`Bucket check passed: ${this.bucket}`);
+    } catch (error: any) {
+      // Игнорируем ошибки проверки bucket - просто продолжаем
+      this.logger.warn(`Bucket check failed, but continuing: ${error?.message || error}`);
+    }
 
     try {
-      // Try to ensure bucket exists, but don't fail if it already exists
-      try {
-        await this.ensureBucketExists();
-      } catch (error: any) {
-        // If bucket check fails with 403, it might already exist - try to upload anyway
-        if (error?.code === '403' || error?.Code === '403' || error?.statusCode === 403) {
-          this.logger.warn(`Bucket check failed with 403, assuming bucket exists and continuing...`);
-        } else {
-          throw error;
-        }
-      }
-
+      this.logger.log(`📤 Creating Upload instance: bucket=${this.bucket}, key=${key}, size=${buffer.length} bytes`);
       const uploader = new Upload({
         client: this.s3,
         params: {
@@ -145,37 +149,59 @@ export class StorageService {
         },
       });
 
+      this.logger.log(`📤 Starting upload: key=${key}`);
       await uploader.done();
-      this.logger.log(`Event media uploaded successfully: ${key}`);
-    } catch (error) {
-      if (this.isMissingBucketError(error)) {
-        this.logger.warn(
-          `Bucket "${this.bucket}" missing, attempting to create and retry upload...`,
-        );
+      this.logger.log(`✅ Event media uploaded successfully: ${key}`);
+    } catch (error: any) {
+      const statusCode = error?.$metadata?.httpStatusCode || error?.statusCode;
+      const errorCode = error?.Code || error?.code || error?.name || 'Unknown';
+      
+      this.logger.error(`❌ Failed to upload event media: ${errorCode} (${statusCode}) - ${error?.message || error}`);
+      this.logger.error(`❌ Upload details: bucket=${this.bucket}, key=${key}, size=${buffer.length} bytes`);
+      this.logger.error(`❌ Error stack: ${error?.stack || 'No stack trace'}`);
+      
+      // Если это ошибка отсутствия bucket или 403 (нет прав), пытаемся создать bucket и повторить
+      if (this.isMissingBucketError(error) || statusCode === 403) {
+        this.logger.warn(`Bucket "${this.bucket}" issue (${statusCode}/${errorCode}), attempting to create and retry upload...`);
         this.ensureBucketTask = undefined;
-        await this.ensureBucketExists();
+        try {
+          await this.ensureBucketExists();
+        } catch (ensureError: any) {
+          // Игнорируем ошибки создания bucket - возможно он уже существует
+          this.logger.warn(`Bucket ensure failed, but continuing: ${ensureError?.message || ensureError}`);
+        }
+        
         // Retry upload
-        const retryUploader = new Upload({
-          client: this.s3,
-          params: {
-            Bucket: this.bucket,
-            Key: key,
-            Body: buffer,
-            ContentType: mimetype,
-            Metadata: {
-              originalName,
+        try {
+          const retryUploader = new Upload({
+            client: this.s3,
+            params: {
+              Bucket: this.bucket,
+              Key: key,
+              Body: buffer,
+              ContentType: mimetype,
+              Metadata: {
+                originalName,
+              },
             },
-          },
-        });
-        await retryUploader.done();
-        this.logger.log(`Event media uploaded successfully after retry: ${key}`);
+          });
+          await retryUploader.done();
+          this.logger.log(`✅ Event media uploaded successfully after retry: ${key}`);
+          return this.buildPublicUrl(key);
+        } catch (retryError: any) {
+          const retryStatusCode = retryError?.$metadata?.httpStatusCode || retryError?.statusCode;
+          const retryErrorCode = retryError?.Code || retryError?.code || retryError?.name || 'Unknown';
+          this.logger.error(`❌ Failed to upload event media after retry: ${retryErrorCode} (${retryStatusCode}) - ${retryError?.message || retryError}`, retryError);
+          throw new InternalServerErrorException(`Не удалось загрузить изображение: ${retryError?.message || `Error ${retryStatusCode} (${retryErrorCode})`}`);
+        }
       } else {
-        this.logger.error('Failed to upload event media', error as Error);
-        throw new InternalServerErrorException('Не удалось загрузить изображение');
+        throw new InternalServerErrorException(`Не удалось загрузить изображение: ${error?.message || `Error ${statusCode} (${errorCode})`}`);
       }
     }
 
-    return this.buildPublicUrl(key);
+    const publicUrl = this.buildPublicUrl(key);
+    this.logger.log(`✅ Returning public URL: ${publicUrl}`);
+    return publicUrl;
   }
 
   async getSignedUploadUrl(userId: string, contentType: string) {
@@ -196,19 +222,24 @@ export class StorageService {
   }
 
   private buildPublicUrl(key: string) {
+    // КРИТИЧЕСКИ ВАЖНО: Всегда используем publicBaseUrl если он установлен
     if (this.publicBaseUrl) {
       const url = `${this.publicBaseUrl.replace(/\/$/, '')}/${key}`;
-      this.logger.debug(`Built public URL: ${url}`);
+      this.logger.debug(`Built public URL from publicBaseUrl: ${url}`);
       return url;
     }
-    // Для Yandex Object Storage используем правильный формат URL
+    // Fallback: Для Yandex Object Storage используем правильный формат URL
     const endpoint = this.configService.get<string>('storage.endpoint');
     if (endpoint && endpoint.includes('yandexcloud.net')) {
       // Yandex Cloud Object Storage публичный URL
-      return `https://${this.bucket}.storage.yandexcloud.net/${key}`;
+      const yandexUrl = `https://${this.bucket}.storage.yandexcloud.net/${key}`;
+      this.logger.debug(`Built public URL from Yandex endpoint: ${yandexUrl}`);
+      return yandexUrl;
     }
     // Fallback для AWS S3
-    return `https://${this.bucket}.s3.amazonaws.com/${key}`;
+    const s3Url = `https://${this.bucket}.s3.amazonaws.com/${key}`;
+    this.logger.debug(`Built public URL from S3 fallback: ${s3Url}`);
+    return s3Url;
   }
 
   private isMissingBucketError(error: unknown) {
@@ -229,27 +260,46 @@ export class StorageService {
 
     this.ensureBucketTask = this.s3
       .send(new HeadBucketCommand({ Bucket: this.bucket }))
-      .catch(async (error) => {
-        if (!this.isMissingBucketError(error)) {
-          throw error;
-        }
-
-        this.logger.warn(`Bucket "${this.bucket}" not found. Creating...`);
-        // MinIO doesn't require LocationConstraint, so we create bucket without it
-        const createCommand = new CreateBucketCommand({ Bucket: this.bucket });
-
-        await this.s3.send(createCommand);
-        this.logger.log(`Bucket "${this.bucket}" created successfully.`);
-      })
       .then(() => {
         this.logger.debug(`Bucket "${this.bucket}" is ready.`);
       })
-      .catch((error: any) => {
+      .catch(async (error: any) => {
+        const statusCode = error?.$metadata?.httpStatusCode || error?.statusCode;
+        const errorCode = error?.Code || error?.code || error?.name || 'Unknown';
+        
+        // КРИТИЧЕСКИ ВАЖНО: Если bucket уже существует (403 или другие ошибки доступа), не бросаем ошибку
+        // Просто продолжаем - bucket скорее всего существует, просто нет прав на HEAD
+        if (statusCode === 403 || statusCode === 404 || errorCode === '403' || errorCode === 'AccessDenied' || errorCode === 'Forbidden' || error?.message?.includes('AccessDenied') || error?.message?.includes('Forbidden')) {
+          this.logger.warn(`Bucket "${this.bucket}" check returned ${statusCode}/${errorCode}, assuming it exists and continuing...`);
+          // НЕ бросаем ошибку - просто продолжаем, пытаемся загрузить файл
+          return;
+        }
+        
+        // Если bucket не существует, создаем его
+        if (this.isMissingBucketError(error)) {
+          this.logger.warn(`Bucket "${this.bucket}" not found. Creating...`);
+          const createCommand = new CreateBucketCommand({ Bucket: this.bucket });
+          try {
+            await this.s3.send(createCommand);
+            this.logger.log(`Bucket "${this.bucket}" created successfully.`);
+            return;
+          } catch (createError: any) {
+            // Если создание не удалось из-за 403/404, bucket уже существует или нет прав
+            const createStatusCode = createError?.$metadata?.httpStatusCode || createError?.statusCode;
+            if (createStatusCode === 403 || createStatusCode === 404 || createError?.Code === '403' || createError?.Code === 'BucketAlreadyExists') {
+              this.logger.warn(`Bucket "${this.bucket}" creation returned ${createStatusCode}, assuming it already exists`);
+              return;
+            }
+            // Для других ошибок - просто продолжаем, не бросаем исключение
+            this.logger.warn(`Bucket "${this.bucket}" creation failed, but continuing anyway: ${createError?.message || createError}`);
+            return;
+          }
+        }
+        
+        // Для всех остальных ошибок - просто продолжаем, не бросаем исключение
+        this.logger.warn(`Failed to ensure bucket exists: ${errorCode} - ${error?.message || error}, but continuing anyway...`);
         this.ensureBucketTask = undefined;
-        const errorMessage = error?.message || String(error);
-        const errorCode = error?.Code || error?.code || 'Unknown';
-        this.logger.error(`Failed to ensure bucket exists: ${errorCode} - ${errorMessage}`, error);
-        throw new InternalServerErrorException(`Ошибка хранения файлов: ${errorCode} - ${errorMessage}`);
+        return; // НЕ бросаем исключение, просто возвращаемся
       });
 
     return this.ensureBucketTask;
