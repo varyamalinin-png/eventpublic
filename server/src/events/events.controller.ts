@@ -381,50 +381,18 @@ export class EventsController {
   async uploadMedia(
     @UploadedFile() file: Express.Multer.File | undefined,
     @RequestUser('userId') userId: string,
-    @Req() req: any,
   ) {
-    try {
-      logger.info(`📤 POST upload media, userId: ${userId}`);
-      const contentType = req.headers['content-type'] || 'not set';
-      logger.info(`📥 Request Content-Type: ${contentType}`);
-      logger.info(`📥 Request method: ${req.method}`);
-      logger.info(`📥 Request url: ${req.url}`);
-      logger.info(`📥 Multer file: ${file ? `yes (${file.mimetype}, ${file.size} bytes, ${file.originalname})` : 'no'}`);
-      logger.info(`📥 Request body keys: ${Object.keys(req.body || {}).join(', ')}`);
-      
-      // КРИТИЧЕСКИ ВАЖНО: Проверяем, что body parser не обработал multipart
-      if (req.body && Object.keys(req.body).length > 0 && contentType.includes('multipart/form-data')) {
-        logger.error(`❌ Body parser обработал multipart/form-data! Body keys: ${Object.keys(req.body).join(', ')}, Body: ${JSON.stringify(req.body)}`);
-        logger.error(`❌ Это означает, что body parser сработал ДО Multer. Файл потерян!`);
-      }
-      
-      if (!file) {
-        const bodyKeys = Object.keys(req.body || {});
-        logger.error(`❌ No file provided. Content-Type: ${contentType}, Body keys: [${bodyKeys.join(', ')}]`);
-        logger.error(`❌ Multer не получил файл. Возможные причины:`);
-        logger.error(`   1. Body parser обработал multipart/form-data до Multer`);
-        logger.error(`   2. Файл не был отправлен клиентом`);
-        logger.error(`   3. Неправильное имя поля (ожидается 'file')`);
-        throw new BadRequestException('No file provided');
-      }
-      
-      logger.debug(`File received: ${file.mimetype}, ${file.size} bytes, ${file.originalname}`);
-
-      // КРИТИЧЕСКИ ВАЖНО: file.buffer уже является Buffer от Multer, не нужно Buffer.from()
-      // Buffer.from() может создать проблемы с подписью S3/MinIO
-      const buffer = file.buffer instanceof Buffer ? file.buffer : Buffer.from(file.buffer);
-      const publicUrl = await this.storageService.uploadEventMedia(userId, {
-        buffer,
-        mimetype: file.mimetype,
-        originalName: file.originalname,
-      });
-
-      logger.info(`Media uploaded successfully, URL: ${publicUrl}`);
-      return { url: publicUrl, mediaUrl: publicUrl, publicUrl };
-    } catch (error) {
-      logger.error(`Error uploading media: ${error?.message}`, error?.stack);
-      throw error;
+    if (!file) {
+      throw new BadRequestException('No file provided');
     }
+
+    const publicUrl = await this.storageService.uploadEventMedia(userId, {
+      buffer: file.buffer,
+      mimetype: file.mimetype,
+      originalName: file.originalname,
+    });
+
+    return { url: publicUrl };
   }
 
   @UseGuards(JwtAuthGuard)

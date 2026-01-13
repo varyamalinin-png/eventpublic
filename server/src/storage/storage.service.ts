@@ -121,21 +121,7 @@ export class StorageService {
     const extension = path.extname(originalName) || '.jpg';
     const key = `events/${userId}/${uuid()}${extension}`;
     
-    this.logger.log(`📤 Starting uploadEventMedia: key=${key}, size=${buffer.length} bytes, mimetype=${mimetype}`);
-
-    // КРИТИЧЕСКИ ВАЖНО: Не ждем ensureBucketExists - если bucket уже существует, просто продолжаем
-    // ensureBucketExists может вернуть ошибку 403, но это не критично
     try {
-      this.logger.debug(`Checking bucket exists: ${this.bucket}`);
-      await this.ensureBucketExists();
-      this.logger.debug(`Bucket check passed: ${this.bucket}`);
-    } catch (error: any) {
-      // Игнорируем ошибки проверки bucket - просто продолжаем
-      this.logger.warn(`Bucket check failed, but continuing: ${error?.message || error}`);
-    }
-
-    try {
-      this.logger.log(`📤 Creating Upload instance: bucket=${this.bucket}, key=${key}, size=${buffer.length} bytes`);
       const uploader = new Upload({
         client: this.s3,
         params: {
@@ -143,68 +129,17 @@ export class StorageService {
           Key: key,
           Body: buffer,
           ContentType: mimetype,
-          Metadata: {
-            originalName,
-          },
         },
       });
 
-      this.logger.log(`📤 Starting upload: key=${key}`);
       await uploader.done();
-      this.logger.log(`✅ Event media uploaded successfully: ${key}`);
+      const publicUrl = this.buildPublicUrl(key);
+      this.logger.log(`✅ Event media uploaded: ${publicUrl}`);
+      return publicUrl;
     } catch (error: any) {
-      const statusCode = error?.$metadata?.httpStatusCode || error?.statusCode;
-      const errorCode = error?.Code || error?.code || error?.name || 'Unknown';
-      
-      this.logger.error(`❌ Failed to upload event media: ${errorCode} (${statusCode}) - ${error?.message || error}`);
-      this.logger.error(`❌ Upload details: bucket=${this.bucket}, key=${key}, size=${buffer.length} bytes`);
-      this.logger.error(`❌ Error stack: ${error?.stack || 'No stack trace'}`);
-      
-      // Если это ошибка отсутствия bucket или 403 (нет прав), пытаемся создать bucket и повторить
-      if (this.isMissingBucketError(error) || statusCode === 403) {
-        this.logger.warn(`Bucket "${this.bucket}" issue (${statusCode}/${errorCode}), attempting to create and retry upload...`);
-        this.ensureBucketTask = undefined;
-        try {
-          await this.ensureBucketExists();
-        } catch (ensureError: any) {
-          // Игнорируем ошибки создания bucket - возможно он уже существует
-          this.logger.warn(`Bucket ensure failed, but continuing: ${ensureError?.message || ensureError}`);
-        }
-        
-        // Retry upload
-        this.logger.log(`🔄 Starting retry upload: key=${key}, size=${buffer.length} bytes`);
-        try {
-          const retryUploader = new Upload({
-            client: this.s3,
-            params: {
-              Bucket: this.bucket,
-              Key: key,
-              Body: buffer,
-              ContentType: mimetype,
-              Metadata: {
-                originalName,
-              },
-            },
-          });
-          this.logger.log(`🔄 Retry uploader created, starting upload...`);
-          await retryUploader.done();
-          this.logger.log(`✅ Event media uploaded successfully after retry: ${key}`);
-          return this.buildPublicUrl(key);
-        } catch (retryError: any) {
-          const retryStatusCode = retryError?.$metadata?.httpStatusCode || retryError?.statusCode;
-          const retryErrorCode = retryError?.Code || retryError?.code || retryError?.name || 'Unknown';
-          this.logger.error(`❌ Failed to upload event media after retry: ${retryErrorCode} (${retryStatusCode}) - ${retryError?.message || retryError}`);
-          this.logger.error(`❌ Retry error stack: ${retryError?.stack || 'No stack trace'}`);
-          throw new InternalServerErrorException(`Не удалось загрузить изображение: ${retryError?.message || `Error ${retryStatusCode} (${retryErrorCode})`}`);
-        }
-      } else {
-        throw new InternalServerErrorException(`Не удалось загрузить изображение: ${error?.message || `Error ${statusCode} (${errorCode})`}`);
-      }
+      this.logger.error(`❌ Failed to upload event media: ${error?.message || error}`);
+      throw new InternalServerErrorException(`Не удалось загрузить изображение: ${error?.message || 'Unknown error'}`);
     }
-
-    const publicUrl = this.buildPublicUrl(key);
-    this.logger.log(`✅ Returning public URL: ${publicUrl}`);
-    return publicUrl;
   }
 
   async getSignedUploadUrl(userId: string, contentType: string) {
