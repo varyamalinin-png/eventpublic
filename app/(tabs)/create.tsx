@@ -989,6 +989,7 @@ export default function CreateEventScreen() {
     submittingRef.current = true;
 
     if (!formData.title || !formData.description || !formData.location) {
+      submittingRef.current = false; // КРИТИЧЕСКИ ВАЖНО: Сбрасываем ref при раннем возврате
       Alert.alert(t.createEvent.error, t.createEvent.fillRequiredFields);
       return;
     }
@@ -1001,6 +1002,7 @@ export default function CreateEventScreen() {
     }
 
     if (!currentUserId) {
+      submittingRef.current = false; // КРИТИЧЕСКИ ВАЖНО: Сбрасываем ref при раннем возврате
       Alert.alert('Требуется вход', 'Авторизуйтесь, чтобы создавать события.', [
         { text: 'OK', onPress: () => router.push('/(auth)') },
       ]);
@@ -1012,6 +1014,7 @@ export default function CreateEventScreen() {
     const isBusinessAccount = authUser?.accountType === 'business';
     
     if (maxParticipants > 100 && !isBusinessAccount) {
+      submittingRef.current = false; // КРИТИЧЕСКИ ВАЖНО: Сбрасываем ref при раннем возврате
       Alert.alert(
         'Массовые события недоступны',
         'Для создания событий с более чем 100 участниками требуется бизнес-аккаунт. Пожалуйста, зарегистрируйте бизнес-аккаунт.',
@@ -1312,16 +1315,13 @@ export default function CreateEventScreen() {
         }
         
         if (Platform.OS === 'web') {
-          // КРИТИЧЕСКИ ВАЖНО: На вебе НЕ используем router.push сразу, чтобы не размонтировать компонент
-          // Используем window.location или setTimeout для навигации после завершения всех операций
-          logger.debug('Переход в explore на вебе (с задержкой для завершения синхронизации)');
+          // КРИТИЧЕСКИ ВАЖНО: На вебе НЕ используем window.location.href сразу, так как это перезагружает страницу
+          // и теряет локальное состояние. Используем router.push для навигации БЕЗ перезагрузки страницы
+          logger.debug('Переход в explore на вебе (БЕЗ перезагрузки страницы, чтобы сохранить локальное состояние)');
+          // Даем время на завершение всех операций (syncEventsFromServer уже завершился выше)
           setTimeout(() => {
-            if (typeof window !== 'undefined') {
-              window.location.href = '/explore';
-            } else {
-              router.push('/explore');
-            }
-          }, 500);
+            router.push('/explore');
+          }, 200);
         } else {
           // На мобильных показываем Alert с опциями
           Alert.alert(
