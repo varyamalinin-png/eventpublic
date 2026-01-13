@@ -172,6 +172,7 @@ export class StorageService {
         }
         
         // Retry upload
+        this.logger.log(`🔄 Starting retry upload: key=${key}, size=${buffer.length} bytes`);
         try {
           const retryUploader = new Upload({
             client: this.s3,
@@ -185,13 +186,15 @@ export class StorageService {
               },
             },
           });
+          this.logger.log(`🔄 Retry uploader created, starting upload...`);
           await retryUploader.done();
           this.logger.log(`✅ Event media uploaded successfully after retry: ${key}`);
           return this.buildPublicUrl(key);
         } catch (retryError: any) {
           const retryStatusCode = retryError?.$metadata?.httpStatusCode || retryError?.statusCode;
           const retryErrorCode = retryError?.Code || retryError?.code || retryError?.name || 'Unknown';
-          this.logger.error(`❌ Failed to upload event media after retry: ${retryErrorCode} (${retryStatusCode}) - ${retryError?.message || retryError}`, retryError);
+          this.logger.error(`❌ Failed to upload event media after retry: ${retryErrorCode} (${retryStatusCode}) - ${retryError?.message || retryError}`);
+          this.logger.error(`❌ Retry error stack: ${retryError?.stack || 'No stack trace'}`);
           throw new InternalServerErrorException(`Не удалось загрузить изображение: ${retryError?.message || `Error ${retryStatusCode} (${retryErrorCode})`}`);
         }
       } else {
