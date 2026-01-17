@@ -181,22 +181,6 @@ nav[role="tablist"].web-tab-bar {
   }
 }
 
-/* На десктопе (>=768px) TabBar должен соответствовать ширине контейнера (640px) */
-@media (min-width: 768px) {
-  .desktop-three-column-layout .web-tab-bar,
-  .desktop-three-column-layout nav.web-tab-bar,
-  .desktop-three-column-layout nav[role="tablist"].web-tab-bar {
-    max-width: 640px !important;
-    width: 640px !important;
-    position: fixed !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-    bottom: 0 !important;
-    box-sizing: border-box !important;
-    z-index: 99999 !important;
-    display: flex !important;
-  }
-}
 
 /* На экранах меньше 500px панель занимает всю ширину */
 @media (max-width: 499px) {
@@ -286,41 +270,15 @@ div[style*="aspect-ratio:3/4"] > div {
 /* Теперь изображения в MemoryPost рендерятся через нативный HTML img тег для веба */
 
 
-/* Стили для условного отображения десктопного и мобильного layout */
-/* На десктопе показываем десктопный layout (одноколоночный с ограниченной шириной), скрываем мобильный */
+/* Стили для мобильного layout */
 @media (min-width: 768px) {
-  .desktop-three-column-layout {
-    display: flex !important;
-    justify-content: center !important;
-    align-items: center !important;
-    width: 100% !important;
-    min-height: 100vh !important;
-  }
   .mobile-layout {
-    display: none !important;
-  }
-  
-  /* Убираем старые стили для трехколоночного layout */
-  .desktop-page-container {
-    width: 100% !important;
-    max-width: 100% !important;
-    margin: 0 !important;
-    border: none !important;
-    min-height: auto;
-  }
-  
-  .desktop-page-wrapper {
-    width: 100% !important;
-    max-width: 100% !important;
-    margin: 0 !important;
+    display: flex !important;
   }
 }
 
-/* На мобильных показываем мобильный layout, скрываем десктопный */
+/* На мобильных показываем мобильный layout */
 @media (max-width: 767px) {
-  .desktop-three-column-layout {
-    display: none !important;
-  }
   .mobile-layout {
     display: flex !important;
     flex-direction: column !important;

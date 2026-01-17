@@ -1,7 +1,6 @@
 'use client';
 
 import dynamicImport from 'next/dynamic';
-import DesktopThreeColumnLayout from '../../../components/DesktopThreeColumnLayout';
 import { WebTabBar } from '../../../components/WebTabBar';
 
 const MemoriesScreen = dynamicImport(
@@ -30,13 +29,9 @@ function LoadingScreen() {
 export const dynamic = 'force-dynamic';
 
 export default function MemoriesPage() {
-  // На десктопе показываем DesktopThreeColumnLayout, на мобильных - MemoriesScreen
   return (
     <>
       {/* Десктопный layout - показывается через CSS media queries на экранах >= 768px */}
-      <div className="desktop-three-column-layout" style={{ display: 'none' }}>
-        <DesktopThreeColumnLayout />
-      </div>
       
       {/* Мобильный layout - показывается по умолчанию, скрывается через CSS на десктопе */}
       <div className="mobile-layout">

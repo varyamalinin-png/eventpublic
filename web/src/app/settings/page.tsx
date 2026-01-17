@@ -1,7 +1,6 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import DesktopThreeColumnLayout from '../../components/DesktopThreeColumnLayout';
 
 const SettingsScreen = dynamic(
   () => import('@/client/app/settings').then(mod => ({ default: mod.default })),
@@ -30,9 +29,6 @@ export default function SettingsPage() {
   return (
     <>
       {/* Десктопный layout - показывается через CSS media queries на экранах >= 768px */}
-      <div className="desktop-three-column-layout" style={{ display: 'none' }}>
-        <DesktopThreeColumnLayout />
-      </div>
       
       {/* Мобильный layout - показывается по умолчанию, скрывается через CSS на десктопе */}
       <div className="mobile-layout">
