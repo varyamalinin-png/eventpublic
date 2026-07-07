@@ -1,6 +1,7 @@
-import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, Modal, ScrollView, Alert, InteractionManager, TextInput } from 'react-native';
+import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, Modal, ScrollView, Alert, InteractionManager, TextInput, Platform, useWindowDimensions, StyleProp, ViewStyle } from 'react-native';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { Link, useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -12,11 +13,132 @@ import { formatRecurringEventDate } from '../utils/dateHelpers';
 import { createLogger } from '../utils/logger';
 import { getAllRecurringDates } from '../utils/recurringEventUtils';
 import { eventCardStyles } from './EventCard/EventCard.styles';
+import { LazyImage } from './ui/LazyImage';
 import { useEventCardActions } from '../hooks/events/useEventCardActions';
 import EventCardActionsModal from './EventCard/EventCardActionsModal';
 import EventCardMiniature from './EventCard/EventCardMiniature';
+import { AppIcon, AppIconName } from './ui/AppIcon';
+import { Palette, Radius } from '../constants/DesignSystem';
 
 const logger = createLogger('EventCard');
+
+/** Реальное фото пользователя; пусто / заглушки из API → data-URI SVG. */
+const SWIPE_ICON_MAP: Record<string, AppIconName> = {
+  '✓': 'check',
+  '✕': 'close',
+  '🗑️': 'trash',
+};
+
+function renderCheckbox(checked: boolean | string | null | undefined) {
+  return checked ? (
+    <View style={{ width: 18, height: 18, borderRadius: 5, backgroundColor: Palette.accent, alignItems: 'center', justifyContent: 'center' }}>
+      <AppIcon name="check" size={12} color="#1a0d00" />
+    </View>
+  ) : (
+    <View style={{ width: 18, height: 18, borderRadius: 5, borderWidth: 1.5, borderColor: Palette.line }} />
+  );
+}
+
+function renderSwipeIcon(glyph: string | undefined, color: string = '#f4f4f5') {
+  if (!glyph) return null;
+  const name = SWIPE_ICON_MAP[glyph];
+  if (name) return <AppIcon name={name} size={18} color={color} />;
+  return <Text style={{ fontSize: 18, color }}>{glyph}</Text>;
+}
+
+function organizerAvatarUri(uri: string | undefined): string | null {
+  const u = (uri ?? '').trim();
+  if (!u || u === 'null' || u === 'undefined') return null;
+  if (!/^https?:\/\//i.test(u)) return null;
+  if (u.includes('cdn.jsdelivr.net/gh/identicons')) return null;
+  if (u.includes('ui-avatars.com')) return null;
+  return u;
+}
+
+/** Серый круг с силуэтом — работает в TG/VK WebView, где emoji/Text могут не рисоваться. */
+const ORGANIZER_AVATAR_PLACEHOLDER_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="69" height="69" viewBox="0 0 69 69">' +
+    '<circle cx="34.5" cy="34.5" r="33" fill="#5a5a5a"/>' +
+    '<circle cx="34.5" cy="26.5" r="9.5" fill="#c4c4c4"/>' +
+    '<ellipse cx="34.5" cy="52" rx="15" ry="11" fill="#c4c4c4"/>' +
+    '</svg>',
+)}`;
+
+/** Серый плейсхолдер 16:9 для обложек событий. */
+const EVENT_MEDIA_PLACEHOLDER_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="608" viewBox="0 0 1080 608">' +
+    '<defs>' +
+      '<linearGradient id="g" x1="0" x2="1" y1="0" y2="1">' +
+        '<stop offset="0" stop-color="#2a2a2a"/>' +
+        '<stop offset="1" stop-color="#141414"/>' +
+      '</linearGradient>' +
+    '</defs>' +
+    '<rect width="1080" height="608" rx="24" ry="24" fill="url(#g)"/>' +
+    '<circle cx="540" cy="260" r="72" fill="#3a3a3a"/>' +
+    '<circle cx="540" cy="235" r="28" fill="#8e8e8e"/>' +
+    '<path d="M470 358c18-46 51-68 70-68s52 22 70 68" fill="#8e8e8e"/>' +
+    '<text x="540" y="456" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial" font-size="34" fill="#9a9a9a">no cover</text>' +
+  '</svg>',
+)}`;
+
+const organizerAvatarButtonStyles = StyleSheet.create({
+  frame: {
+    overflow: 'hidden',
+  },
+  image: {
+    width: '100%',
+    height: '100%',
+  },
+});
+
+function OrganizerAvatarButton({
+  remoteUri,
+  onPress,
+  style,
+  imageNativeId,
+}: {
+  remoteUri: string | null;
+  onPress: () => void;
+  style: StyleProp<ViewStyle>;
+  imageNativeId: string;
+}) {
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    setLoadFailed(false);
+  }, [remoteUri]);
+
+  const uri = remoteUri && !loadFailed ? remoteUri : ORGANIZER_AVATAR_PLACEHOLDER_URI;
+
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.88}>
+      <View style={[style, organizerAvatarButtonStyles.frame]}>
+        <Image
+          nativeID={imageNativeId}
+          source={{ uri }}
+          style={organizerAvatarButtonStyles.image}
+          resizeMode="cover"
+          onError={() => {
+            if (remoteUri) setLoadFailed(true);
+          }}
+        />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function useImageFallbackUri(primaryUri: string | undefined, fallbackUri: string) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [primaryUri]);
+
+  return {
+    uri: !primaryUri || failed ? fallbackUri : primaryUri,
+    onError: () => setFailed(true),
+  };
+}
 
 type EventCardProps = {
   id: string;
@@ -49,7 +171,7 @@ type EventCardProps = {
   folderId?: string; // ID папки, в которой находится событие (если есть)
 };
 
-export default function EventCard({
+function EventCard({
   id,
   title,
   description,
@@ -125,15 +247,7 @@ export default function EventCard({
   } = useEvents();
   
   // Получаем событие из контекста
-<<<<<<< HEAD
-  const event = useMemo(() => events.find(e => e.id === id), [events, id]);
-  
-  // Загружаем из профиля события при монтировании
-  const eventProfile = useMemo(() => {
-    const foundEvent = events.find(e => e.id === id);
-    return foundEvent ? getEventProfile(id) : null;
-  }, [events, id, getEventProfile]);
-=======
+
   const event = useMemo(() => {
     return events.find(e => e.id === id);
   }, [events, id]);
@@ -143,16 +257,16 @@ export default function EventCard({
     return eventProfiles.find(p => p.eventId === id) || null;
   }, [eventProfiles, id]);
   
-  // Загружаем профиль события автоматически, если его нет
-  // НЕ загружаем профиль для preview-событий (они временные и не имеют профиля на сервере)
+  // Загружаем профиль события автоматически, если его нет.
+  // НЕ загружаем профиль для preview-событий (они временные и не имеют профиля на сервере).
+  // НЕ загружаем в контексте explore/other_profile — в ленте может быть 20+ карточек,
+  // и каждая порождала бы отдельный HTTP-запрос (N+1). Профиль загрузится,
+  // когда пользователь откроет страницу события.
   const loadingProfileRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    // Загружаем профиль только если:
-    // 1. Событие существует
-    // 2. Профиль еще не загружен
-    // 3. fetchEventProfile доступен
-    // 4. Профиль еще не загружается
-    // 5. Это НЕ preview-событие (временное событие)
+    // В explore и other_profile карточек на экране много — не грузим профили по одному.
+    if (context === 'explore' || context === 'other_profile') return;
+
     const isPreviewEvent = id && (id.includes('-temp') || id.startsWith('preview-'));
     if (event && !eventProfile && fetchEventProfile && id && !loadingProfileRef.current.has(id) && !isPreviewEvent) {
       loadingProfileRef.current.add(id);
@@ -168,8 +282,7 @@ export default function EventCard({
           loadingProfileRef.current.delete(id);
         });
     }
-  }, [event, eventProfile, fetchEventProfile, id]);
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
+  }, [event, eventProfile, fetchEventProfile, id, context]);
   
   const [showParticipants, setShowParticipants] = useState(false);
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
@@ -186,14 +299,12 @@ export default function EventCard({
   const [selectedNewOrganizerId, setSelectedNewOrganizerId] = useState<string | null>(null);
   // Состояние для режима редактирования видимости параметров (только для прошедших событий в меморис)
   const [isEditingParameterVisibility, setIsEditingParameterVisibility] = useState(false);
-<<<<<<< HEAD
-  const [hiddenParameters, setHiddenParameters] = useState<Record<string, boolean>>(
-    (eventProfile as any)?.hiddenParameters || {}
-  );
-=======
+  // Состояние разворачивания описания
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+
   const initialHiddenParameters = useMemo(() => (eventProfile as any)?.hiddenParameters || {}, [eventProfile]);
   const [hiddenParameters, setHiddenParameters] = useState<Record<string, boolean>>(initialHiddenParameters);
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   
   // Синхронизируем скрытые параметры при изменении профиля события
   useEffect(() => {
@@ -202,22 +313,23 @@ export default function EventCard({
     }
   }, [eventProfile]);
   const translateX = useRef(new Animated.Value(0)).current;
+  // Bounce animation for save/bookmark action (Task 2a)
+  const saveScaleAnim = useRef(new Animated.Value(1)).current;
+  const animateSaveBounce = useCallback(() => {
+    Animated.sequence([
+      Animated.spring(saveScaleAnim, { toValue: 1.3, useNativeDriver: true, speed: 50 }),
+      Animated.spring(saveScaleAnim, { toValue: 1, useNativeDriver: true, speed: 30 }),
+    ]).start();
+  }, [saveScaleAnim]);
   const [isJoined, setIsJoined] = useState(false);
   const [showSwipeButtons, setShowSwipeButtons] = useState(false);
   const swipeX = useRef(0); // Отслеживаем текущее значение свайпа
-<<<<<<< HEAD
   
-=======
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   const { t, language } = useLanguage();
   
   // Отладочная информация для тегов
   const allTags = tags && tags.length > 0 ? tags : (event?.tags && event.tags.length > 0 ? event.tags : []);
-<<<<<<< HEAD
-  if (allTags.length > 0 && (typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production')) {
-    logger.debug(`Tags for event ${id}:`, { allTags, tagsProp: tags, eventTags: event?.tags });
-  }
-=======
+
   
   // Явно добавляем метку "массовое" если событие массовое, но тег отсутствует
   // Проверяем как из контекста (event?.isMassEvent), так и из тегов
@@ -233,7 +345,6 @@ export default function EventCard({
     ? [...allTags, 'массовое']
     : allTags;
   
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   
   // Используем новую функцию getUserRelationship для определения отношений
   const relationship = event && currentUserId ? getUserRelationship(event, currentUserId) : 'non_member';
@@ -328,13 +439,13 @@ export default function EventCard({
             secondary: null
           };
         } else {
-          // Передать роль организатора (красная кнопка)
+          // Отменить событие (красная кнопка) - при нажатии покажется попап с transfer organizer role
           return {
             primary: {
-              type: 'transfer_organizer_role',
-              label: t.events.transferOrganizerRole || 'Передать роль организатора',
+              type: 'cancel_event',
+              label: t.events.cancelEvent,
               color: '#FF3B30',
-              icon: '👤'
+              icon: '✕'
             },
             secondary: null
           };
@@ -343,18 +454,12 @@ export default function EventCard({
         // В профиле другого человека (раздел участник) - две кнопки
         // Первая: отменить событие или передать роль (в зависимости от количества участников)
         // Вторая: удалить участника
-        const primaryButton = participantsCount === 1
-          ? {
+        // Всегда показываем кнопку "Отменить событие" - при нажатии покажется попап с transfer organizer role
+        const primaryButton = {
               type: 'cancel_event',
               label: t.events.cancelEvent,
               color: '#FF3B30',
               icon: '✕'
-            }
-          : {
-              type: 'transfer_organizer_role',
-              label: t.events.transferOrganizerRole || 'Передать роль организатора',
-              color: '#FF3B30',
-              icon: '👤'
             };
         
         return {
@@ -379,12 +484,13 @@ export default function EventCard({
             secondary: null
           };
         } else {
+          // Отменить событие (красная кнопка) - при нажатии покажется попап с transfer organizer role
           return {
             primary: {
-              type: 'transfer_organizer_role',
-              label: t.events.transferOrganizerRole || 'Передать роль организатора',
+              type: 'cancel_event',
+              label: t.events.cancelEvent,
               color: '#FF3B30',
-              icon: '👤'
+              icon: '✕'
             },
             secondary: null
           };
@@ -469,7 +575,7 @@ export default function EventCard({
           primary: {
             type: 'go',
             label: 'GO',
-            color: '#8B5CF6',
+            color: '#FF8D32',
             icon: '' // Убираем дублирование, оставляем только label
           },
           secondary: null
@@ -487,9 +593,9 @@ export default function EventCard({
   // ВАЖНО: Если mediaUrl передан напрямую через props, используем его (для карточек событий)
   // Иначе используем getEventPhotoForUser для персонализированных фото (для прошедших событий)
   const displayMediaUrl = mediaUrl || (event ? getEventPhotoForUser(id, currentUserId || '', viewerUserId) : undefined) || (event?.mediaUrl) || organizerAvatar;
-  
-  // Определяем формат медиа: если соотношение > 1.5, то это горизонтальный формат
-  const isWideFormat = mediaAspectRatio > 1.5;
+
+  const { width: windowWidth } = useWindowDimensions();
+  const eventMedia = useImageFallbackUri(displayMediaUrl, EVENT_MEDIA_PLACEHOLDER_URI);
   
   const handlePricePress = () => {
     // Переход на страницу платежки (пока заглушка)
@@ -612,6 +718,37 @@ export default function EventCard({
     }
   };
 
+  // Обработка отмены события с поддержкой веба
+  const handleCancelEvent = useCallback(async (eventId: string) => {
+    try {
+      logger.info('Отмена события:', eventId);
+      await cancelEvent(eventId);
+      
+      // На вебе показываем сообщение через console, так как Alert может не работать
+      if (Platform.OS === 'web') {
+        // На вебе можно обновить страницу или показать уведомление
+        if (typeof window !== 'undefined') {
+          // Опционально: можно добавить toast-уведомление
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        }
+      } else {
+        Alert.alert('Событие отменено', 'Событие было успешно отменено');
+      }
+    } catch (error: any) {
+      logger.error('Ошибка при отмене события:', error);
+      const errorMessage = error?.message || 'Не удалось отменить событие';
+      
+      if (Platform.OS === 'web') {
+        console.error('Ошибка отмены события:', errorMessage);
+        alert(`Ошибка: ${errorMessage}`);
+      } else {
+        Alert.alert('Ошибка', errorMessage);
+      }
+    }
+  }, [cancelEvent]);
+
   // Обработчик действий из модального окна
   const handleActionPress = useCallback((actionId: string) => {
     if (actionId === 'share') {
@@ -651,12 +788,9 @@ export default function EventCard({
         setShowEventActionsModal(false);
       } else {
         // Если участник только организатор, просто отменяем событие
-        cancelEvent(id);
+        handleCancelEvent(id);
         setShowEventActionsModal(false);
       }
-    } else if (actionId === 'transfer_organizer_role') {
-      setShowTransferOrganizerModal(true);
-      setShowEventActionsModal(false);
     } else if (actionId === 'view_requests') {
       router.push('/(tabs)/inbox');
       setShowEventActionsModal(false);
@@ -664,6 +798,9 @@ export default function EventCard({
       const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === id && c.type === 'event');
       if (eventChat) {
         router.push(`/(tabs)/inbox/${eventChat.id}`);
+        setShowEventActionsModal(false);
+      } else {
+        Alert.alert('Ошибка', 'Чат события не найден');
         setShowEventActionsModal(false);
       }
     } else if (actionId === 'schedule') {
@@ -690,11 +827,12 @@ export default function EventCard({
       setIsEditingParameterVisibility(true);
       setShowEventActionsModal(false);
     } else if (actionId === 'save') {
+      animateSaveBounce();
       if (isEventSaved(id)) {
         removeSavedEvent(id);
         Alert.alert('Готово', 'Событие удалено из сохраненных');
       } else {
-        saveEvent(id);
+        saveEvent(id, event);
         Alert.alert('Готово', 'Событие сохранено');
       }
       setShowEventActionsModal(false);
@@ -731,39 +869,78 @@ export default function EventCard({
       setShowAddToFolderModal(true);
       setShowEventActionsModal(false);
     } else if (actionId === 'delete_event') {
-      Alert.alert(
-        t.events.deleteEvent || 'Удалить событие',
-        t.events.deleteEventConfirm || 'Вы уверены, что хотите удалить это событие?',
-        [
-          {
-            text: t.common.cancel || 'Отмена',
-            style: 'cancel',
-            onPress: () => setShowEventActionsModal(false),
-          },
-          {
-            text: t.events.deleteEvent || 'Удалить',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                const event = events.find(e => e.id === id);
-                if (event && isEventPast(event)) {
-                  logger.debug(`Отменяем участие в прошедшем событии ${id} (событие остается для других участников)`);
-                  if (currentUserId) {
-                    await cancelEventParticipation(id, currentUserId);
-                  }
-                  setShowEventActionsModal(false);
-                } else {
-                  await deleteEvent(id);
-                  setShowEventActionsModal(false);
+      // На вебе используем window.confirm, на мобильных - Alert.alert
+      if (Platform.OS === 'web') {
+        const confirmed = window.confirm(t.events.deleteEventConfirm || 'Вы уверены, что хотите удалить это событие?');
+        if (confirmed) {
+          (async () => {
+            try {
+              const event = events.find(e => e.id === id);
+              if (event && isEventPast(event)) {
+                logger.debug(`Отменяем участие в прошедшем событии ${id} (событие остается для других участников)`);
+                if (currentUserId) {
+                  await cancelEventParticipation(id, currentUserId);
                 }
-              } catch (error) {
-                logger.error('Error deleting event:', error);
-                Alert.alert(t.common.error || 'Ошибка', (t.events as any).deleteError || 'Не удалось удалить событие');
+                setShowEventActionsModal(false);
+                // Обновляем страницу на вебе после удаления
+                if (typeof window !== 'undefined') {
+                  setTimeout(() => {
+                    window.location.reload();
+                  }, 500);
+                }
+              } else {
+                await deleteEvent(id);
+                setShowEventActionsModal(false);
+                // Обновляем страницу на вебе после удаления
+                if (typeof window !== 'undefined') {
+                  setTimeout(() => {
+                    window.location.reload();
+                  }, 500);
+                }
               }
+            } catch (error) {
+              logger.error('Error deleting event:', error);
+              alert(t.events.deleteError || 'Не удалось удалить событие');
+            }
+          })();
+        } else {
+          setShowEventActionsModal(false);
+        }
+      } else {
+        Alert.alert(
+          t.events.deleteEvent || 'Удалить событие',
+          t.events.deleteEventConfirm || 'Вы уверены, что хотите удалить это событие?',
+          [
+            {
+              text: t.common.cancel || 'Отмена',
+              style: 'cancel',
+              onPress: () => setShowEventActionsModal(false),
             },
-          },
-        ]
-      );
+            {
+              text: t.events.deleteEvent || 'Удалить',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  const event = events.find(e => e.id === id);
+                  if (event && isEventPast(event)) {
+                    logger.debug(`Отменяем участие в прошедшем событии ${id} (событие остается для других участников)`);
+                    if (currentUserId) {
+                      await cancelEventParticipation(id, currentUserId);
+                    }
+                    setShowEventActionsModal(false);
+                  } else {
+                    await deleteEvent(id);
+                    setShowEventActionsModal(false);
+                  }
+                } catch (error) {
+                  logger.error('Error deleting event:', error);
+                  Alert.alert(t.common.error || 'Ошибка', (t.events as any).deleteError || 'Не удалось удалить событие');
+                }
+              },
+            },
+          ]
+        );
+      }
     } else {
       setShowEventActionsModal(false);
     }
@@ -802,6 +979,7 @@ export default function EventCard({
     setShowRecurringDatesModal,
     setSelectedShareChats,
     setShareSearchQuery,
+    handleCancelEvent,
   ]);
 
   // Обработка изменения фото события (обернута в useCallback для стабильности)
@@ -1002,13 +1180,24 @@ export default function EventCard({
         break;
         
       case 'cancel_event':
-        // Отмена события
-        cancelEvent(id);
-        setShowSwipeButtons(false);
-        Animated.spring(translateX, {
-          toValue: 0,
-          useNativeDriver: true,
-        }).start();
+        // Отмена события - если участников больше 1, показываем попап с transfer organizer role
+        const participantsCount = getEventParticipants(id).length;
+        if (participantsCount > 1) {
+          setShowTransferOrganizerModal(true);
+          setShowSwipeButtons(false);
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        } else {
+          // Если участник только организатор, просто отменяем событие
+          handleCancelEvent(id);
+          setShowSwipeButtons(false);
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        }
         break;
         
       case 'cancel_organizer_participation':
@@ -1149,7 +1338,116 @@ export default function EventCard({
     }, 300);
   };
 
-  const onGestureEvent = Animated.event(
+  // Для веба: обработка touch и mouse событий
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
+  const isDragging = useRef(false);
+  const lastMoveX = useRef<number | null>(null);
+  const lastMoveTime = useRef<number | null>(null);
+  const mouseDown = useRef(false);
+
+  const handleWebTouchStart = useCallback((e: any) => {
+    if (!shouldShowSwipeButtons || Platform.OS !== 'web') return;
+    const touch = e.touches?.[0] || e;
+    touchStartX.current = touch.clientX;
+    touchStartY.current = touch.clientY;
+    lastMoveX.current = touch.clientX;
+    lastMoveTime.current = Date.now();
+    isDragging.current = false;
+    if (!e.touches) {
+      // Это mouse событие
+      mouseDown.current = true;
+    }
+  }, [shouldShowSwipeButtons]);
+
+  const handleWebTouchMove = useCallback((e: any) => {
+    if (!shouldShowSwipeButtons || Platform.OS !== 'web' || touchStartX.current === null) return;
+    
+    // Для mouse событий проверяем, что кнопка мыши нажата
+    if (!e.touches && (!mouseDown.current || e.buttons === 0)) return;
+    
+    const touch = e.touches?.[0] || e;
+    const deltaX = touch.clientX - (touchStartX.current || 0);
+    const deltaY = Math.abs((touch.clientY || 0) - (touchStartY.current || 0));
+    
+    // Проверяем, что это горизонтальный свайп, а не вертикальный скролл
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+      isDragging.current = true;
+      
+      // Обновляем позицию только для свайпа влево
+      if (deltaX < 0) {
+        swipeX.current = deltaX;
+        translateX.setValue(deltaX);
+        
+        // Показываем кнопки если свайпнуто влево более чем на 50px
+        if (deltaX < -50) {
+          setShowSwipeButtons(true);
+        } else {
+          setShowSwipeButtons(false);
+        }
+      }
+    }
+    
+    if (isDragging.current) {
+      lastMoveX.current = touch.clientX;
+      lastMoveTime.current = Date.now();
+    }
+  }, [shouldShowSwipeButtons, translateX]);
+
+  const handleWebTouchEnd = useCallback((e: any) => {
+    if (!shouldShowSwipeButtons || Platform.OS !== 'web') {
+      touchStartX.current = null;
+      touchStartY.current = null;
+      mouseDown.current = false;
+      return;
+    }
+
+    if (touchStartX.current === null) {
+      mouseDown.current = false;
+      return;
+    }
+
+    const touch = e.changedTouches?.[0] || e;
+    const deltaX = (touch.clientX || lastMoveX.current || 0) - (touchStartX.current || 0);
+    const now = Date.now();
+    const timeDelta = lastMoveTime.current ? now - lastMoveTime.current : 0;
+    const velocityX = timeDelta > 0 && lastMoveX.current !== null 
+      ? ((touch.clientX || lastMoveX.current) - lastMoveX.current) / timeDelta * 1000 
+      : 0;
+
+    // Если свайп влево на достаточное расстояние
+    if (deltaX < -100 || (deltaX < -50 && velocityX < -500)) {
+      setShowSwipeButtons(true);
+      // Вычисляем смещение в зависимости от количества кнопок
+      const offset = swipeButtons.secondary ? -240 : -120;
+      Animated.spring(translateX, {
+        toValue: offset,
+        useNativeDriver: true,
+        friction: 8,
+        tension: 40,
+      }).start();
+    } else {
+      // Возвращаем карточку в исходное положение
+      setShowSwipeButtons(false);
+      Animated.spring(translateX, {
+        toValue: 0,
+        useNativeDriver: true,
+        friction: 8,
+        tension: 40,
+      }).start();
+    }
+
+    touchStartX.current = null;
+    touchStartY.current = null;
+    lastMoveX.current = null;
+    lastMoveTime.current = null;
+    isDragging.current = false;
+    mouseDown.current = false;
+  }, [shouldShowSwipeButtons, translateX, swipeButtons]);
+
+  const onGestureEvent = Platform.OS === 'web' ? undefined : Animated.event(
     [{ nativeEvent: { translationX: translateX } }],
     { 
       useNativeDriver: true,
@@ -1166,7 +1464,7 @@ export default function EventCard({
     }
   );
 
-  const onHandlerStateChange = (event: { nativeEvent: { state: number; translationX: number; velocityX: number } }) => {
+  const onHandlerStateChange = Platform.OS === 'web' ? undefined : (event: { nativeEvent: { state: number; translationX: number; velocityX: number } }) => {
     if (event.nativeEvent.state === State.END) {
       const { translationX, velocityX } = event.nativeEvent;
       
@@ -1193,102 +1491,7 @@ export default function EventCard({
   // Для миниатюрных вариантов не показываем свайп
   if (variant !== 'default') {
     return (
-<<<<<<< HEAD
-      <TouchableOpacity onPress={() => {
-        logger.debug('Miniature card clicked', { hasOnMiniaturePress: !!onMiniaturePress, variant });
-        if (onMiniaturePress) {
-          logger.debug('Calling onMiniaturePress');
-          onMiniaturePress();
-        } else {
-          logger.debug('No onMiniaturePress handler');
-          // Для мини-карточек навигация не нужна - они просто открывают модальное окно
-        }
-      }}>
-        <View style={[
-          variant === 'miniature_1' && styles.miniatureCard1,
-          variant === 'miniature_2' && styles.miniatureCard2,
-          variant === 'chat_preview' && styles.chatPreview
-        ]}>
-          {/* Фоновое изображение события */}
-          {(() => {
-            const miniPhoto = event ? (getEventPhotoForUser(id, currentUserId || '', viewerUserId) || event.mediaUrl || organizerAvatar) : (mediaUrl || organizerAvatar);
-            // logger.debug('Mini photo:', { miniPhoto, hasEvent: !!event, mediaUrl, variant });
-            if (!miniPhoto) {
-              logger.debug('No mini photo available, using fallback background');
-              return (
-                <View style={[styles.miniatureBackgroundContainer, { backgroundColor: '#2a2a2a' }]} />
-              );
-            }
-            return (
-              <View style={styles.miniatureBackgroundContainer}>
-                <Image 
-                  source={{ uri: miniPhoto }} 
-                  style={styles.miniatureBackgroundImage}
-                  onError={(error) => {
-                    // Silently handle image loading errors - fallback background will be shown
-                    // Only log in development if needed
-                    if (typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production') {
-                      const errorMsg = error?.nativeEvent?.error || 'Unknown error';
-                      logger.warn('Error loading mini photo', { error: errorMsg, url: miniPhoto });
-                    }
-                  }}
-                />
-                {mediaType === 'video' && (
-                  <View style={styles.miniaturePlayButton}>
-                    <Text style={styles.miniaturePlayIcon}>▶️</Text>
-                  </View>
-                )}
-              </View>
-            );
-          })()}
 
-          {/* Аватарка организатора в правом верхнем углу */}
-          {showOrganizerAvatar && (() => {
-            const organizerData = getUserData(organizerId);
-            return (
-              <View style={styles.miniatureOrganizerAvatarContainer}>
-                <TouchableOpacity
-                  onPress={() => {
-                    if (currentUserId === organizerId) {
-                      router.push('/(tabs)/profile');
-                    } else {
-                      router.push(`/profile/${organizerId}`);
-                    }
-                  }}
-                >
-                  <Image 
-                    source={{ uri: organizerData.avatar }} 
-                    style={styles.miniatureOrganizerAvatar} 
-                  />
-                </TouchableOpacity>
-              </View>
-            );
-          })()}
-
-
-          {/* Участники в правом нижнем углу - используем displayParticipants из getEventParticipants */}
-          {displayParticipants && displayParticipants.length > 0 && (
-            <View style={styles.miniatureParticipantsContainer}>
-              {displayParticipants.slice(0, 3).map((participant, index) => (
-                <Image 
-                  key={participant.userId || index}
-                  source={{ uri: participant.avatar }} 
-                  style={[
-                    styles.miniatureParticipantAvatar,
-                    { marginLeft: index > 0 ? -8 : 0 }
-                  ]} 
-                />
-              ))}
-              {displayParticipants.length > 3 && (
-                <View style={[styles.miniatureParticipantAvatar, styles.miniatureMoreParticipants]}>
-                  <Text style={styles.miniatureMoreText}>+{displayParticipants.length - 3}</Text>
-                </View>
-              )}
-            </View>
-          )}
-        </View>
-      </TouchableOpacity>
-=======
       <EventCardMiniature
         id={id}
         title={title}
@@ -1303,7 +1506,6 @@ export default function EventCard({
         participantsData={displayParticipants}
         viewerUserId={viewerUserId}
       />
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
     );
   }
 
@@ -1326,7 +1528,7 @@ export default function EventCard({
               ]} 
               onPress={handleSecondaryButtonPress}
             >
-              <Text style={styles.swipeButtonIcon}>{swipeButtons.secondary.icon}</Text>
+              {renderSwipeIcon(swipeButtons.secondary.icon)}
               {swipeButtons.secondary.label && (
                 <Text style={styles.swipeButtonLabel}>{swipeButtons.secondary.label}</Text>
               )}
@@ -1341,9 +1543,7 @@ export default function EventCard({
             ]} 
             onPress={handlePrimaryButtonPress}
           >
-            {swipeButtons.primary.icon && (
-              <Text style={styles.swipeButtonIcon}>{swipeButtons.primary.icon}</Text>
-            )}
+            {renderSwipeIcon(swipeButtons.primary.icon)}
             {swipeButtons.primary.label && (
               <Text style={styles.swipeButtonLabel}>{swipeButtons.primary.label}</Text>
             )}
@@ -1352,442 +1552,300 @@ export default function EventCard({
       )}
 
       {/* Карточка с жестом свайпа */}
-      <PanGestureHandler
-        onGestureEvent={onGestureEvent}
-        onHandlerStateChange={onHandlerStateChange}
-        shouldCancelWhenOutside={true}
-        activeOffsetX={[-10, 10]}
-      >
-        <Animated.View 
-          style={[
-            styles.card,
-            { transform: [{ translateX }] }
-          ]}
-          onLayout={(event) => {
-            if (onLayout) {
-              onLayout(event.nativeEvent.layout.height);
-            }
-          }}
-        >
-          {/* Метка "Вас пригласили" - показывается только если пользователь приглашен */}
-          {isInvited && variant === 'default' && (
-            <View style={styles.invitedLabel}>
-              <Text style={styles.invitedLabelText}>Вас пригласили</Text>
-            </View>
-          )}
+      {(() => {
+        const cardContent = (
+          <>
+            {/* Метка "Вас пригласили" - показывается только если пользователь приглашен */}
+            {isInvited && variant === 'default' && (
+              <View style={styles.invitedLabel}>
+                <Text style={styles.invitedLabelText}>Вас пригласили</Text>
+              </View>
+            )}
 
-          {/* Адаптивная структура в зависимости от формата медиа */}
-          {isWideFormat ? (
-            /* Горизонтальный формат: медиа слева, контент справа */
-            (() => {
-              // Вычисляем количество скрытых параметров (без title)
-              const hiddenParamsCount = Object.entries(hiddenParameters)
-                .filter(([key, value]) => key !== 'title' && value === true).length;
-              const photoHeightPercent: string = hiddenParamsCount > 0 
-                ? `${100 + (hiddenParamsCount * 10)}%` 
-                : '100%';
-              
-              return (
-                <View style={styles.horizontalLayout}>
-                  {displayMediaUrl && (
-                    <TouchableOpacity 
-                      style={[
-                        styles.mediaContainerHorizontal,
-                        { height: photoHeightPercent as any }
-                      ]}
-                      onPress={() => {
-                        const originalUrl = originalMediaUrl || event?.originalMediaUrl || displayMediaUrl;
-                        if (originalUrl) {
-                          setShowImageModal(true);
-                        }
-                      }}
-                      activeOpacity={0.9}
-                    >
-                      <Image 
-                        source={{ uri: displayMediaUrl }} 
-                        style={styles.mediaImageHorizontal} 
-                      />
-                      {/* Метки (теги) - поверх фото сверху слева */}
-                      {finalTags.length > 0 && (context !== 'memories' || tagsVisible) && (
-                        <View style={styles.tagsContainerOverlay}>
-                          {finalTags.map((tag, index) => (
-                            <View key={index} style={styles.tagBadge}>
-                              <Text style={styles.tagText}>{tag}</Text>
-                            </View>
-                          ))}
-                        </View>
-                      )}
-                      {mediaType === 'video' && (
-                        <View style={styles.playButton}>
-                          <Text style={styles.playIcon}>▶️</Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  )}
-                  
-                  <View style={styles.contentContainer}>
-                    {/* Название события - всегда видимо, нельзя скрыть */}
-                    <TouchableOpacity onPress={() => {
-                      const url = viewerUserId 
+            {/* Card layout: Full-bleed image card with gradient overlay (Airbnb-style) — universal for all contexts */}
+          {(() => {
+              // === UNIVERSAL CARD: Full-bleed image with gradient overlay ===
+              const organizerData = getUserData(organizerId);
+                const exploreAvatarUrl = organizerAvatarUri(organizerData.avatar);
+                const dateText = (() => {
+                  const targetEvent = event || events.find(e => e.id === id);
+                  return (targetEvent?.isRecurring)
+                    ? formatRecurringEventDate(targetEvent, language || 'ru')
+                    : (displayDate || date || '');
+                })();
+                const TAG_LABELS: Record<string, string> = {
+                  'age_18_plus': '18+',
+                  'age_21_plus': '21+',
+                  'age_16_plus': '16+',
+                  'women_only': 'women only',
+                  'men_only': 'men only',
+                  'recurring': 'recurring',
+                  'starting_soon': 'starting soon',
+                  'массовое': 'массовое',
+                  'регулярное': 'recurring',
+                };
+
+                return (
+                  <TouchableOpacity
+                    nativeID={`event-card-hero-${id}`}
+                    style={[exploreStyles.exploreCardContainer]}
+                    onPress={(e) => {
+                      e?.stopPropagation?.();
+                      const url = viewerUserId
                         ? `/event-profile/${id}?viewerUserId=${viewerUserId}`
                         : `/event-profile/${id}`;
                       router.push(url);
-                    }} style={styles.titleContainer}>
-                      <View style={styles.titleWithPostsContainer}>
-                        <Text style={styles.title} numberOfLines={1}>
-                          {title || 'Название события'}
-                        </Text>
-                        {(() => {
-                          const postsCount = eventProfile?.posts?.length || 0;
-                          return (
-                            <Text style={styles.postsCount}>
-                              {postsCount} {postsCount === 1 ? 'post' : 'posts'}
-                            </Text>
-                          );
-                        })()}
-                      </View>
-                    </TouchableOpacity>
-                    
-                    {renderParameterWithOverlay('description', (
-                      <Text style={styles.description} numberOfLines={3}>
-                        {description || 'Описание события'}
-                      </Text>
-                    ), hiddenParameters.description)}
-                    
-                    {/* Параметры */}
-                    <View style={styles.parametersContainer}>
-                      {renderParameterWithOverlay('price', (
-                        <TouchableOpacity onPress={handlePricePress} style={styles.parameterItem}>
-                          <Text style={styles.parameterEmoji}>💰</Text>
-                          <Text style={styles.parameterText}>{price || '0₽'}</Text>
-                        </TouchableOpacity>
-                      ), hiddenParameters.price)}
-                      
-                      {renderParameterWithOverlay('date', (
-                        <TouchableOpacity onPress={handleDatePress} style={styles.parameterItem}>
-                          <Text style={styles.parameterEmoji}>📅</Text>
-                          <Text style={styles.parameterText}>
-                            {(() => {
-                              const targetEvent = event || events.find(e => e.id === id);
-                              return (targetEvent?.isRecurring)
-                                ? formatRecurringEventDate(targetEvent, language || 'ru')
-                                : (displayDate || date || 'Дата');
-                            })()}
-                          </Text>
-                        </TouchableOpacity>
-                      ), hiddenParameters.date)}
-                      
-                      {renderParameterWithOverlay('time', (
-                        <TouchableOpacity onPress={handleTimePress} style={styles.parameterItem}>
-                          <Text style={styles.parameterEmoji}>🕐</Text>
-                          <Text style={styles.parameterText}>{time || 'Время'}</Text>
-                        </TouchableOpacity>
-                      ), hiddenParameters.time)}
-                      
-                      {renderParameterWithOverlay('location', (
-                        isOnlineEvent ? (
-                          <View style={styles.parameterItem}>
-                            <Text style={styles.parameterEmoji}>📍</Text>
-                            <Text style={styles.parameterText} numberOfLines={1}>Онлайн</Text>
-                          </View>
-                        ) : (
-                          <TouchableOpacity onPress={handleLocationPress} style={styles.parameterItem}>
-                            <Text style={styles.parameterEmoji}>📍</Text>
-                            <Text style={styles.parameterText} numberOfLines={1}>{location || 'Место'}</Text>
-                          </TouchableOpacity>
-                        )
-                      ), hiddenParameters.location)}
-                      
-                      {renderParameterWithOverlay('participants', (
-                        <TouchableOpacity onPress={handleParticipantsPress} style={styles.participantsParameterItem}>
-                          <View style={styles.participantsMiniAvatars}>
-                            {displayParticipants.slice(0, 3).map((participant, index) => (
-                              <Image 
-                                key={index}
-                                source={{ uri: participant.avatar }} 
-                                style={[
-                                  styles.participantMiniAvatar,
-                                  { marginLeft: index > 0 ? -6 : 0 }
-                                ]} 
-                              />
-                            ))}
-                            {displayParticipants.length > 3 && (
-                              <View style={[styles.participantMiniAvatar, styles.participantMoreMini]}>
-                                <Text style={styles.participantMoreMiniText}>+{displayParticipants.length - 3}</Text>
-                              </View>
-                            )}
-                          </View>
-                          <Text style={styles.participantsCountText}>{displayParticipants.length}/{maxParticipants}</Text>
-                        </TouchableOpacity>
-                      ), hiddenParameters.participants)}
-                    </View>
-                    
-                    {/* Динамические аватарки участников */}
-                    {showParticipants && displayParticipants.length > 0 && (
-                      <View style={styles.participantsAvatars}>
-                        {displayParticipants.slice(0, 5).map((participant, index) => (
-                          <TouchableOpacity 
-                            key={index}
-                            onPress={() => handleParticipantPress(participant.userId)}
-                            style={styles.participantAvatarContainer}
-                          >
-                            <Image 
-                              source={{ uri: participant.avatar }} 
-                              style={styles.participantAvatar} 
-                            />
-                            {participant.name && (
-                              <Text style={styles.participantName}>{participant.name}</Text>
-                            )}
-                          </TouchableOpacity>
-                        ))}
-                        {displayParticipants.length > 5 && (
-                          <Text style={styles.moreParticipants}>+{displayParticipants.length - 5}</Text>
-                        )}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              );
-            })()
-          ) : (
-            /* Вертикальный формат: медиа сверху, контент снизу */
-            (() => {
-              // Вычисляем количество скрытых параметров (без title)
-              const hiddenParamsCount = Object.entries(hiddenParameters)
-                .filter(([key, value]) => key !== 'title' && value === true).length;
-              const photoHeight = 160 + (hiddenParamsCount * 20);
-              const contentPaddingTop = photoHeight; // Контент начинается сразу после фото
-              
-              return (
-                <View style={[styles.verticalLayout, { paddingTop: contentPaddingTop }]}>
-                  {displayMediaUrl && (
-                    <TouchableOpacity 
-                      style={[
-                        styles.mediaContainerVertical,
-                        { height: photoHeight }
-                      ]}
-                      onPress={() => {
-                        const originalUrl = originalMediaUrl || event?.originalMediaUrl || displayMediaUrl;
-                        if (originalUrl) {
-                          setShowImageModal(true);
-                        }
-                      }}
-                      activeOpacity={0.9}
-                    >
-                      <Image 
-                        source={{ uri: displayMediaUrl }} 
-                        style={styles.mediaImageVertical} 
+                    }}
+                    activeOpacity={0.9}
+                  >
+                    {/* Image area wrapper — fixed height so absolute children position relative to image */}
+                    <View style={{ aspectRatio: 3/4, position: 'relative', overflow: 'hidden', width: '100%' }}>
+                      {/* Full-bleed image */}
+                      <LazyImage
+                        source={{ uri: eventMedia.uri }}
+                        style={[exploreStyles.exploreImage, StyleSheet.absoluteFillObject]}
+                        onError={eventMedia.onError}
                       />
-                      {/* Метки (теги) - поверх фото сверху слева */}
-                      {finalTags.length > 0 && (context !== 'memories' || tagsVisible) && (
-                        <View style={styles.tagsContainerOverlay}>
-                          {finalTags.map((tag, index) => (
-                            <View key={index} style={styles.tagBadge}>
-                              <Text style={styles.tagText}>{tag}</Text>
+
+                      {/* Organizer avatar + name — top-left */}
+                      <TouchableOpacity
+                        style={[exploreStyles.exploreOrganizerContainer, { position: 'absolute' }]}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          if (currentUserId === organizerId) {
+                            router.push('/(tabs)/profile');
+                          } else {
+                            router.push(`/profile/${organizerId}`);
+                          }
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Image
+                          source={{ uri: exploreAvatarUrl || ORGANIZER_AVATAR_PLACEHOLDER_URI }}
+                          style={exploreStyles.exploreOrganizerAvatar}
+                        />
+                        <Text style={exploreStyles.exploreOrganizerName} numberOfLines={1}>
+                          {organizerData.name || organizerData.username || ''}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {/* Tags/badges + participants — top-right */}
+                      <View style={[exploreStyles.exploreTagsContainer, { position: 'absolute' }]}>
+                        <TouchableOpacity
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            setShowParticipantsModal(true);
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <View style={styles.participantsBadge}>
+                            <View style={styles.participantsMiniAvatarsCard}>
+                              {displayParticipants.slice(0, 3).map((p, index) => (
+                                <Image
+                                  key={p.userId}
+                                  source={{ uri: p.avatar || ORGANIZER_AVATAR_PLACEHOLDER_URI }}
+                                  style={[styles.participantMiniAvatarCard, { marginLeft: index > 0 ? -5 : 0 }]}
+                                />
+                              ))}
+                              {participantsCount > 3 && (
+                                <View style={[styles.participantMiniAvatarCard, styles.participantMoreMiniCard, { marginLeft: -5 }]}>
+                                  <Text style={styles.participantMoreMiniCardText}>+{participantsCount - 3}</Text>
+                                </View>
+                              )}
                             </View>
-                          ))}
+                            <Text style={styles.participantsBadgeText}>
+                              {participantsCount}{maxParticipants > 0 ? `/${maxParticipants}` : ''}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                        {finalTags.map((tag, index) => (
+                          <View key={index} style={styles.tagBadge}>
+                            <Text style={styles.tagText}>{TAG_LABELS[tag] || tag}</Text>
+                          </View>
+                        ))}
+                      </View>
+
+                      {/* Invited label */}
+                      {isInvited && (
+                        <View style={[exploreStyles.exploreInvitedLabel, { position: 'absolute' }]}>
+                          <Text style={styles.invitedLabelText}>Вас пригласили</Text>
                         </View>
                       )}
+
+                      {/* Video play button */}
                       {mediaType === 'video' && (
-                        <View style={styles.playButton}>
+                        <View style={[styles.playButton, { position: 'absolute' }]}>
                           <Text style={styles.playIcon}>▶️</Text>
                         </View>
                       )}
-                    </TouchableOpacity>
-                  )}
-                  
-                  <View style={styles.contentContainer}>
-                    {/* Название события - всегда видимо, нельзя скрыть */}
-                    <TouchableOpacity onPress={() => {
-                      const url = viewerUserId 
-                        ? `/event-profile/${id}?viewerUserId=${viewerUserId}`
-                        : `/event-profile/${id}`;
-                      router.push(url);
-                    }} style={styles.titleContainer}>
-                      <View style={styles.titleWithPostsContainer}>
-                        <Text style={styles.title} numberOfLines={1}>
+
+                      {/* Gradient overlay at bottom */}
+                      <LinearGradient
+                        colors={['transparent', 'rgba(0,0,0,0.75)']}
+                        style={exploreStyles.exploreGradient}
+                      >
+                        {/* Title */}
+                        <Text style={exploreStyles.exploreTitle} numberOfLines={2}>
                           {title || 'Название события'}
                         </Text>
-                        {(() => {
-                          const postsCount = eventProfile?.posts?.length || 0;
-                          return (
-                            <Text style={styles.postsCount}>
-                              {postsCount} {postsCount === 1 ? 'post' : 'posts'}
-                            </Text>
-                          );
-                        })()}
-                      </View>
-                    </TouchableOpacity>
-                    
-                    {renderParameterWithOverlay('description', (
-                      <Text style={styles.description} numberOfLines={2}>
-                        {description || 'Описание события'}
-                      </Text>
-                    ), hiddenParameters.description)}
 
-                    {/* Параметры */}
-                    <View style={styles.parametersContainer}>
-                      {renderParameterWithOverlay('price', (
-                        <TouchableOpacity onPress={handlePricePress} style={styles.parameterItem}>
-                          <Text style={styles.parameterEmoji}>💰</Text>
-                          <Text style={styles.parameterText}>{price || '0₽'}</Text>
-                        </TouchableOpacity>
-                      ), hiddenParameters.price)}
-                      
-                      {renderParameterWithOverlay('date', (
-                        <TouchableOpacity onPress={handleDatePress} style={styles.parameterItem}>
-                          <Text style={styles.parameterEmoji}>📅</Text>
-                          <Text style={styles.parameterText}>
-                            {(() => {
-                              const targetEvent = event || events.find(e => e.id === id);
-                              return (targetEvent?.isRecurring)
-                                ? formatRecurringEventDate(targetEvent, language || 'ru')
-                                : (displayDate || date || 'Дата');
-                            })()}
-                          </Text>
-                        </TouchableOpacity>
-                      ), hiddenParameters.date)}
-                      
-                      {renderParameterWithOverlay('time', (
-                        <TouchableOpacity onPress={handleTimePress} style={styles.parameterItem}>
-                          <Text style={styles.parameterEmoji}>🕐</Text>
-                          <Text style={styles.parameterText}>{time || 'Время'}</Text>
-                        </TouchableOpacity>
-                      ), hiddenParameters.time)}
-                      
-                      {renderParameterWithOverlay('location', (
-                        isOnlineEvent ? (
-                          <View style={styles.parameterItem}>
-                            <Text style={styles.parameterEmoji}>📍</Text>
-                            <Text style={styles.parameterText} numberOfLines={1}>Онлайн</Text>
+                        {/* Date + Location row */}
+                        <View style={exploreStyles.exploreInfoRow}>
+                          {dateText ? (
+                            <View style={exploreStyles.exploreInfoItem}>
+                              <AppIcon name="calendar" size={12} color="rgba(255,255,255,0.8)" />
+                              <Text style={exploreStyles.exploreInfoText} numberOfLines={1}>{dateText}</Text>
+                            </View>
+                          ) : null}
+                          {time ? (
+                            <View style={exploreStyles.exploreInfoItem}>
+                              <AppIcon name="clock" size={12} color="rgba(255,255,255,0.8)" />
+                              <Text style={exploreStyles.exploreInfoText}>{time}</Text>
+                            </View>
+                          ) : null}
+                          <View style={exploreStyles.exploreInfoItem}>
+                            <AppIcon name="pin" size={12} color="rgba(255,255,255,0.8)" />
+                            <Text style={exploreStyles.exploreInfoText} numberOfLines={1}>
+                              {isOnlineEvent ? 'Онлайн' : (location || 'Место')}
+                            </Text>
                           </View>
-                        ) : (
-                          <TouchableOpacity onPress={handleLocationPress} style={styles.parameterItem}>
-                            <Text style={styles.parameterEmoji}>📍</Text>
-                            <Text style={styles.parameterText} numberOfLines={1}>{location || 'Место'}</Text>
-                          </TouchableOpacity>
-                        )
-                      ), hiddenParameters.location)}
-                      
-                      {renderParameterWithOverlay('participants', (
-                        <TouchableOpacity onPress={handleParticipantsPress} style={styles.participantsParameterItem}>
-                          <View style={styles.participantsMiniAvatars}>
-                            {displayParticipants.slice(0, 3).map((participant, index) => (
-                              <Image 
-                                key={index}
-                                source={{ uri: participant.avatar }} 
-                                style={[
-                                  styles.participantMiniAvatar,
-                                  { marginLeft: index > 0 ? -6 : 0 }
-                                ]} 
-                              />
-                            ))}
-                            {displayParticipants.length > 3 && (
-                              <View style={[styles.participantMiniAvatar, styles.participantMoreMini]}>
-                                <Text style={styles.participantMoreMiniText}>+{displayParticipants.length - 3}</Text>
-                              </View>
+                        </View>
+                        {description ? (
+                          <View style={{ marginTop: 8 }}>
+                            <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', lineHeight: 18 }} numberOfLines={descriptionExpanded ? undefined : 2}>
+                              {description}
+                            </Text>
+                            {description.length > 80 && (
+                              <TouchableOpacity onPress={(e) => { e.stopPropagation(); setDescriptionExpanded(!descriptionExpanded); }} activeOpacity={0.7}>
+                                <Text style={{ fontSize: 13, color: '#FF8D32', fontWeight: '600', marginTop: 4 }}>
+                                  {descriptionExpanded ? 'Свернуть' : 'Ещё'}
+                                </Text>
+                              </TouchableOpacity>
                             )}
                           </View>
-                          <Text style={styles.participantsCountText}>{displayParticipants.length}/{maxParticipants}</Text>
-                        </TouchableOpacity>
-                      ), hiddenParameters.participants)}
+                        ) : null}
+                      </LinearGradient>
+
                     </View>
-                    
-                    {/* Динамические аватарки участников */}
-                    {showParticipants && displayParticipants.length > 0 && (
-                      <View style={styles.participantsAvatars}>
-                        {displayParticipants.slice(0, 5).map((participant, index) => (
-                          <TouchableOpacity 
-                            key={index}
-                            onPress={() => handleParticipantPress(participant.userId)}
-                            style={styles.participantAvatarContainer}
-                          >
-                            <Image 
-                              source={{ uri: participant.avatar }} 
-                              style={styles.participantAvatar} 
-                            />
-                            {participant.name && (
-                              <Text style={styles.participantName}>{participant.name}</Text>
-                            )}
-                          </TouchableOpacity>
-                        ))}
-                        {displayParticipants.length > 5 && (
-                          <Text style={styles.moreParticipants}>+{displayParticipants.length - 5}</Text>
-                        )}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              );
-            })()
-          )}
+                  </TouchableOpacity>
+                );
+            })()}
           
-          {/* Три точки для действий с событием - в правом нижнем углу карточки */}
-          {shouldShowThreeDots && (
-            <TouchableOpacity 
-              style={styles.eventActionsButton}
-              onPress={(e) => {
-                e.stopPropagation();
-                logger.debug('Три точки нажаты, открываем модальное окно');
-                setShowEventActionsModal(true);
-              }}
-              activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Text style={styles.eventActionsButtonText}>⋯</Text>
-            </TouchableOpacity>
-          )}
-          
-          {/* Кнопка "Сохранить" в режиме редактирования видимости параметров */}
-          {shouldShowSaveButton && (
-            <TouchableOpacity 
-              style={styles.saveButton}
-              onPress={async (e) => {
-                e.stopPropagation();
-                // Выходим из режима редактирования
-                setIsEditingParameterVisibility(false);
-                // Сохраняем скрытые параметры в профиль события
-                if (event && updateEventProfile) {
-                  try {
-                    await updateEventProfile(id, {
-                      hiddenParameters: hiddenParameters
-                    });
-                  } catch (error) {
-                    logger.error('Failed to save hidden parameters:', error);
+            {/* Три точки для действий с событием.
+                Позиция bottom:15 right:15 = нижний правый угол карточки,
+                не пересекается с медиа-изображением (top:0 h:208) и аватаркой (top-right).
+                Работает на всех платформах. */}
+            {shouldShowThreeDots && (
+              <TouchableOpacity
+                style={styles.eventActionsButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  logger.debug('Три точки нажаты, открываем модальное окно');
+                  setShowEventActionsModal(true);
+                }}
+                activeOpacity={0.7}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <AppIcon name="more" size={18} color={Palette.text} />
+              </TouchableOpacity>
+            )}
+            
+            {/* Кнопка "Сохранить" в режиме редактирования видимости параметров */}
+            {shouldShowSaveButton && (
+              <TouchableOpacity 
+                style={styles.saveButton}
+                onPress={async (e) => {
+                  e.stopPropagation();
+                  // Выходим из режима редактирования
+                  setIsEditingParameterVisibility(false);
+                  // Сохраняем скрытые параметры в профиль события
+                  if (event && updateEventProfile) {
+                    try {
+                      await updateEventProfile(id, {
+                        hiddenParameters: hiddenParameters
+                      });
+                    } catch (error) {
+                      logger.error('Failed to save hidden parameters:', error);
+                    }
                   }
-                }
-              }}
-              activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Text style={styles.saveButtonText}>{t.common.save}</Text>
-            </TouchableOpacity>
-          )}
-        </Animated.View>
-      </PanGestureHandler>
-      
-      {/* Аватарка организатора в правом верхнем углу - вынесена за пределы карточки */}
-      {showOrganizerAvatar && (() => {
-        const organizerData = getUserData(organizerId);
-        return (
-          <View style={styles.organizerAvatarContainer}>
-            <TouchableOpacity
-              onPress={() => {
-                if (currentUserId === organizerId) {
-                  router.push('/(tabs)/profile');
-                } else {
-                  router.push(`/profile/${organizerId}`);
-                }
-              }}
-            >
-              <Image 
-                source={{ uri: organizerData.avatar }} 
-                style={styles.organizerAvatar} 
-                />
-            </TouchableOpacity>
-          </View>
+                }}
+                activeOpacity={0.7}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={styles.saveButtonText}>{t.common.save}</Text>
+              </TouchableOpacity>
+            )}
+          </>
         );
+
+        if (Platform.OS === 'web') {
+          return (
+            <Animated.View
+              style={[
+                styles.card,
+                { transform: [{ translateX }] },
+                { cursor: 'grab', userSelect: 'none' as any }
+              ]}
+              onLayout={(event) => {
+                if (onLayout) {
+                  onLayout(event.nativeEvent.layout.height);
+                }
+              }}
+              onTouchStart={handleWebTouchStart}
+              onTouchMove={handleWebTouchMove}
+              onTouchEnd={handleWebTouchEnd}
+              onMouseDown={(e: any) => {
+                e.preventDefault();
+                handleWebTouchStart(e);
+              }}
+              onMouseMove={(e: any) => {
+                if (mouseDown.current) {
+                  e.preventDefault();
+                  handleWebTouchMove(e);
+                }
+              }}
+              onMouseUp={(e: any) => {
+                if (mouseDown.current) {
+                  e.preventDefault();
+                  handleWebTouchEnd(e);
+                }
+              }}
+              onMouseLeave={(e: any) => {
+                if (mouseDown.current) {
+                  handleWebTouchEnd(e);
+                }
+              }}
+            >
+              {cardContent}
+            </Animated.View>
+          );
+        } else {
+          return (
+            <PanGestureHandler
+              onGestureEvent={onGestureEvent}
+              onHandlerStateChange={onHandlerStateChange}
+              shouldCancelWhenOutside={true}
+              activeOffsetX={[-10, 10]}
+            >
+              <Animated.View 
+                style={[
+                  styles.card,
+                  { transform: [{ translateX }] }
+                ]}
+                onLayout={(event) => {
+                  if (onLayout) {
+                    onLayout(event.nativeEvent.layout.height);
+                  }
+                }}
+              >
+                {cardContent}
+              </Animated.View>
+            </PanGestureHandler>
+          );
+        }
       })()}
+
+      {/* Organizer avatar is now always rendered inside the card */}
 
       {/* Модальное окно с участниками */}
       <ParticipantsModal
@@ -1807,190 +1865,10 @@ export default function EventCard({
       {/* Модальное окно действий с событием */}
       <EventCardActionsModal
         visible={showEventActionsModal}
-<<<<<<< HEAD
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowEventActionsModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity 
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={() => setShowEventActionsModal(false)}
-          />
-          <View style={styles.actionsModalContainer}>
-            <View style={styles.actionsModalHeader}>
-              <Text style={styles.actionsModalTitle}>{t.common.actions}</Text>
-              <TouchableOpacity onPress={() => setShowEventActionsModal(false)}>
-                <Text style={styles.actionsModalClose}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.actionsModalScroll} bounces={false}>
-              {eventActions.map((action, index) => (
-                <TouchableOpacity 
-                  key={action.id}
-                  style={[
-                    styles.actionItem,
-                    index === eventActions.length - 1 && styles.actionItemLast
-                  ]}
-                  onPress={() => {
-                    if (action.id === 'share') {
-                      // Открываем модальное окно для выбора чатов
-                      setSelectedShareChats([]);
-                      setShareSearchQuery('');
-                      setShowShareModal(true);
-                      setShowEventActionsModal(false);
-                    } else if (action.isClickable && action.id === 'change_photo') {
-                      handleChangePhotoFromModal();
-                    } else if (action.isClickable && action.id === 'accept_invite') {
-                      // Переход в календарь в режим preview с кнопкой "Принять приглашение"
-                      const isoDateTime = `${date}T${time}:00`;
-                      const inviteId = inviteRequest?.id;
-                      router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${id}${inviteId ? `&inviteId=${inviteId}` : ''}`);
-                      setShowEventActionsModal(false);
-                    } else if (action.isClickable && action.id === 'cancel_invite') {
-                      // Отклонение приглашения (invited → rejected)
-                      if (inviteRequest) {
-                        rejectInvitation(inviteRequest.id).catch(error => {
-                          logger.error('Ошибка при отклонении приглашения:', error);
-                          Alert.alert(t.common.error, t.events.failedToDeclineInvitation || 'Failed to decline invitation');
-                        });
-                      }
-                      setShowEventActionsModal(false);
-                    } else if (action.id === 'cancel_request') {
-                      // Отмена запроса (waiting → non_member)
-                      if (currentUserId) {
-                        cancelEventRequest(id, currentUserId);
-                      }
-                      setShowEventActionsModal(false);
-                    } else if (action.id === 'cancel_participation') {
-                      // Отмена участия (accepted → non_member)
-                      if (currentUserId) {
-                        cancelEventParticipation(id, currentUserId);
-                      }
-                      setShowEventActionsModal(false);
-                    } else if (action.id === 'cancel_event') {
-                      // Отмена события (organizer, ≤2 участников)
-                      cancelEvent(id);
-                      setShowEventActionsModal(false);
-                    } else if (action.id === 'cancel_organizer_participation') {
-                      // Отмена участия организатора (organizer, >2 участников)
-                      cancelOrganizerParticipation(id);
-                      setShowEventActionsModal(false);
-                    } else if (action.id === 'view_requests') {
-                      // Переход в "Мои запросы"
-                      router.push('/(tabs)/inbox');
-                      setShowEventActionsModal(false);
-                    } else if (action.id === 'schedule') {
-                      // Для регулярных событий показываем модальное окно со списком дат
-                      if (event?.isRecurring) {
-                        setShowRecurringDatesModal(true);
-                        setShowEventActionsModal(false);
-                      } else {
-                        // Переход в календарь для планирования
-                        const isoDateTime = `${date}T${time}:00`;
-                        router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${id}`);
-                        setShowEventActionsModal(false);
-                      }
-                    } else if (action.id === 'extend_recurring') {
-                      // Продление регулярного события - переход на страницу создания с редактированием дат
-                      setShowEventActionsModal(false);
-                      router.push(`/(tabs)/create?eventId=${id}`);
-                    } else if (action.id === 'change_parameters') {
-                      // Изменение параметров события (для организатора)
-                      router.push(`/create?eventId=${id}`);
-                      setShowEventActionsModal(false);
-                    } else if (action.id === 'remove_participant') {
-                      // Удаление участника (для организатора)
-                      if (viewerUserId) {
-                        removeParticipantFromEvent(id, viewerUserId);
-                      }
-                      setShowEventActionsModal(false);
-                    } else if (action.id === 'hide_parameters') {
-                      // Вход в режим редактирования видимости параметров
-                      setIsEditingParameterVisibility(true);
-                      setShowEventActionsModal(false);
-                    } else if (action.id === 'save') {
-                      // Сохранение/удаление события из сохраненных
-                      if (isEventSaved(id)) {
-                        removeSavedEvent(id);
-                        Alert.alert('Готово', 'Событие удалено из сохраненных');
-                      } else {
-                        saveEvent(id);
-                        Alert.alert('Готово', 'Событие сохранено');
-                      }
-                      setShowEventActionsModal(false);
-                    } else if (action.id === 'report') {
-                      // Открываем форму жалобы
-                      setShowEventActionsModal(false);
-                      setShowComplaintForm(true);
-                    } else if (action.id === 'toggle_tags') {
-                      // Переключение видимости меток
-                      setTagsVisible(!tagsVisible);
-                      setShowEventActionsModal(false);
-                    } else if (action.id === 'delete_event') {
-                      // Удаление события
-                      Alert.alert(
-                        t.events.deleteEvent || 'Удалить событие',
-                        t.events.deleteEventConfirm || 'Вы уверены, что хотите удалить это событие?',
-                        [
-                          {
-                            text: t.common.cancel || 'Отмена',
-                            style: 'cancel',
-                            onPress: () => setShowEventActionsModal(false),
-                          },
-                          {
-                            text: t.events.deleteEvent || 'Удалить',
-                            style: 'destructive',
-                            onPress: async () => {
-                              try {
-                                const event = events.find(e => e.id === id);
-                                if (event && isEventPast(event)) {
-                                  // Для прошедших событий (Memories) удаляем локально без API
-                                  // Событие удаляется только для текущего пользователя
-                                  // Для остальных участников карточка и профиль события остаются
-                                  logger.debug(`Удаляем прошедшее событие ${id} локально (только для текущего пользователя)`);
-                                  await deleteEvent(id);
-                                  setShowEventActionsModal(false);
-                                } else {
-                                  // Для будущих событий удаляем полностью через API
-                                  await deleteEvent(id);
-                                  setShowEventActionsModal(false);
-                                }
-                              } catch (error) {
-                                logger.error('Error deleting event:', error);
-                                Alert.alert(t.common.error || 'Ошибка', t.events.deleteError || 'Не удалось удалить событие');
-                              }
-                            },
-                          },
-                        ]
-                      );
-                    } else {
-                      // Для остальных действий пока просто закрываем модальное окно
-                      setShowEventActionsModal(false);
-                    }
-                  }}
-                  activeOpacity={action.isClickable ? 0.7 : 1}
-                  disabled={!action.isClickable}
-                >
-                  <Text style={[
-                    styles.actionItemText,
-                    !action.isClickable && styles.actionItemTextDisabled
-                  ]}>
-                    {action.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-=======
         actions={eventActions}
         onClose={() => setShowEventActionsModal(false)}
         onActionPress={handleActionPressWithPhoto}
       />
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
 
       {/* Модальное окно для выбора чатов и друзей для отправки события */}
       <Modal
@@ -2004,15 +1882,34 @@ export default function EventCard({
             <View style={styles.shareModalHeader}>
               <Text style={styles.shareModalTitle}>{t.events.shareEvent}</Text>
               <TouchableOpacity onPress={() => setShowShareModal(false)}>
-                <Text style={styles.shareModalCloseButton}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.textDim} />
               </TouchableOpacity>
             </View>
             
+            {/* Копировать ссылку */}
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 4, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' }}
+              onPress={async () => {
+                const url = `https://iwent.ru/event-profile/${id}`;
+                try {
+                  const { Share, Platform } = require('react-native');
+                  if (Platform.OS === 'web') {
+                    await navigator.clipboard.writeText(url);
+                  } else {
+                    await Share.share({ message: url, url });
+                  }
+                } catch {}
+              }}
+            >
+              <AppIcon name="link" size={18} color={Palette.accent} />
+              <Text style={{ color: '#f4f4f5', fontSize: 15, fontWeight: '500' }}>Поделиться ссылкой</Text>
+            </TouchableOpacity>
+
             {/* Поле поиска */}
             <TextInput
               style={styles.shareModalSearchInput}
               placeholder={t.events.searchChatsAndFriends}
-              placeholderTextColor="#999"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               value={shareSearchQuery}
               onChangeText={setShareSearchQuery}
             />
@@ -2021,11 +1918,8 @@ export default function EventCard({
             <ScrollView style={styles.shareModalScrollView}>
               {/* Чаты */}
               <Text style={styles.shareModalSectionTitle}>Чаты</Text>
-<<<<<<< HEAD
-              {(currentUserId ? getChatsForUser(currentUserId) : [])
-=======
+
               {getChatsForUser(currentUserId || '')
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
                 .filter(chat => 
                   chat.name.toLowerCase().includes(shareSearchQuery.toLowerCase())
                 )
@@ -2050,7 +1944,7 @@ export default function EventCard({
                             : (() => {
                                 // Для личных чатов: находим аватарку другого участника (не текущего пользователя)
                                 const otherParticipant = chat.participants.find(p => p !== currentUserId);
-                                return otherParticipant ? getUserData(otherParticipant)?.avatar : 'https://randomuser.me/api/portraits/women/22.jpg';
+                                return otherParticipant ? getUserData(otherParticipant)?.avatar : '';
                               })()
                         ) 
                       }}
@@ -2062,9 +1956,7 @@ export default function EventCard({
                         {chat.type === 'event' ? 'Чат события' : 'Личный чат'}
                       </Text>
                     </View>
-                    <Text style={styles.shareModalCheckbox}>
-                      {selectedShareChats.includes(chat.id) ? '☑' : '☐'}
-                    </Text>
+                    {renderCheckbox(selectedShareChats.includes(chat.id))}
                   </TouchableOpacity>
                 ))}
               
@@ -2077,11 +1969,8 @@ export default function EventCard({
                 )
                 .map(friend => {
                   // Находим существующий личный чат
-<<<<<<< HEAD
+
                   const existingChat = currentUserId ? getChatsForUser(currentUserId).find(
-=======
-                  const existingChat = getChatsForUser(currentUserId || '').find(
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
                     chat => chat.type === 'personal' && chat.participants.includes(friend.id)
                   ) : undefined;
                   const chatId = existingChat ? existingChat.id : null;
@@ -2127,9 +2016,7 @@ export default function EventCard({
                         <Text style={styles.shareModalItemName}>{friend.name}</Text>
                         <Text style={styles.shareModalItemSubtext}>@{friend.username}</Text>
                       </View>
-                      <Text style={styles.shareModalCheckbox}>
-                        {isSelected ? '☑' : '☐'}
-                      </Text>
+                      {renderCheckbox(isSelected)}
                     </TouchableOpacity>
                   );
                 })}
@@ -2179,7 +2066,7 @@ export default function EventCard({
                 setShowAddToFolderModal(false);
                 setSelectedFolderIds(new Set());
               }}>
-                <Text style={styles.shareModalCloseButton}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.textDim} />
               </TouchableOpacity>
             </View>
             
@@ -2224,9 +2111,11 @@ export default function EventCard({
                           {isEventInFolder && ' • Уже в папке'}
                         </Text>
                       </View>
-                      <Text style={styles.shareModalCheckbox}>
-                        {isEventInFolder ? '✓' : (isSelected ? '☑' : '☐')}
-                      </Text>
+                      {(isEventInFolder || isSelected) ? (
+                        <AppIcon name="check" size={16} color={Palette.accent} />
+                      ) : (
+                        <View style={{ width: 16, height: 16, borderRadius: 4, borderWidth: 1.5, borderColor: Palette.line }} />
+                      )}
                     </TouchableOpacity>
                   );
                 })
@@ -2279,7 +2168,7 @@ export default function EventCard({
               <TouchableOpacity
                 onPress={() => setShowRecurringDatesModal(false)}
               >
-                <Text style={styles.shareModalCloseButton}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.textDim} />
               </TouchableOpacity>
             </View>
             
@@ -2318,15 +2207,9 @@ export default function EventCard({
                                   return;
                                 }
                                 try {
-<<<<<<< HEAD
-                                  if (currentUserId) {
-                                    await sendEventRequest(id, currentUserId);
-                                    Alert.alert(t.common.success || 'Успешно', t.events.requestSent || 'Запрос отправлен');
-                                  }
-=======
+
                                   await sendEventRequest(id, currentUserId);
                                   Alert.alert(t.common.success || 'Успешно', (t.events as any).requestSent || 'Запрос отправлен');
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
                                 } catch (error) {
                                   logger.error('Failed to send event request', error);
                                   Alert.alert(t.common.error || 'Ошибка', (t.events as any).failedToSendRequest || 'Не удалось отправить запрос');
@@ -2414,43 +2297,13 @@ export default function EventCard({
                   setSelectedNewOrganizerId(null);
                 }}
               >
-                <Text style={styles.shareModalCloseButton}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.textDim} />
               </TouchableOpacity>
             </View>
             
             <Text style={styles.transferOrganizerDescription}>
-              Выберите участника, которому хотите передать роль организатора. После передачи вы больше не будете организатором этого события.
+              Выберите участника, которому хотите передать роль организатора. После передачи вы выйдете из события, а новый организатор будет управлять им.
             </Text>
-            
-            {/* Кнопка для отмены события без передачи роли */}
-            <TouchableOpacity
-              style={[styles.shareModalSendButton, styles.cancelEventButton]}
-              onPress={() => {
-                Alert.alert(
-                  t.events.cancelEvent || 'Отменить событие',
-                  'Вы уверены, что хотите отменить это событие?',
-                  [
-                    {
-                      text: t.common.cancel || 'Отмена',
-                      style: 'cancel'
-                    },
-                    {
-                      text: t.events.cancelEvent || 'Отменить',
-                      style: 'destructive',
-                      onPress: () => {
-                        cancelEvent(id);
-                        setShowTransferOrganizerModal(false);
-                        setSelectedNewOrganizerId(null);
-                      }
-                    }
-                  ]
-                );
-              }}
-            >
-              <Text style={styles.shareModalSendButtonText}>
-                {t.events.cancelEvent || 'Отменить событие'}
-              </Text>
-            </TouchableOpacity>
             
             <ScrollView style={styles.shareModalList}>
               {(() => {
@@ -2482,7 +2335,7 @@ export default function EventCard({
                       onPress={() => setSelectedNewOrganizerId(participantId)}
                     >
                       <Image
-                        source={{ uri: participantData?.avatar || 'https://randomuser.me/api/portraits/women/68.jpg' }}
+                        source={{ uri: participantData?.avatar || '' }}
                         style={styles.shareModalAvatar}
                       />
                       <View style={styles.shareModalItemInfo}>
@@ -2495,9 +2348,7 @@ export default function EventCard({
                           </Text>
                         )}
                       </View>
-                      <View style={styles.shareModalCheckbox}>
-                        <Text style={styles.shareModalCheckboxText}>{isSelected ? '☑' : '☐'}</Text>
-                      </View>
+                      {renderCheckbox(isSelected)}
                     </TouchableOpacity>
                   );
                 });
@@ -2516,31 +2367,42 @@ export default function EventCard({
                   // Вызываем функцию передачи роли организатора
                   if (transferOrganizerRole) {
                     await transferOrganizerRole(id, selectedNewOrganizerId);
-                    Alert.alert(
-                      'Успешно',
-                      'Роль организатора успешно передана',
-                      [
-                        {
-                          text: 'OK',
-                          onPress: () => {
-                            setShowTransferOrganizerModal(false);
-                            setSelectedNewOrganizerId(null);
-                          }
-                        }
-                      ]
-                    );
+                    setShowTransferOrganizerModal(false);
+                    setSelectedNewOrganizerId(null);
+                    
+                    // На вебе обновляем страницу после передачи роли
+                    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                      setTimeout(() => {
+                        window.location.reload();
+                      }, 1000);
+                    }
+                    
+                    // После успешной передачи роли данные обновятся через syncEventsFromServer
+                    // Событие автоматически исчезнет из календаря и списка участников
                   } else {
-                    Alert.alert('Ошибка', 'Функция передачи роли не доступна');
+                    const errorMsg = 'Функция передачи роли не доступна';
+                    if (Platform.OS === 'web') {
+                      console.error(errorMsg);
+                      alert(`Ошибка: ${errorMsg}`);
+                    } else {
+                      Alert.alert('Ошибка', errorMsg);
+                    }
                   }
-                } catch (error) {
+                } catch (error: any) {
                   logger.error('Failed to transfer organizer role', error);
-                  Alert.alert('Ошибка', 'Не удалось передать роль организатора');
+                  const errorMessage = error?.message || error?.body?.message || 'Не удалось передать роль организатора';
+                  if (Platform.OS === 'web') {
+                    console.error('Ошибка передачи роли организатора:', errorMessage);
+                    alert(`Ошибка: ${errorMessage}`);
+                  } else {
+                    Alert.alert('Ошибка', errorMessage);
+                  }
                 }
               }}
               disabled={!selectedNewOrganizerId}
             >
               <Text style={styles.shareModalSendButtonText}>
-                Передать роль
+                Передать роль и выйти из события
               </Text>
             </TouchableOpacity>
           </View>
@@ -2564,7 +2426,7 @@ export default function EventCard({
               style={styles.imageModalCloseButton}
               onPress={() => setShowImageModal(false)}
             >
-              <Text style={styles.imageModalCloseText}>✕</Text>
+              <AppIcon name="close" size={22} color="#fff" />
             </TouchableOpacity>
             {(() => {
               const originalUrl = originalMediaUrl || event?.originalMediaUrl || displayMediaUrl;
@@ -2584,6 +2446,130 @@ export default function EventCard({
   );
 }
 
+// Мемоизируем компонент — не перерисовывается при изменении родительского state,
+// если собственные props не изменились (визуальная скорость экрана explore)
+export default memo(EventCard);
+
+// Styles for explore full-bleed card variant (Airbnb Experiences style)
+const exploreStyles = StyleSheet.create({
+  exploreCardContainer: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    width: '100%',
+    maxWidth: 500,
+    alignSelf: 'center' as const,
+    position: 'relative',
+    backgroundColor: '#141417',
+  },
+  exploreImage: {
+    resizeMode: 'cover',
+  },
+  exploreGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '75%',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+  },
+  exploreTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+    marginBottom: 6,
+  },
+  exploreInfoRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    alignItems: 'center',
+  },
+  exploreInfoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  exploreInfoText: {
+    fontSize: 12.5,
+    color: 'rgba(255,255,255,0.85)',
+    fontWeight: '500',
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  exploreOrganizerContainer: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 20,
+    paddingRight: 10,
+    paddingVertical: 3,
+    paddingLeft: 3,
+    zIndex: 10,
+    maxWidth: '60%',
+  },
+  exploreOrganizerAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  exploreOrganizerName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+    marginLeft: 6,
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+    flexShrink: 1,
+  },
+  exploreTagsContainer: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    zIndex: 10,
+    maxWidth: '35%',
+    justifyContent: 'flex-end',
+  },
+  exploreInvitedLabel: {
+    position: 'absolute',
+    top: 44,
+    left: 10,
+    backgroundColor: '#FF8D32',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    zIndex: 10,
+  },
+  exploreSaveBtn: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+});
+
 // Используем стили из отдельного файла и добавляем стили для модальных окон
 const styles = {
   ...eventCardStyles,
@@ -2596,9 +2582,12 @@ const styles = {
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
+    backgroundColor: '#141417',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
     width: '90%',
+    maxWidth: 460,
     maxHeight: '70%',
     padding: 20,
   },
@@ -2612,24 +2601,24 @@ const styles = {
     marginBottom: 20,
     paddingBottom: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#333333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#f4f4f5',
   },
   closeButton: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   closeButtonText: {
     fontSize: 16,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontWeight: 'bold',
   },
   participantsList: {
@@ -2655,7 +2644,7 @@ const styles = {
   participantModalName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1A1A1A',
+    color: '#f4f4f5',
     marginBottom: 2,
   },
   participantUsername: {
@@ -2667,32 +2656,35 @@ const styles = {
     position: 'absolute',
     bottom: 15,
     right: 15,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    backgroundColor: 'rgba(20, 20, 24, 0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1000,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
     elevation: 10,
-    padding: 8,
   },
   eventActionsButtonText: {
     fontSize: 20,
-    color: '#999999',
+    color: Palette.text,
     fontWeight: 'bold',
   },
   actionsModalContent: {
     // legacy (no longer used)
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#141417',
   },
   actionsModalContainer: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
+    backgroundColor: '#141417',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
     width: '88%',
     maxHeight: '60%',
     paddingHorizontal: 16,
@@ -2705,15 +2697,15 @@ const styles = {
     alignItems: 'center',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   actionsModalTitle: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
   },
   actionsModalClose: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 20,
     fontWeight: 'bold',
   },
@@ -2723,13 +2715,13 @@ const styles = {
   actionItem: {
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   actionItemLast: {
     borderBottomWidth: 0,
   },
   actionItemText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '500',
   },
@@ -2742,14 +2734,14 @@ const styles = {
     position: 'absolute',
     top: 8,
     left: 8,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
     zIndex: 20,
   },
   invitedLabelText: {
-    color: '#FFFFFF',
+    color: '#0A0A0A',
     fontSize: 11,
     fontWeight: '600',
   },
@@ -2758,15 +2750,22 @@ const styles = {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'flex-end',
+    alignItems: 'center',
   },
   shareModalContent: {
-    backgroundColor: '#1a1a1a',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: '#141417',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
     paddingTop: 20,
     paddingBottom: 40,
     paddingHorizontal: 20,
     maxHeight: '80%',
+    width: '100%',
+    maxWidth: 500,
   },
   shareModalHeader: {
     flexDirection: 'row',
@@ -2777,21 +2776,21 @@ const styles = {
   shareModalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#f4f4f5',
   },
   shareModalCloseButton: {
     fontSize: 24,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontWeight: 'bold',
   },
   shareModalSearchInput: {
     borderWidth: 1,
-    borderColor: '#333333',
-    borderRadius: 12,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#2a2a2a',
-    color: '#FFFFFF',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    color: '#f4f4f5',
     marginBottom: 16,
   },
   shareModalScrollView: {
@@ -2800,7 +2799,7 @@ const styles = {
   shareModalSectionTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#999999',
+    color: 'rgba(244,244,245,0.55)',
     marginTop: 16,
     marginBottom: 8,
     textTransform: 'uppercase',
@@ -2817,20 +2816,20 @@ const styles = {
     alignItems: 'center',
   },
   emptyParticipantsText: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
   },
   shareModalItemSelected: {
-    backgroundColor: '#2A2A2A',
-    borderColor: '#8B5CF6',
-    borderWidth: 2,
+    backgroundColor: 'rgba(255,141,50,0.10)',
+    borderColor: '#FF8D32',
+    borderWidth: 1,
   },
   shareModalItem: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#333333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   shareModalAvatar: {
     width: 40,
@@ -2844,11 +2843,11 @@ const styles = {
   shareModalItemName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: '#f4f4f5',
   },
   shareModalItemSubtext: {
     fontSize: 14,
-    color: '#999999',
+    color: 'rgba(244,244,245,0.55)',
     marginTop: 2,
   },
   shareModalCheckbox: {
@@ -2859,10 +2858,10 @@ const styles = {
   },
   shareModalCheckboxText: {
     fontSize: 20,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
   },
   shareModalSendButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -2873,7 +2872,7 @@ const styles = {
     opacity: 0.5,
   },
   shareModalSendButtonText: {
-    color: '#FFFFFF',
+    color: '#0A0A0A',
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -2882,7 +2881,7 @@ const styles = {
     marginBottom: 12,
   },
   shareModalEmptyText: {
-    color: '#999999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     textAlign: 'center',
     padding: 20,
@@ -2896,7 +2895,7 @@ const styles = {
   recurringDatesSectionTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#8B5CF6',
+    color: '#FF8D32',
     marginTop: 16,
     marginBottom: 8,
   },
@@ -2905,25 +2904,27 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
-    backgroundColor: '#2a2a2a',
-    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 14,
     marginBottom: 8,
   },
   recurringDateText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     flex: 1,
   },
   recurringDateTime: {
     fontSize: 14,
-    color: '#999999',
+    color: 'rgba(244,244,245,0.55)',
     marginLeft: 12,
   },
   recurringDateButton: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#8B5CF6',
+    color: '#FF8D32',
     marginLeft: 12,
   },
   recurringDateStatus: {
@@ -2932,13 +2933,13 @@ const styles = {
     marginLeft: 12,
   },
   scheduleAllButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     marginTop: 16,
   },
   scheduleAllButtonText: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#0A0A0A',
     textAlign: 'center',
     flex: 1,
   },
@@ -2967,7 +2968,7 @@ const styles = {
     alignItems: 'center',
   },
   imageModalCloseText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 24,
     fontWeight: 'bold',
   },
@@ -2979,14 +2980,14 @@ const styles = {
     position: 'absolute',
     bottom: 12,
     right: 12,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
     zIndex: 10,
   },
   saveButtonText: {
-    color: '#FFFFFF',
+    color: '#0A0A0A',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -3013,20 +3014,28 @@ const styles = {
   },
   titleContainer: {
     marginBottom: 8,
-    backgroundColor: '#2a2a2a',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 12,
     alignSelf: 'flex-start',
+    maxWidth: '95%',
+  },
+  titleText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#f4f4f5',
+    flexShrink: 1,
   },
   titleWithPostsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    maxWidth: '100%',
   },
   postsCount: {
     fontSize: 11,
-    color: '#AAAAAA',
+    color: 'rgba(244,244,245,0.55)',
     fontStyle: 'italic',
   },
   hiddenElement: {
@@ -3051,15 +3060,52 @@ const styles = {
   tagBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
-    backgroundColor: '#2A1A3A',
+    backgroundColor: 'rgba(26, 26, 26, 0.65)',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#8B5CF6',
+    borderColor: 'rgba(255, 255, 255, 0.85)',
   },
   tagText: {
     fontSize: 12,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontWeight: '500',
+  },
+  participantsBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  participantsBadgeText: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '600',
+  },
+  participantsMiniAvatarsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  participantMiniAvatarCard: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  participantMoreMiniCard: {
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  participantMoreMiniCardText: {
+    color: '#f4f4f5',
+    fontSize: 7,
+    fontWeight: 'bold',
   },
   }),
 };

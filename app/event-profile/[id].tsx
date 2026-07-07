@@ -1,5 +1,7 @@
-import { View, Text, ScrollView, TouchableOpacity, Image, Modal, TextInput, Alert, Dimensions } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { View, Text, ScrollView, TouchableOpacity, Image, Modal, TextInput, Alert, Dimensions, Platform, StyleSheet } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useLocalSearchParams } from 'expo-router';
+import { useSafeRouter } from '../../utils/safeRouter';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useEvents } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
@@ -9,17 +11,49 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { Audio } from 'expo-av';
 import MemoryPost from '../../components/MemoryPost';
 import ParticipantsModal from '../../components/ParticipantsModal';
+import ComplaintForm from '../../components/ComplaintForm';
 import { createLogger } from '../../utils/logger';
 import { API_BASE_URL } from '../../services/api';
 import type { EventProfilePost } from '../../types/EventProfile';
-import { eventProfileStyles } from './[id].styles';
+import { eventProfileStyles } from '../../styles/event-profile.styles';
+import { AppIcon } from '../../components/ui/AppIcon';
+import { Palette } from '../../constants/DesignSystem';
 
 const logger = createLogger('EventProfile');
-const styles = eventProfileStyles;
+const styles = eventProfileStyles || StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0a0a0c',
+  },
+  content: {
+    flex: 1,
+  },
+  backButtonFixed: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 20,
+  },
+  backText: {
+    color: '#f4f4f5',
+    fontSize: 24,
+  },
+});
 
 export default function EventProfileScreen() {
   const { id, viewerUserId } = useLocalSearchParams();
-  const router = useRouter();
+  const router = useSafeRouter();
+  
+  // Функция навигации для передачи в MemoryPost
+  const handleNavigate = (path: string) => {
+    router.push(path);
+  };
   const { t } = useLanguage();
   const { 
     events,
@@ -51,7 +85,8 @@ export default function EventProfileScreen() {
     removeParticipantFromEvent,
     respondToEventRequest,
     fetchEventProfile,
-    getChatsForUser
+    getChatsForUser,
+    transferOrganizerRole
   } = useEvents();
   const { user: authUser, accessToken } = useAuth();
   const currentUserId = authUser?.id ?? null;
@@ -74,8 +109,11 @@ export default function EventProfileScreen() {
   
   // Состояния для действий с событием
   const [showEventActionsModal, setShowEventActionsModal] = useState(false);
+  const [showComplaintForm, setShowComplaintForm] = useState(false);
   const [isEditingParameterVisibility, setIsEditingParameterVisibility] = useState(false);
   const [localHiddenParameters, setLocalHiddenParameters] = useState<Record<string, boolean>>(hiddenParameters);
+  const [showTransferOrganizerModal, setShowTransferOrganizerModal] = useState(false);
+  const [selectedNewOrganizerId, setSelectedNewOrganizerId] = useState<string | null>(null);
   
   // Синхронизируем скрытые параметры с профилем (только если действительно изменились значения)
   useEffect(() => {
@@ -96,7 +134,7 @@ export default function EventProfileScreen() {
   const [musicTitle, setMusicTitle] = useState('');
   const [musicArtist, setMusicArtist] = useState('');
   const [contentCaption, setContentCaption] = useState('');
-  const [selectedPhotos, setSelectedPhotos] = useState<Array<{ uri: string; index: number; id: string; caption?: string }>>([]);
+  const [selectedPhotos, setSelectedPhotos] = useState<Array<{ uri: string; index: number; id: string; caption?: string; file?: File }>>([]);
   const [isUploadingPhotos, setIsUploadingPhotos] = useState(false);
   const [combineIntoOnePost, setCombineIntoOnePost] = useState(false); // Чекбокс "объединить в один пост"
   
@@ -123,20 +161,32 @@ export default function EventProfileScreen() {
 
   // Загружаем профиль события с сервера (доступен всем для просмотра)
   useEffect(() => {
-    if (!eventProfile && eventId && event && !attemptedProfiles.current.has(eventId)) {
+    // ВАЖНО: пробуем загрузить профиль даже если базовое событие ещё не в состоянии events.
+    // Это нужно для прямых переходов по ссылке /event-profile/[id] (в том числе из браузера/на телефоне).
+    if (!eventProfile && eventId && !attemptedProfiles.current.has(eventId)) {
       attemptedProfiles.current.add(eventId);
       // Пытаемся загрузить профиль с сервера
       // Профиль доступен всем для просмотра, редактирование доступно только участникам
-      fetchEventProfile(eventId).then((profile) => {
+      const loadProfile = async () => {
+        try {
+          logger.debug(`Загружаем профиль события ${eventId}`);
+          const profile = await fetchEventProfile(eventId);
         if (!profile) {
           logger.debug('Профиль события не найден');
+          } else {
+            logger.debug(`Профиль события ${eventId} загружен, постов: ${profile.posts?.length || 0}`);
         }
+        } catch (error) {
+          logger.error('Ошибка при загрузке профиля события:', error);
+        } finally {
         attemptedProfiles.current.delete(eventId);
-      }).catch(() => {
-        attemptedProfiles.current.delete(eventId);
-      });
+        }
+      };
+      loadProfile();
     }
-  }, [eventId, eventProfile, event, fetchEventProfile]);
+    // fetchEventProfile стабилен (useCallback), но для безопасности оставляем его в зависимостях
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId, event?.id]); // Используем только eventId и event.id для предотвращения множественных вызовов
 
   // Обновляем данные события (включая персональные фото) при открытии профиля
   useEffect(() => {
@@ -158,7 +208,9 @@ export default function EventProfileScreen() {
   // Получаем обновленный профиль события после создания
   const currentEventProfile = getEventProfile(eventId);
 
-  // Используем данные из события как fallback, если профиля еще нет
+  // Используем данные из события как fallback, если профиля еще нет.
+  // ВАЖНО: даже если события нет в состоянии events (например, при прямом заходе по ссылке),
+  // создаём минимальный "заглушечный" профиль, чтобы не залипать навсегда на экране загрузки.
   const displayProfile = currentEventProfile || (event ? {
     id: `profile-${eventId}`,
     eventId,
@@ -173,12 +225,35 @@ export default function EventProfileScreen() {
     posts: [],
     createdAt: new Date(),
     avatar: event.mediaUrl,
-  } : null);
+  } : (eventId ? {
+    id: `profile-${eventId}`,
+    eventId,
+    name: '',
+    description: '',
+    date: '',
+    time: '',
+    location: '',
+    participants: [],
+    organizerId: '',
+    isCompleted: false,
+    posts: [],
+    createdAt: new Date(),
+    avatar: undefined,
+  } : null));
 
   // Профиль события доступен всем для просмотра
   // Редактирование доступно только участникам (проверяется через canEditEventProfile)
-  if (!displayProfile || !event) {
-    return null;
+  // ВАЖНО: показываем экран, как только есть displayProfile, даже если объекта event ещё нет в состоянии.
+  // Это позволяет открывать страницу по прямой ссылке, когда событие не подгружено в общий список events.
+  if (!displayProfile) {
+    // Показываем loading состояние вместо null, чтобы избежать черного экрана
+    return (
+      <View style={styles.container}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0a0a0c' }}>
+          <Text style={{ color: '#FF8D32', fontSize: 16 }}>Загрузка события...</Text>
+        </View>
+      </View>
+    );
   }
 
   const participants = getEventParticipants(eventId);
@@ -211,13 +286,8 @@ export default function EventProfileScreen() {
       if (relationship === 'invited') {
         actions.push({ id: 'accept_invite', label: t.events.acceptInvitation, isClickable: true });
         actions.push({ id: 'cancel_invite', label: t.events.cancelInvitation, isClickable: true });
-        // Опция "go to chat" - активна только если пользователь является участником (accepted или organizer)
-          const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
-        if (eventChat && (relationship === 'accepted' || relationship === 'organizer')) {
-            actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: true });
-        } else {
+        // Опция "go to chat" - неактивна для приглашенных пользователей
           actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: false });
-        }
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });
         actions.push({ id: 'report', label: t.events.report, isClickable: true });
@@ -226,13 +296,8 @@ export default function EventProfileScreen() {
       else if (relationship === 'waiting') {
         actions.push({ id: 'view_requests', label: t.events.viewRequests, isClickable: true });
         actions.push({ id: 'cancel_request', label: t.events.cancelRequest, isClickable: true });
-        // Опция "go to chat" - активна только если пользователь является участником (accepted или organizer)
-          const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
-        if (eventChat && (relationship === 'accepted' || relationship === 'organizer')) {
-            actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: true });
-        } else {
+        // Опция "go to chat" - неактивна для пользователей в ожидании
           actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: false });
-        }
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });
         actions.push({ id: 'report', label: t.events.report, isClickable: true });
@@ -240,13 +305,9 @@ export default function EventProfileScreen() {
       // ПРИОРИТЕТ 3: Участник (accepted)
       else if (relationship === 'accepted') {
         actions.push({ id: 'cancel_participation', label: t.events.cancelParticipation });
-        // Опция "go to chat" - активна только если пользователь является участником (accepted или organizer)
+        // Опция "go to chat" - активна для принятых участников
           const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
-        if (eventChat && (relationship === 'accepted' || relationship === 'organizer')) {
-            actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: true });
-        } else {
-          actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: false });
-        }
+        actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: !!eventChat });
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });
         actions.push({ id: 'report', label: t.events.report, isClickable: true });
@@ -254,23 +315,16 @@ export default function EventProfileScreen() {
       // ПРИОРИТЕТ 4: Организатор (organizer)
       else if (relationship === 'organizer') {
         actions.push({ id: 'change_parameters', label: t.events.changeParameters, isClickable: true });
-        if (participantsCount === 1) {
+        // Всегда показываем кнопку "Отменить событие" - при нажатии покажется попап с transfer organizer role
           actions.push({ id: 'cancel_event', label: t.events.cancelEvent, isClickable: true });
-        } else {
-          actions.push({ id: 'transfer_organizer_role', label: t.events.transferOrganizerRole || 'Передать роль организатора', isClickable: true });
-        }
         // Действие "продлить" для регулярных событий
         if (event.isRecurring) {
           actions.push({ id: 'extend_recurring', label: t.events.extendRecurring || 'Продлить', isClickable: true });
         }
         actions.push({ id: 'remove_participant', label: t.events.removeParticipant, isClickable: true });
-        // Опция "go to chat" - активна только если пользователь является участником (accepted или organizer)
+        // Опция "go to chat" - активна для принятых участников
           const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === eventId && c.type === 'event');
-        if (eventChat && (relationship === 'accepted' || relationship === 'organizer')) {
-            actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: true });
-        } else {
-          actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: false });
-        }
+        actions.push({ id: 'go_to_chat', label: 'Go to chat', isClickable: !!eventChat });
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: isEventSaved(eventId) ? t.eventProfile.removeFromSaved : t.eventProfile.save, isClickable: true });
       }
@@ -329,7 +383,7 @@ export default function EventProfileScreen() {
           onPress={() => toggleParameterVisibility(parameterName)}
           activeOpacity={0.7}
         >
-          <Text style={styles.eyeIcon}>{isHidden ? '👁️‍🗨️' : '👁️'}</Text>
+          <AppIcon name={isHidden ? 'eye' : 'eye'} size={18} color={isHidden ? 'rgba(244,244,245,0.3)' : Palette.accent} />
         </TouchableOpacity>
       </View>
     );
@@ -378,6 +432,52 @@ export default function EventProfileScreen() {
     }
 
     try {
+      if (Platform.OS === 'web') {
+        // Для веба используем input type="file" с множественным выбором
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.multiple = true; // Разрешаем выбор нескольких файлов
+        input.onchange = async (event) => {
+          const files = (event.target as HTMLInputElement).files;
+          if (files && files.length > 0) {
+            const fileArray = Array.from(files);
+            const currentPhotoCount = selectedPhotos.length;
+            
+            // Обрабатываем каждый файл
+            const photosWithIndex = await Promise.all(
+              fileArray.map(async (file, index) => {
+                // Создаем data URL для превью
+                const uri = await new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onload = (e) => {
+                    resolve(e.target?.result as string);
+                  };
+                  reader.onerror = reject;
+                  reader.readAsDataURL(file);
+                });
+                
+                return {
+                  uri,
+                  index: currentPhotoCount + index + 1,
+                  id: `${file.name}-${Date.now()}-${index}`,
+                  file, // Сохраняем File объект для загрузки на вебе
+                };
+              })
+            );
+            
+            setSelectedPhotos(prev => {
+              const updated = [...prev, ...photosWithIndex];
+              // Пересчитываем индексы для всех фото
+              return updated.map((p, i) => ({ ...p, index: i + 1 }));
+            });
+          }
+        };
+        input.click();
+        return;
+      }
+
+      // Для нативных платформ используем expo-image-picker
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'images' as any,
         allowsMultipleSelection: true,
@@ -395,12 +495,18 @@ export default function EventProfileScreen() {
         setSelectedPhotos(prev => [...prev, ...photosWithIndex]);
       }
     } catch (error) {
+      logger.error('Failed to pick photos:', error);
       Alert.alert('Ошибка', 'Не удалось выбрать фото');
     }
   };
 
   // Функция для сжатия фото перед загрузкой
-  const compressPhoto = async (uri: string): Promise<string> => {
+  const compressPhoto = async (uri: string, file?: File): Promise<string | File> => {
+    if (Platform.OS === 'web' && file) {
+      // На вебе используем File объект напрямую (браузер сам обработает)
+      return file;
+    }
+    
     try {
       // Сжимаем изображение: максимум 1200px по ширине, качество 0.75
       const manipResult = await ImageManipulator.manipulateAsync(
@@ -446,12 +552,16 @@ export default function EventProfileScreen() {
           
           for (const photo of sortedPhotos) {
             try {
-              // Сжимаем фото перед загрузкой
-              const compressedUri = await compressPhoto(photo.uri);
-              
               // Загружаем фото через FormData и получаем URL
               // ВАЖНО: создаем временный пост только для получения URL
               const formData = new FormData();
+              
+              if (Platform.OS === 'web' && photo.file) {
+                // На вебе используем File объект напрямую
+                formData.append('file', photo.file);
+              } else {
+                // Для мобильных платформ сжимаем фото перед загрузкой
+                const compressedUri = await compressPhoto(photo.uri) as string;
               const filename = compressedUri.split('/').pop() || 'photo.jpg';
               const match = /\.(\w+)$/.exec(filename);
               const type = match ? `image/${match[1]}` : 'image/jpeg';
@@ -461,6 +571,7 @@ export default function EventProfileScreen() {
                 name: filename,
                 type: type,
               } as any);
+              }
               
               // Используем токен из useAuth (уже определен в компоненте)
               if (!accessToken) {
@@ -549,6 +660,9 @@ export default function EventProfileScreen() {
               temporaryPostIds: temporaryPostIds,
             });
             
+            // После успешного создания поста НЕ вызываем fetchEventProfile автоматически
+            // чтобы избежать дублирования - пост уже добавлен в локальный state через addEventProfilePost
+            
             // Удаляем временные посты, которые были созданы при загрузке файлов
             // ВАЖНО: удаляем только если финальный пост успешно создан И имеет photoUrls
             if (finalPostTyped && Array.isArray((finalPostTyped as any).photoUrls) && (finalPostTyped as any).photoUrls.length > 0) {
@@ -594,14 +708,28 @@ export default function EventProfileScreen() {
         // Если не объединяем - создаем отдельные посты для каждого фото
         for (const photo of sortedPhotos) {
           try {
-            // Сжимаем фото перед загрузкой для предотвращения ошибки 413
-            const compressedUri = await compressPhoto(photo.uri);
+            let photoUrl: string;
+            
+            // ВАЖНО: Используем только addEventProfilePost для создания поста
+            // НЕ делаем прямой запрос к API, чтобы избежать дублирования
+            if (Platform.OS === 'web' && photo.file) {
+              // На вебе создаем File объект для передачи в addEventProfilePost
+              // addEventProfilePost сам обработает загрузку через FormData
+              await addEventProfilePost(eventId, {
+                authorId: currentUserId,
+                content: photo.caption || `Фото ${photo.index} с события!`,
+                photoUrl: photo.file as any, // Передаем File объект напрямую
+              });
+            } else {
+              // Для мобильных платформ сжимаем фото перед загрузкой
+              const compressedUri = await compressPhoto(photo.uri) as string;
             
             await addEventProfilePost(eventId, {
               authorId: currentUserId,
               content: photo.caption || `Фото ${photo.index} с события!`,
               photoUrl: compressedUri, // Используем сжатое фото
             });
+            }
             successfulUploads.push(photo.id);
             
             // Увеличиваем задержку между загрузками для предотвращения перегрузки сервера
@@ -702,14 +830,14 @@ export default function EventProfileScreen() {
           id: 1,
           title: `${query} - Remix`,
           user: { username: 'DJ Artist' },
-          artwork_url: 'https://via.placeholder.com/300x300/FF6B6B/fff?text=🎵',
+          artwork_url: '',
           stream_url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'
         },
         {
           id: 2,
           title: `${query} - Original Mix`,
           user: { username: 'Producer Name' },
-          artwork_url: 'https://via.placeholder.com/300x300/4ECDC4/fff?text=🎶',
+          artwork_url: '',
           stream_url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3'
         },
         {
@@ -867,16 +995,31 @@ export default function EventProfileScreen() {
       );
     }
 
-    const SCREEN_WIDTH = Dimensions.get('window').width;
+    // Для веб-версии используем ограниченную ширину контейнера (500px), для мобильных - полную ширину экрана
+    const getContainerWidth = () => {
+      const screenWidth = Dimensions.get('window').width;
+      if (Platform.OS === 'web') {
+        return Math.min(screenWidth, 500);
+      }
+      return screenWidth;
+    };
+    const containerWidth = getContainerWidth();
     const containerPadding = 0; // Нет отступов от краев
-    const gap = 0; // Нет отступов между карточками
-    const dividerWidth = 1; // Тонкая полоска между карточками
-    const availableWidth = SCREEN_WIDTH - containerPadding;
-    const cardWidth = (availableWidth - dividerWidth * 2) / 3; // 3 колонки с 2 разделителями
+    const dividerWidth = 1; // Тонкая полоска между карточками (визуальный разделитель)
+    const availableWidth = containerWidth - containerPadding;
+    // Расчет ширины карточки: точно как в профиле пользователя
+    // Делим доступную ширину на 3, вычитая 2 разделителя (между 3 колонками)
+    // Важно: разделители занимают место, поэтому вычитаем их из доступной ширины
+    // Расчет ширины: точно как в профиле пользователя
+    // Делим доступную ширину на 3, вычитая 2 разделителя (между 3 колонками)
+    // Используем Math.floor для точного деления без дробей
+    const cardWidth = Math.floor((availableWidth - dividerWidth * 2) / 3); // 3 колонки с 2 разделителями
     const cardHeight = cardWidth * (4 / 3); // Высота для формата 3x4 (4/3 соотношение)
+    
+    // Логирование для отладки (всегда, не только в dev)
 
     return (
-      <View style={styles.postsGrid}>
+      <View style={[styles.postsGrid, { maxWidth: containerWidth, width: containerWidth }]}>
         {displayProfile.posts.map((post, index) => {
           const isLastInRow = (index + 1) % 3 === 0;
           const showRightDivider = !isLastInRow;
@@ -886,7 +1029,14 @@ export default function EventProfileScreen() {
               key={post.id} 
               style={[
                 styles.postItem,
-                { width: cardWidth },
+                { 
+                  width: cardWidth, 
+                  maxWidth: cardWidth, 
+                  minWidth: cardWidth,
+                  flexBasis: cardWidth,
+                  flexShrink: 0,
+                  flexGrow: 0,
+                },
                 showRightDivider && styles.postItemWithRightDivider
               ]}
               onPress={() => handlePostPress(post)}
@@ -916,7 +1066,7 @@ export default function EventProfileScreen() {
                     />
                   ) : (
                     <View style={styles.musicPlaceholder}>
-                      <Text style={styles.musicIcon}>🎵</Text>
+                      <AppIcon name="heart" size={16} color="rgba(244,244,245,0.5)" />
                     </View>
                   )}
                   {currentPlayingTrack === post.id ? (
@@ -965,185 +1115,174 @@ export default function EventProfileScreen() {
         nestedScrollEnabled={true}
         removeClippedSubviews={false}
       >
-        {/* Event Info */}
-        {/* Аватар события - от края до края */}
-        {(() => {
+        {/* Card-style header — same layout as EventCard */}
+        {event && (() => {
           const effectiveViewerUserId = viewerUserId ? (Array.isArray(viewerUserId) ? viewerUserId[0] : viewerUserId) : undefined;
-          const canChangePhoto = event && currentUserId && isEventPast(event) && isUserEventMember(event, currentUserId);
-          const displayPhoto = event
-            ? getEventPhotoForUser(event.id, currentUserId ?? '', effectiveViewerUserId, true) // true = использовать оригинальное фото
-            : undefined;
-          
-          // Вычисляем высоту фото на основе aspectRatio
-          const screenWidth = Dimensions.get('window').width;
-          let calculatedHeight = screenWidth; // По умолчанию квадрат
-          
-          if (event?.mediaAspectRatio) {
-            // mediaAspectRatio = ширина / высота
-            // height = width / aspectRatio
-            calculatedHeight = screenWidth / event.mediaAspectRatio;
-          } else if (displayPhoto) {
-            // Если aspectRatio не указан, пытаемся определить из оригинального фото
-            // Используем дефолтное значение (квадрат) если не можем определить
-            calculatedHeight = screenWidth;
-          }
-          
-          // Используем вычисленную высоту без ограничений - шапка подстраивается под размер фото
-          const finalHeight = calculatedHeight;
-          
-          return displayPhoto && (
-            <TouchableOpacity 
-              style={[styles.eventAvatarContainer, { height: finalHeight }]}
-              onLayout={(event) => {
-                const { height } = event.nativeEvent.layout;
-                setPhotoHeight(height);
-              }}
-              onPress={() => {
-                setFullImageUrl(event.originalMediaUrl || event.mediaUrl || displayPhoto);
-                setShowImageModal(true);
-              }}
-              activeOpacity={0.9}
-            >
-              <Image 
-                source={{ uri: displayPhoto }} 
-                style={styles.eventAvatar}
-                resizeMode="cover"
-              />
-            </TouchableOpacity>
-          );
-        })()}
-        
-        <View style={styles.eventInfo}>
-          {/* Название события - всегда видимо */}
-          {event && (
-            <>
-              <Text style={styles.eventName}>{event.title}</Text>
-              
-              {/* Описание - скрывается если скрыто */}
-              {renderParameterWithOverlay('description', (
-                <Text style={styles.eventDescription}>{event.description}</Text>
-              ), localHiddenParameters.description)}
-              
-              {/* Параметры события - скрываются если скрыто */}
-              <View style={styles.parametersContainer}>
-                {renderParameterWithOverlay('date', (
-                  <TouchableOpacity 
-                    onPress={() => {
-                      // Переход в календарь на недельную раскладку с кнопкой schedule
-                      const isoDateTime = `${event.date}T${event.time}:00`;
-                      router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${eventId}`);
-                    }} 
-                    style={styles.parameterItem}
-                  >
-                    <Text style={styles.parameterEmoji}>📅</Text>
-                    <Text style={styles.parameterText}>{event.displayDate || event.date}</Text>
-                  </TouchableOpacity>
-                ), localHiddenParameters.date)}
-                
-                {renderParameterWithOverlay('time', (
-                  <TouchableOpacity 
-                    onPress={() => {
-                      // Переход в календарь на недельную раскладку с кнопкой schedule
-                      const isoDateTime = `${event.date}T${event.time}:00`;
-                      router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${eventId}`);
-                    }} 
-                    style={styles.parameterItem}
-                  >
-                    <Text style={styles.parameterEmoji}>🕐</Text>
-                    <Text style={styles.parameterText}>{event.time}</Text>
-                  </TouchableOpacity>
-                ), localHiddenParameters.time)}
-                
-                {renderParameterWithOverlay('location', (
-                  !event.coordinates ? (
-                    <View style={styles.parameterItem}>
-                      <Text style={styles.parameterEmoji}>📍</Text>
-                      <Text style={styles.parameterText} numberOfLines={1}>Онлайн</Text>
-                    </View>
-                  ) : (
-                    <TouchableOpacity 
-                      onPress={() => router.push(`/map?eventId=${eventId}`)} 
-                      style={styles.parameterItem}
-                    >
-                      <Text style={styles.parameterEmoji}>📍</Text>
-                      <Text style={styles.parameterText} numberOfLines={1}>{event.location}</Text>
-                    </TouchableOpacity>
-                  )
-                ), localHiddenParameters.location)}
-                
+          const displayPhoto = getEventPhotoForUser(event.id, currentUserId ?? '', effectiveViewerUserId, true);
+          const organizerData = getUserData(event.organizerId);
+          const organizerAvatarUrl = (() => {
+            const u = (organizerData.avatar ?? '').trim();
+            if (!u || u === 'null' || u === 'undefined') return null;
+            if (!/^https?:\/\//i.test(u)) return null;
+            if (u.includes('cdn.jsdelivr.net/gh/identicons') || u.includes('ui-avatars.com')) return null;
+            return u;
+          })();
+          const PLACEHOLDER = `data:image/svg+xml;charset=utf-8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="69" height="69" viewBox="0 0 69 69"><circle cx="34.5" cy="34.5" r="33" fill="#5a5a5a"/><circle cx="34.5" cy="26.5" r="9.5" fill="#c4c4c4"/><ellipse cx="34.5" cy="52" rx="15" ry="11" fill="#c4c4c4"/></svg>')}`;
+          const IMG_PLACEHOLDER = `data:image/svg+xml;charset=utf-8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1440" viewBox="0 0 1080 1440"><rect width="1080" height="1440" fill="#141417"/></svg>')}`;
+          const photoUri = (displayPhoto && typeof displayPhoto === 'string') ? displayPhoto : IMG_PLACEHOLDER;
+          const isoDateTime = `${event.date}T${event.time}:00`;
+
+          return (
+            <View style={epHeaderStyles.wrapper}>
+              {/* Full-bleed image 3:4 */}
+              <View style={epHeaderStyles.imageArea}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => { setFullImageUrl(event.originalMediaUrl || event.mediaUrl || photoUri); setShowImageModal(true); }}
+                  style={StyleSheet.absoluteFill}
+                >
+                  <Image source={{ uri: photoUri }} style={[epHeaderStyles.image, StyleSheet.absoluteFillObject]} resizeMode="cover" />
+                </TouchableOpacity>
+
+                {/* Organizer — top-left */}
+                <TouchableOpacity
+                  style={epHeaderStyles.organizerContainer}
+                  onPress={() => {
+                    if (currentUserId === event.organizerId) router.push('/(tabs)/profile');
+                    else router.push(`/profile/${event.organizerId}`);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Image source={{ uri: organizerAvatarUrl || PLACEHOLDER }} style={epHeaderStyles.organizerAvatar} />
+                  <Text style={epHeaderStyles.organizerName} numberOfLines={1}>
+                    {organizerData.name || organizerData.username || ''}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Participants badge — top-right */}
                 {renderParameterWithOverlay('participants', (
-                  <TouchableOpacity 
-                    onPress={() => setShowParticipantsModal(true)} 
-                    style={styles.participantsParameterItem}
+                  <TouchableOpacity
+                    style={epHeaderStyles.participantsBadgeWrap}
+                    onPress={() => setShowParticipantsModal(true)}
+                    activeOpacity={0.8}
                   >
-                    <View style={styles.participantsMiniAvatars}>
-                      {participants.slice(0, 3).map((participantId, index) => {
-                        const userData = getUserData(participantId);
-                        return (
-                          <Image 
-                            key={participantId}
-                            source={{ uri: userData.avatar }} 
-                            style={[
-                              styles.participantMiniAvatar,
-                              { marginLeft: index > 0 ? -6 : 0 }
-                            ]} 
-                          />
-                        );
-                      })}
-                      {participants.length > 3 && (
-                        <View style={[styles.participantMiniAvatar, styles.participantMoreMini]}>
-                          <Text style={styles.participantMoreMiniText}>+{participants.length - 3}</Text>
-                        </View>
-                      )}
+                    <View style={epHeaderStyles.participantsBadge}>
+                      <View style={epHeaderStyles.participantsMiniAvatars}>
+                        {participants.slice(0, 3).map((pId, idx) => {
+                          const pData = getUserData(pId);
+                          return (
+                            <Image
+                              key={pId}
+                              source={{ uri: pData.avatar || PLACEHOLDER }}
+                              style={[epHeaderStyles.participantMiniAvatar, { marginLeft: idx > 0 ? -5 : 0 }]}
+                            />
+                          );
+                        })}
+                        {participantsCount > 3 && (
+                          <View style={[epHeaderStyles.participantMiniAvatar, epHeaderStyles.participantMoreMini, { marginLeft: -5 }]}>
+                            <Text style={epHeaderStyles.participantMoreMiniText}>+{participantsCount - 3}</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={epHeaderStyles.participantsCountText}>
+                        {participantsCount}{event.maxParticipants > 0 ? `/${event.maxParticipants}` : ''}
+                      </Text>
                     </View>
-                    <Text style={styles.participantsCountText}>{participants.length}/{event.maxParticipants}</Text>
                   </TouchableOpacity>
                 ), localHiddenParameters.participants)}
-                
-                {renderParameterWithOverlay('price', (
-                  event.price ? (
-                    <View style={styles.parameterItem}>
-                      <Text style={styles.parameterEmoji}>💰</Text>
-                      <Text style={styles.parameterText}>{event.price}</Text>
-                    </View>
-                  ) : null
-                ), localHiddenParameters.price)}
-              </View>
-              
-              {/* Три точки для действий с событием - в правом нижнем углу под параметрами */}
-              {shouldShowThreeDots && !isEditingParameterVisibility && (
-                <TouchableOpacity 
-                  style={styles.eventActionsButton}
-                  onPress={() => setShowEventActionsModal(true)}
-                  activeOpacity={0.7}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Text style={styles.eventActionsButtonText}>⋯</Text>
-                </TouchableOpacity>
-              )}
-              
-              {/* Кнопка "Сохранить" в режиме редактирования видимости параметров */}
-              {isEditingParameterVisibility && (
-                <TouchableOpacity 
-                  style={styles.saveButton}
-                  onPress={handleSaveHiddenParameters}
-                  activeOpacity={0.7}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Text style={styles.saveButtonText}>{t.common.save}</Text>
-                </TouchableOpacity>
-              )}
-            </>
-          )}
-        </View>
 
-        {/* Разделительная линия с кнопкой "+" по центру */}
+                {/* Gradient + title + info */}
+                <LinearGradient
+                  colors={['transparent', 'rgba(0,0,0,0.82)']}
+                  style={epHeaderStyles.gradient}
+                >
+                  {/* Title */}
+                  <Text style={epHeaderStyles.title}>{event.title}</Text>
+
+                  {/* Info row: date, time, location, price */}
+                  <View style={epHeaderStyles.infoRow}>
+                    {renderParameterWithOverlay('date', (
+                      <TouchableOpacity
+                        style={epHeaderStyles.infoItem}
+                        onPress={() => router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${eventId}`)}
+                      >
+                        <AppIcon name="calendar" size={12} color="rgba(255,255,255,0.8)" />
+                        <Text style={epHeaderStyles.infoText}>{event.displayDate || event.date}</Text>
+                      </TouchableOpacity>
+                    ), localHiddenParameters.date)}
+
+                    {renderParameterWithOverlay('time', (
+                      <TouchableOpacity
+                        style={epHeaderStyles.infoItem}
+                        onPress={() => router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${eventId}`)}
+                      >
+                        <AppIcon name="clock" size={12} color="rgba(255,255,255,0.8)" />
+                        <Text style={epHeaderStyles.infoText}>{event.time}</Text>
+                      </TouchableOpacity>
+                    ), localHiddenParameters.time)}
+
+                    {renderParameterWithOverlay('location', (
+                      !event.coordinates ? (
+                        <View style={epHeaderStyles.infoItem}>
+                          <AppIcon name="pin" size={12} color="rgba(255,255,255,0.8)" />
+                          <Text style={epHeaderStyles.infoText}>Онлайн</Text>
+                        </View>
+                      ) : (
+                        <TouchableOpacity style={epHeaderStyles.infoItem} onPress={() => router.push(`/map?eventId=${eventId}`)}>
+                          <AppIcon name="pin" size={12} color="rgba(255,255,255,0.8)" />
+                          <Text style={epHeaderStyles.infoText} numberOfLines={1}>{event.location}</Text>
+                        </TouchableOpacity>
+                      )
+                    ), localHiddenParameters.location)}
+
+                    {event.price ? renderParameterWithOverlay('price', (
+                      <View style={epHeaderStyles.infoItem}>
+                        <AppIcon name="card" size={12} color="rgba(255,255,255,0.8)" />
+                        <Text style={epHeaderStyles.infoText}>{event.price}</Text>
+                      </View>
+                    ), localHiddenParameters.price) : null}
+                  </View>
+
+                  {/* Description — fully expanded, no collapse button */}
+                  {event.description ? renderParameterWithOverlay('description', (
+                    <Text style={epHeaderStyles.description}>{event.description}</Text>
+                  ), localHiddenParameters.description) : null}
+                </LinearGradient>
+
+                {/* Three dots — bottom right */}
+                {shouldShowThreeDots && !isEditingParameterVisibility && (
+                  <TouchableOpacity
+                    style={styles.eventActionsButton}
+                    onPress={() => setShowEventActionsModal(true)}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <AppIcon name="more" size={18} color={Palette.text} />
+                  </TouchableOpacity>
+                )}
+
+                {/* Save button in edit mode */}
+                {isEditingParameterVisibility && (
+                  <TouchableOpacity
+                    style={styles.saveButton}
+                    onPress={handleSaveHiddenParameters}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.saveButtonText}>{t.common.save}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* Toolbar: линия + кнопки */}
         <View style={styles.divider}>
+          <View style={styles.dividerLine} />
           {isMember && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.addContentButton}
               onPress={() => {
-                // Сбрасываем состояние при открытии модального окна
                 setContentType(null);
                 setContentCaption('');
                 setSelectedPhotos([]);
@@ -1160,6 +1299,21 @@ export default function EventProfileScreen() {
               <Text style={styles.addContentIcon}>+</Text>
             </TouchableOpacity>
           )}
+          {(() => {
+            const eventChat = currentUserId
+              ? getChatsForUser(currentUserId).find(c => c.eventId === eventId && c.type === 'event')
+              : null;
+            if (!eventChat) return null;
+            return (
+              <TouchableOpacity
+                style={styles.chatButton}
+                onPress={() => router.push(`/(tabs)/inbox/${eventChat.id}`)}
+              >
+                <AppIcon name="message" size={16} color="rgba(255,255,255,0.8)" />
+              </TouchableOpacity>
+            );
+          })()}
+          <View style={styles.dividerLine} />
         </View>
 
         {/* Posts */}
@@ -1189,6 +1343,7 @@ export default function EventProfileScreen() {
                 key={post.id}
                 post={post}
                 showOptions={true}
+                onNavigate={handleNavigate}
               />
             ))}
           </ScrollView>
@@ -1206,8 +1361,9 @@ export default function EventProfileScreen() {
       <Modal
         visible={showEventActionsModal}
         transparent={true}
-        animationType="fade"
+        animationType="slide"
         onRequestClose={() => setShowEventActionsModal(false)}
+        statusBarTranslucent
       >
         <View style={styles.modalOverlay}>
           <TouchableOpacity 
@@ -1216,9 +1372,10 @@ export default function EventProfileScreen() {
             onPress={() => setShowEventActionsModal(false)}
           />
           <View style={styles.actionsModalContainer}>
+            <View style={styles.actionsModalHandle} />
             <View style={styles.actionsModalHeader}>
               <Text style={styles.actionsModalTitle}>{t.common.actions}</Text>
-              <TouchableOpacity onPress={() => setShowEventActionsModal(false)}>
+              <TouchableOpacity style={styles.actionsModalCloseBtn} onPress={() => setShowEventActionsModal(false)}>
                 <Text style={styles.actionsModalClose}>✕</Text>
               </TouchableOpacity>
             </View>
@@ -1242,7 +1399,7 @@ export default function EventProfileScreen() {
                         removeSavedEvent(eventId);
                         Alert.alert(t.common.success, t.messages.removedFromSaved || 'Event removed from saved');
                       } else {
-                        saveEvent(eventId);
+                        saveEvent(eventId, event);
                         Alert.alert(t.common.success, t.messages.saved || 'Event saved');
                       }
                       setShowEventActionsModal(false);
@@ -1305,11 +1462,18 @@ export default function EventProfileScreen() {
                       }
                       setShowEventActionsModal(false);
                     } else if (action.id === 'cancel_event') {
-                      // Отмена события
+                      // Отмена события - если участников больше 1, показываем попап с transfer organizer role
+                      const participantsCount = getEventParticipants(eventId).length;
+                      if (participantsCount > 1) {
+                        setShowTransferOrganizerModal(true);
+                        setShowEventActionsModal(false);
+                      } else {
+                        // Если участник только организатор, просто отменяем событие
                       if (event) {
                         cancelEvent(eventId);
                       }
                       setShowEventActionsModal(false);
+                      }
                     } else if (action.id === 'cancel_organizer_participation') {
                       // Отмена участия организатора
                       if (event) {
@@ -1341,9 +1505,8 @@ export default function EventProfileScreen() {
                         setShowEventActionsModal(false);
                       }
                     } else if (action.id === 'report') {
-                      // TODO: Реализовать функционал "Пожаловаться"
-                      Alert.alert(t.common.confirm || 'Info', 'Функция "Пожаловаться" будет реализована');
                       setShowEventActionsModal(false);
+                      setShowComplaintForm(true);
                     } else {
                       setShowEventActionsModal(false);
                     }
@@ -1397,27 +1560,36 @@ export default function EventProfileScreen() {
             
             {!contentType ? (
               <View style={styles.contentTypeButtons}>
-                <TouchableOpacity 
-                  style={styles.contentTypeButton} 
+                <TouchableOpacity
+                  style={styles.contentTypeButton}
                   onPress={() => setContentType('photo')}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.contentTypeIcon}>📷</Text>
+                  <View style={styles.contentTypeIconWrap}>
+                    <AppIcon name="image" size={24} color="#f4f4f5" />
+                  </View>
                   <Text style={styles.contentTypeText}>{t.eventProfile.photo}</Text>
                 </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={styles.contentTypeButton} 
+
+                <TouchableOpacity
+                  style={styles.contentTypeButton}
                   onPress={() => setContentType('music')}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.contentTypeIcon}>🎵</Text>
+                  <View style={styles.contentTypeIconWrap}>
+                    <AppIcon name="heart" size={24} color="#f4f4f5" />
+                  </View>
                   <Text style={styles.contentTypeText}>{t.eventProfile.music}</Text>
                 </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={styles.contentTypeButton} 
+
+                <TouchableOpacity
+                  style={styles.contentTypeButton}
                   onPress={() => setContentType('text')}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.contentTypeIcon}>📝</Text>
+                  <View style={styles.contentTypeIconWrap}>
+                    <AppIcon name="edit" size={24} color="#f4f4f5" />
+                  </View>
                   <Text style={styles.contentTypeText}>{t.eventProfile.text}</Text>
                 </TouchableOpacity>
               </View>
@@ -1499,14 +1671,14 @@ export default function EventProfileScreen() {
                           position: 'absolute',
                           top: 5,
                           left: 5,
-                          backgroundColor: '#8B5CF6',
+                          backgroundColor: '#FF8D32',
                           borderRadius: 12,
                           width: 24,
                           height: 24,
                           justifyContent: 'center',
                           alignItems: 'center',
                         }}>
-                          <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>
+                          <Text style={{ color: '#f4f4f5', fontSize: 12, fontWeight: 'bold' }}>
                             {photo.index}
                           </Text>
                         </View>
@@ -1524,7 +1696,7 @@ export default function EventProfileScreen() {
                           }}
                           onPress={() => handleRemovePhoto(photo.id)}
                         >
-                          <Text style={{ color: 'white', fontSize: 16 }}>×</Text>
+                          <Text style={{ color: '#f4f4f5', fontSize: 16 }}>×</Text>
                         </TouchableOpacity>
                       </View>
                     ))}
@@ -1583,7 +1755,7 @@ export default function EventProfileScreen() {
                         onPress={() => handleTrackSelect(track)}
                       >
                         <Image 
-                          source={{ uri: track.artwork_url || 'https://via.placeholder.com/50x50/333/fff?text=🎵' }} 
+                          source={{ uri: track.artwork_url || '' }} 
                           style={styles.searchResultImage}
                         />
                         <View style={styles.searchResultInfo}>
@@ -1610,7 +1782,7 @@ export default function EventProfileScreen() {
                 {selectedTrack && (
                   <View style={styles.selectedTrackContainer}>
                     <Image 
-                      source={{ uri: selectedTrack.artwork_url || 'https://via.placeholder.com/60x60/333/fff?text=🎵' }} 
+                      source={{ uri: selectedTrack.artwork_url || '' }} 
                       style={styles.selectedTrackImage}
                     />
                     <View style={styles.selectedTrackInfo}>
@@ -1753,7 +1925,256 @@ export default function EventProfileScreen() {
           </TouchableOpacity>
         </View>
       </Modal>
+
+      {/* Модальное окно для передачи роли организатора */}
+      <Modal
+        visible={showTransferOrganizerModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowTransferOrganizerModal(false)}
+      >
+        <View style={styles.shareModalOverlay}>
+          <View style={styles.shareModalContent}>
+            <View style={styles.actionsModalHandle} />
+            <View style={styles.shareModalHeader}>
+              <Text style={styles.shareModalTitle}>Передать роль организатора</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowTransferOrganizerModal(false);
+                  setSelectedNewOrganizerId(null);
+                }}
+              >
+                <Text style={styles.shareModalCloseButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.transferOrganizerDescription}>
+              Выберите участника, которому хотите передать роль организатора. После передачи вы выйдете из события, а новый организатор будет управлять им.
+            </Text>
+            
+            <ScrollView style={styles.shareModalList}>
+              {(() => {
+                // Получаем список участников (исключая текущего организатора)
+                const participants = getEventParticipants(eventId);
+                const organizerId = event?.organizerId;
+                const otherParticipants = participants.filter(pId => pId !== organizerId && pId !== currentUserId);
+                
+                if (otherParticipants.length === 0) {
+                  return (
+                    <View style={styles.emptyParticipantsContainer}>
+                      <Text style={styles.emptyParticipantsText}>
+                        Нет других участников для передачи роли
+                      </Text>
+                    </View>
+                  );
+                }
+                
+                return otherParticipants.map((participantId) => {
+                  const participantData = getUserData(participantId);
+                  const isSelected = selectedNewOrganizerId === participantId;
+                  
+                  return (
+                    <TouchableOpacity
+                      key={participantId}
+                      style={[
+                        styles.shareModalItem,
+                        isSelected && styles.shareModalItemSelected
+                      ]}
+                      onPress={() => setSelectedNewOrganizerId(participantId)}
+                    >
+                      <Image
+                        source={{ uri: participantData?.avatar || '' }}
+                        style={styles.shareModalAvatar}
+                      />
+                      <View style={styles.shareModalItemInfo}>
+                        <Text style={styles.shareModalItemName}>
+                          {participantData?.name || participantData?.username || 'Пользователь'}
+                        </Text>
+                        {participantData?.username && participantData.username !== participantData?.name && (
+                          <Text style={styles.shareModalItemSubtext}>
+                            @{participantData.username}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={[styles.shareModalCheckbox, isSelected && { backgroundColor: '#FF8D32', borderColor: '#FF8D32' }]}>
+                        {isSelected && <Text style={styles.shareModalCheckboxText}>✓</Text>}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                });
+              })()}
+            </ScrollView>
+            
+            <TouchableOpacity
+              style={[
+                styles.shareModalSendButton,
+                !selectedNewOrganizerId && styles.shareModalSendButtonDisabled
+              ]}
+              onPress={async () => {
+                if (!selectedNewOrganizerId) return;
+                
+                try {
+                  // Вызываем функцию передачи роли организатора
+                  if (transferOrganizerRole) {
+                    await transferOrganizerRole(eventId, selectedNewOrganizerId);
+                    setShowTransferOrganizerModal(false);
+                    setSelectedNewOrganizerId(null);
+                    // После успешной передачи роли данные обновятся через syncEventsFromServer
+                    // Событие автоматически исчезнет из календаря и списка участников
+                  } else {
+                    Alert.alert('Ошибка', 'Функция передачи роли не доступна');
+                  }
+                } catch (error: any) {
+                  logger.error('Failed to transfer organizer role', error);
+                  const errorMessage = error?.message || error?.body?.message || 'Не удалось передать роль организатора';
+                  Alert.alert('Ошибка', errorMessage);
+                }
+              }}
+              disabled={!selectedNewOrganizerId}
+            >
+              <Text style={styles.shareModalSendButtonText}>
+                Передать роль и выйти из события
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <ComplaintForm
+        visible={showComplaintForm}
+        onClose={() => setShowComplaintForm(false)}
+        type="EVENT"
+        reportedEventId={eventId}
+      />
     </View>
   );
 }
+
+const epHeaderStyles = StyleSheet.create({
+  wrapper: {
+    width: '100%',
+  },
+  imageArea: {
+    aspectRatio: 3 / 4,
+    position: 'relative',
+    overflow: 'hidden',
+    width: '100%',
+  },
+  image: {
+    resizeMode: 'cover',
+  },
+  organizerContainer: {
+    position: 'absolute',
+    top: 56,
+    left: 68,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 20,
+    paddingRight: 10,
+    paddingVertical: 3,
+    paddingLeft: 3,
+    zIndex: 10,
+    maxWidth: '60%',
+  },
+  organizerAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  organizerName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+    marginLeft: 6,
+    flexShrink: 1,
+  },
+  participantsBadgeWrap: {
+    position: 'absolute',
+    top: 56,
+    right: 10,
+    zIndex: 10,
+  },
+  participantsBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  participantsMiniAvatars: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  participantMiniAvatar: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  participantMoreMini: {
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  participantMoreMiniText: {
+    color: '#f4f4f5',
+    fontSize: 8,
+    fontWeight: 'bold',
+  },
+  participantsCountText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '600',
+  },
+  gradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '75%',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+    marginBottom: 6,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  infoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  infoText: {
+    fontSize: 12.5,
+    color: 'rgba(255,255,255,0.85)',
+    fontWeight: '500',
+  },
+  description: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.7)',
+    lineHeight: 18,
+    marginTop: 6,
+  },
+});
 
