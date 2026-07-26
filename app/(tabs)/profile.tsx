@@ -18,6 +18,7 @@ import FolderCard from '../../components/FolderCard';
 import type { EventFolder } from '../../types/EventFolder';
 import AddToFolderModal from '../../components/AddToFolderModal';
 import CreateFolderModal from '../../components/CreateFolderModal';
+import { getEventDateTime } from '../../utils/eventHelpers';
 
 const logger = createLogger('Profile');
 
@@ -1011,7 +1012,8 @@ export default function ProfileScreen() {
             const CARD_W = Math.floor((containerW - GAP * 2) / 3);
             const FOLDER_W = CARD_W * 2 + GAP;
 
-            type GridItem = { type: 'event' | 'folder'; data: any };
+            // sortKey — время самого свежего события (у папки — максимум по её событиям)
+            type GridItem = { type: 'event' | 'folder'; data: any; sortKey?: number };
 
             // Раскладка по рядам: 3 слота в ряду, папка занимает 2
             const buildRows = (items: GridItem[]) => {
@@ -1125,12 +1127,38 @@ export default function ProfileScreen() {
             const participantItems: GridItem[] = participatedEvents
               .filter((e: Event) => !organizedEvents.find((o: Event) => o.id === e.id))
               .map((e: Event) => ({ type: 'event', data: e }));
+            // Папка встаёт в сетке по своему самому свежему событию —
+            // как актуальное в сторис. Добавили недавнее событие — папка
+            // поднялась наверх; добавили старое — осталась ниже.
+            const timeOf = (e: Event) => {
+              try {
+                return getEventDateTime(e).getTime();
+              } catch {
+                return 0;
+              }
+            };
+            const folderTime = (f: EventFolder) => {
+              // Элементы папки приходят как event либо как обёртка { event }
+              const inFolder: Event[] = Array.isArray(f.events)
+                ? f.events
+                    .map((item: any) => (item?.event || item) as Event)
+                    .filter((e: Event) => e && e.id)
+                : [];
+              if (inFolder.length > 0) {
+                const times = inFolder.map(timeOf).filter(n => n > 0);
+                if (times.length > 0) return Math.max(...times);
+              }
+              const fallback = f.duration?.end || f.updatedAt || f.createdAt;
+              const parsed = fallback ? new Date(fallback).getTime() : 0;
+              return Number.isFinite(parsed) ? parsed : 0;
+            };
+
             const memoriesItems: GridItem[] = [
-              ...pastEvents.map((e: Event) => ({ type: 'event' as const, data: e })),
+              ...pastEvents.map((e: Event) => ({ type: 'event' as const, data: e, sortKey: timeOf(e) })),
               ...((eventFolders?.length > 0)
-                ? eventFolders.map((f: EventFolder) => ({ type: 'folder' as const, data: f }))
+                ? eventFolders.map((f: EventFolder) => ({ type: 'folder' as const, data: f, sortKey: folderTime(f) }))
                 : []),
-            ];
+            ].sort((a, b) => b.sortKey - a.sortKey);
 
             return (
               <>

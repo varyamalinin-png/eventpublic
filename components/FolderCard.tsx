@@ -217,7 +217,7 @@ const styles = StyleSheet.create({
     marginRight: 0, // Убираем marginRight, он задается родителем
     marginBottom: 0, // Убираем marginBottom, он задается родителем
     marginTop: 0, // Убираем marginTop, он задается родителем
-    alignSelf: 'flex-start',
+    alignSelf: 'stretch', // тянемся на высоту ряда, чтобы совпадать с карточкой события
     width: '100%', // Занимает всю доступную ширину от родителя
   },
   profileImage: {
