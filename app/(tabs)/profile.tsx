@@ -44,7 +44,7 @@ export default function ProfileScreen() {
   const expoRouter = useExpoRouter(); // Обычный роутер для кликов в шапке
   const params = useLocalSearchParams<{ eventId?: string }>();
   const { events, eventProfiles, getOrganizerStats, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember, getUserData, getUserRequestStatus, eventFolders, createEventFolder, deleteEvent, addEventToFolder, fetchEventProfile, refreshEventFolders } = useEvents();
-  const { user: authUser, loading: authLoading } = useAuth();
+  const { user: authUser, loading: authLoading, initializing: authInitializing } = useAuth();
   const { t } = useLanguage();
   const [showEventFeed, setShowEventFeed] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
@@ -649,16 +649,19 @@ export default function ProfileScreen() {
 
   // КРИТИЧЕСКИ ВАЖНО: Все ранние возвраты должны быть ПОСЛЕ всех хуков
   useEffect(() => {
-    if (!authUser && !authLoading) {
+    // Ждём окончания восстановления сессии. Раньше проверялся только loading,
+    // который во время бутстрапа остаётся false — на вебе это уводило на /login
+    // сразу после перехода, а затем логин перекидывал на explore.
+    if (!authUser && !authLoading && !authInitializing) {
       router.replace('/(auth)/login' as any);
     }
-  }, [authUser, authLoading]);
+  }, [authUser, authLoading, authInitializing]);
 
   if (!authUser || !currentUserId) {
     return (
       <View style={styles.container}>
         <View style={styles.centered}>
-          <Text style={styles.emptyText}>{authLoading ? 'Загрузка профиля...' : ''}</Text>
+          <Text style={styles.emptyText}>{(authLoading || authInitializing) ? t.common.loading : ''}</Text>
         </View>
       </View>
     );
