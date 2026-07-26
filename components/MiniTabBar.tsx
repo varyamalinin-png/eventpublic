@@ -11,14 +11,25 @@ const TABS = [
   { name: 'profile', path: '/(tabs)/profile', icon: 'person-outline' as const },
 ];
 
-export default function MiniTabBar() {
+type MiniTabBarProps = {
+  /** Раздел, из которого открыт экран. Нужен, чтобы на чужом профиле
+   *  подсвечивался исходный таб, а не Profile. */
+  activeTab?: string | null;
+};
+
+export default function MiniTabBar({ activeTab = null }: MiniTabBarProps) {
   const router = useRouter();
   const pathname = usePathname();
+
+  // Точное совпадение по последнему сегменту: раньше проверка была через
+  // includes(), и на /profile/<id> подсвечивался таб Profile, будто это
+  // собственный аккаунт.
+  const currentSegment = pathname?.split('?')[0].split('/').filter(Boolean).pop() ?? '';
 
   return (
     <View style={styles.bar}>
       {TABS.map(tab => {
-        const active = pathname?.includes(tab.name);
+        const active = activeTab ? activeTab === tab.name : currentSegment === tab.name;
         return (
           <TouchableOpacity
             key={tab.name}

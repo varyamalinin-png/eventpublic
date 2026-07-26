@@ -20,6 +20,10 @@ import { Palette } from '../../constants/DesignSystem';
 
 const logger = createLogger('OtherProfile');
 
+/** Счётчики Organized/Participated временно скрыты — как в своём профиле
+ *  и в карточке организатора. Вернуть: переключить в true. */
+const SHOW_ORG_PART = false;
+
 // Для веб-версии используем ограниченную ширину контейнера (500px), для мобильных - полную ширину экрана
 const getContainerWidth = () => {
   const screenWidth = Dimensions.get('window').width;
@@ -31,7 +35,9 @@ const getContainerWidth = () => {
 const SCREEN_WIDTH = getContainerWidth();
 
 export default function OtherProfileScreen() {
-  const { id, eventId } = useLocalSearchParams();
+  // from — раздел, из которого открыт профиль: нижняя панель должна
+  // подсвечивать его, а не Profile (это чужой аккаунт, не свой)
+  const { id, eventId, from } = useLocalSearchParams();
   const router = useSafeRouter();
   const { events, eventProfiles, getUserData: contextGetUserData, getOrganizerStats, getFriendsList, getEventProfile, createEventProfile, fetchEventProfile, sendFriendRequest, removeFriend, isFriend, userFolders, addUserToFolder, removeUserFromFolder, createPersonalChat, getChatsForUser, isUserParticipant, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember, friendRequests, respondToFriendRequest, getUserRequestStatus, getUserFriendsList } = useEvents();
   const { user: authUser, accessToken } = useAuth();
@@ -639,17 +645,22 @@ export default function OtherProfileScreen() {
             </TouchableOpacity>
           </View>
           
-          {/* Второй ряд - всегда видимый */}
+          {/* Второй ряд: Organized/Participated скрыты флагом SHOW_ORG_PART,
+              разметка сохранена */}
           <View style={styles.statsRow}>
-            <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/organized-events/${userId}`)}>
-              <Text style={styles.statNumber}>{organizedEvents.length + pastEvents.filter(e => isUserOrganizer(e, userId)).length}</Text>
-              <Text style={styles.statLabel}>{t.profile.statsOrganized}</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/participated-events/${userId}`)}>
-              <Text style={styles.statNumber}>{allParticipatedEvents.length}</Text>
-              <Text style={styles.statLabel}>{t.profile.statsParticipated}</Text>
-            </TouchableOpacity>
+            {SHOW_ORG_PART && (
+              <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/organized-events/${userId}`)}>
+                <Text style={styles.statNumber}>{organizedEvents.length + pastEvents.filter(e => isUserOrganizer(e, userId)).length}</Text>
+                <Text style={styles.statLabel}>{t.profile.statsOrganized}</Text>
+              </TouchableOpacity>
+            )}
+
+            {SHOW_ORG_PART && (
+              <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/participated-events/${userId}`)}>
+                <Text style={styles.statNumber}>{allParticipatedEvents.length}</Text>
+                <Text style={styles.statLabel}>{t.profile.statsParticipated}</Text>
+              </TouchableOpacity>
+            )}
             
             {currentUserId && userId !== currentUserId && (
               <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/shared-events/${userId}`)}>
@@ -1163,7 +1174,7 @@ export default function OtherProfileScreen() {
         type="USER"
         reportedUserId={userId}
       />
-      <MiniTabBar />
+      <MiniTabBar activeTab={typeof from === 'string' ? from : 'explore'} />
     </View>
   );
 }
