@@ -1,7 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { View, Text, ScrollView, StyleSheet, Image, TouchableOpacity, Modal, Dimensions, TextInput, Alert } from 'react-native';
+import { View, Text, ScrollView, FlatList, StyleSheet, Image, TouchableOpacity, Modal, Dimensions, TextInput, Alert, Platform, RefreshControl } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import { useRefresh } from '../../hooks/useRefresh';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { useLocalSearchParams, useFocusEffect, useRouter as useExpoRouter } from 'expo-router';
+import { useSafeRouter } from '../../utils/safeRouter';
 import EventCard from '../../components/EventCard';
 import TopBar from '../../components/TopBar';
 import { useEvents, Event } from '../../context/EventsContext';
@@ -9,6 +12,8 @@ import { formatUsername } from '../../utils/username';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { createLogger } from '../../utils/logger';
+import { AppIcon } from '../../components/ui/AppIcon';
+import { Palette } from '../../constants/DesignSystem';
 import FolderCard from '../../components/FolderCard';
 import type { EventFolder } from '../../types/EventFolder';
 import AddToFolderModal from '../../components/AddToFolderModal';
@@ -16,17 +21,33 @@ import CreateFolderModal from '../../components/CreateFolderModal';
 
 const logger = createLogger('Profile');
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const getContainerWidth = () => {
+  try {
+    const screenWidth = Dimensions.get('window').width;
+    if (Platform?.OS === 'web') {
+      return Math.min(screenWidth, 500);
+    }
+    return screenWidth;
+  } catch {
+    return 390;
+  }
+};
+const SCREEN_WIDTH = getContainerWidth();
 
 export default function ProfileScreen() {
-  const router = useRouter();
+  const router = useSafeRouter();
+  const expoRouter = useExpoRouter(); // Обычный роутер для кликов в шапке
   const params = useLocalSearchParams<{ eventId?: string }>();
-  const { events, eventProfiles, getOrganizerStats, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember, getUserData, getUserRequestStatus, eventFolders, createEventFolder, deleteEvent, addEventToFolder } = useEvents();
-  const { user: authUser } = useAuth();
+  const { events, eventProfiles, getOrganizerStats, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember, getUserData, getUserRequestStatus, eventFolders, createEventFolder, deleteEvent, addEventToFolder, fetchEventProfile, refreshEventFolders } = useEvents();
+  const { user: authUser, loading: authLoading } = useAuth();
   const { t } = useLanguage();
   const [showEventFeed, setShowEventFeed] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<EventFolder | null>(null);
+  const [eventHeights, setEventHeights] = useState<Record<string, number>>({});
+  const { refreshing, onRefresh } = useRefresh();
+  const [initialFeedIndex, setInitialFeedIndex] = useState(0);
+  const feedListRef = useRef<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -104,6 +125,8 @@ export default function ProfileScreen() {
       }
       
       // Для прошедших событий - используем те же признаки, что и для предстоящих
+      // КРИТИЧЕСКИ ВАЖНО: Если пользователь удалил свое участие, событие должно быть удалено из events
+      // (это обрабатывается в deleteEvent), поэтому если событие осталось в events, значит пользователь все еще организатор
       if (isEventPast(event)) {
         return isUserOrganizer(event, currentUserId);
       }
@@ -247,24 +270,23 @@ export default function ProfileScreen() {
         return false;
       }
       
-      // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий проверяем участие через eventProfiles
-      // ВСЕ события имеют профиль - проверяем участие через профиль
+      // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий используем ту же логику, что и для счетчиков (allParticipatedEvents):
+      // организатор — всегда показываем; участник — показываем, если он в profile.participants.
+      // Иначе у участников прошедшие события исчезают из профиля (isUserEventMember для прошлых событий может быть false).
+      if (isUserOrganizer(event, currentUserId)) {
+        return true;
+      }
       const profile = eventProfiles.find(p => p.eventId === event.id);
       if (!profile) {
-        // Профиль должен существовать для всех событий
-        logger.debug('pastEvents: профиль не найден для события', { eventId: event.id, title: event.title });
+        // Профиль не загружен — для участника не показываем (организатор уже отфильтрован выше)
+        logger.debug('pastEvents: профиль не найден для события участника', { eventId: event.id, title: event.title });
         return false;
       }
-      
-      // Проверяем, что пользователь в списке участников профиля
       const isParticipantInProfile = profile.participants.includes(currentUserId);
       if (!isParticipantInProfile) {
-        // Пользователь не в списке участников профиля - не показываем событие
-        logger.debug('pastEvents: пользователь не в списке участников профиля', { eventId: event.id, title: event.title });
+        logger.debug('pastEvents: пользователь не в participants профиля', { eventId: event.id, title: event.title });
         return false;
       }
-      
-      // Пользователь в списке участников профиля - показываем событие
       return true;
     });
     
@@ -282,7 +304,7 @@ export default function ProfileScreen() {
       const dateB = new Date(b.date + 'T' + b.time + ':00').getTime();
       return dateB - dateA; // Убывание: последнее первым
     });
-  }, [events, eventProfiles, currentUserId, isEventPast, getUserRequestStatus, isUserEventMember, eventsInFolders]);
+  }, [events, eventProfiles, currentUserId, isEventPast, isUserOrganizer, eventsInFolders]);
   
   // Объединяем все события для параметра "всего событий" - ВСЕ события, включая те, что в папках
   // Для счетчиков нужно показывать ВСЕ события пользователя, а не только те, что видны в списке
@@ -304,66 +326,54 @@ export default function ProfileScreen() {
     return uniqueEvents;
   }, [allOrganizedEvents, allParticipatedEvents]);
   
-  // Примечание: Профили событий загружаются автоматически при открытии event-profile/[id] для отображения меморис постов
-  // Для фильтрации событий они больше не нужны - используем те же признаки, что и для предстоящих событий
-
-  // Обработка открытия по параметру eventId
+  // Загружаем профили для прошедших событий при открытии профиля
+  // КРИТИЧЕСКИ ВАЖНО: Загружаем профили СРАЗУ при монтировании, а не асинхронно
+  // Это нужно, чтобы карточки событий загружались сразу, а не в реальном времени
   useEffect(() => {
-    if (params.eventId) {
-      const event = events.find(e => e.id === params.eventId);
-      if (event) {
-        setSelectedEvent(event);
-        setSelectedFolder(null);
-        setShowEventFeed(true);
-        
-        // Прокручиваем к событию после небольшой задержки
-        setTimeout(() => {
-          // Создаем временный массив items для поиска индекса
-          const tempItems: Array<{ type: 'folder' | 'event'; data: EventFolder | Event }> = [];
-          if (eventFolders && eventFolders.length > 0) {
-            eventFolders.forEach((folder: EventFolder) => {
-              tempItems.push({ type: 'folder', data: folder });
-            });
+    if (!currentUserId || !fetchEventProfile) return;
+    
+    const loadProfilesForPastEvents = async () => {
+      const pastEventsToLoad = events.filter(event => isEventPast(event));
+      // Убираем избыточное логирование - оставляем только при необходимости
+      // logger.debug('Загружаем профили для прошедших событий в профиле (useEffect)', { count: pastEventsToLoad.length, currentUserId });
+      
+      // Загружаем все профили параллельно для быстрой загрузки
+      const loadPromises = pastEventsToLoad.map(async (event) => {
+        const existingProfile = eventProfiles.find(p => p.eventId === event.id);
+        if (!existingProfile) {
+          try {
+            await fetchEventProfile(event.id);
+            // Убираем избыточное логирование для каждого события
+          } catch (error) {
+            logger.warn(`Не удалось загрузить профиль для события ${event.id}:`, error);
           }
-          pastEvents.forEach((e: Event) => {
-            tempItems.push({ type: 'event', data: e });
-          });
-          
-          const itemIndex = tempItems.findIndex(item => item.type === 'event' && (item.data as Event).id === params.eventId);
-          if (itemIndex !== -1 && scrollViewRef.current) {
-            // Более точный расчет высоты карточки + отступы
-            const cardHeight = 400; // высота карточки
-            const marginBottom = 15; // отступ снизу
-            const totalItemHeight = cardHeight + marginBottom;
-            
-            // Высота экрана (примерная)
-            const screenHeight = 800;
-            // Позиция карточки от начала контента
-            const cardPosition = itemIndex * totalItemHeight;
-            
-            // Рассчитываем позицию прокрутки так, чтобы карточка была по центру экрана
-            const centerOffset = (screenHeight - cardHeight) / 2;
-            let scrollToY = cardPosition - centerOffset;
-            
-            // Ограничиваем прокрутку границами контента
-            const totalContentHeight = tempItems.length * totalItemHeight - marginBottom + 20; // 20 - paddingBottom
-            const maxScrollY = Math.max(0, totalContentHeight - screenHeight);
-            
-            scrollToY = Math.max(0, Math.min(scrollToY, maxScrollY));
-            
-            logger.debug('Scrolling to center event from URL', { scrollToY });
-            scrollViewRef.current.scrollTo({ y: scrollToY, animated: true });
-          }
-        }, 200);
-      }
-    } else if (params.eventId === undefined && showEventFeed) {
-      // Если параметр eventId удален из URL, закрываем ленту
-      setShowEventFeed(false);
-      setSelectedEvent(null);
-      setSelectedFolder(null);
-    }
-  }, [params.eventId, events, pastEvents, eventFolders]);
+        }
+      });
+      
+      // Ждем загрузки всех профилей
+      await Promise.all(loadPromises);
+      // Убираем избыточное логирование
+      // logger.debug('Все профили для прошедших событий загружены');
+    };
+    
+    loadProfilesForPastEvents();
+  }, [currentUserId, events.length, isEventPast, fetchEventProfile]); // Убрали eventProfiles из зависимостей, чтобы не вызывать повторно
   
+  // Дополнительная загрузка при фокусе на экране (на случай, если события изменились)
+  const loadProfilesForPastEvents = useCallback(async () => {
+    if (!currentUserId || !fetchEventProfile || events.length === 0) return;
+    const pastEventsToLoad = events.filter(event => isEventPast(event));
+    for (const event of pastEventsToLoad) {
+      if (!eventProfiles.find(p => p.eventId === event.id)) {
+        try { await fetchEventProfile(event.id); } catch {}
+      }
+    }
+  }, [currentUserId, events, eventProfiles, isEventPast, fetchEventProfile]);
+
+  useEffect(() => { loadProfilesForPastEvents(); }, [loadProfilesForPastEvents]);
+
+  useFocusEffect(useCallback(() => { loadProfilesForPastEvents(); }, [loadProfilesForPastEvents]));
+
   // Функция поиска для профиля
   const handleProfileSearch = (query: string) => {
     setSearchQuery(query);
@@ -407,12 +417,31 @@ export default function ProfileScreen() {
   const filteredEvents = searchUserEvents(userEvents, searchQuery);
 
   const handleMemoryPress = (eventId: string) => {
+    logger.debug('handleMemoryPress вызван для события', { eventId });
     const event = pastEvents.find(e => e.id === eventId);
     if (event) {
-      router.setParams({ eventId: event.id });
+      // Сохраняем время клика для предотвращения закрытия ленты
+      if (typeof window !== 'undefined') {
+        (window as any).lastEventClickTime = Date.now();
+        (window as any).lastSetParamsTime = Date.now();
+      }
+      
+      // КРИТИЧЕСКИ ВАЖНО: На вебе не используем router.setParams, только локальное состояние
+      // Устанавливаем eventId в URL чтобы useEffect не закрывал ленту (только для мобильного)
+      if (Platform.OS !== 'web' && router && typeof router.setParams === 'function') {
+        try {
+          router.setParams({ eventId: event.id as any });
+          logger.debug('router.setParams вызван в handleMemoryPress для события', { eventId: event.id });
+        } catch (error) {
+          logger.warn('Failed to set params in handleMemoryPress:', error);
+        }
+      }
+      
       setSelectedEvent(event);
       setSelectedFolder(null);
       setShowEventFeed(true);
+      
+      logger.debug('showEventFeed установлено в true в handleMemoryPress');
       
       // Прокручиваем к нужному событию после рендера
       setTimeout(() => {
@@ -522,6 +551,7 @@ export default function ProfileScreen() {
             logger.error(`Failed to add event ${eventId} to folder:`, error);
           }
         }
+        await refreshEventFolders();
         setShowCreateFolderModal(false);
         setSelectMode(false);
         setSelectedEventIds(new Set());
@@ -537,54 +567,16 @@ export default function ProfileScreen() {
     }
   }, [selectedEventIds, createEventFolder, addEventToFolder]);
 
-  const handleMiniaturePress = (event: Event) => {
-    logger.debug('handleMiniaturePress вызван для события', { eventId: event.id, eventTitle: event.title, showEventFeedBefore: showEventFeed });
-    
-    // Устанавливаем eventId в URL чтобы useEffect не закрывал ленту
-    router.setParams({ eventId: event.id });
-    
+  const handleMiniaturePress = useCallback((event: Event) => {
+    logger.debug('MINIATURE TAP', { id: event.id, title: event.title, isPast: isEventPast(event) });
     setSelectedEvent(event);
     setShowEventFeed(true);
-    
-    logger.debug('showEventFeed установлено в true');
-    
-    // Отладочная информация
-    logger.debug('Clicked event', { eventId: event.id, eventTitle: event.title, totalEvents: userEvents.length, eventIndex: userEvents.findIndex(e => e.id === event.id) });
-    
-    // Прокручиваем к нужному событию после рендера
-    setTimeout(() => {
-      const eventIndex = userEvents.findIndex(e => e.id === event.id);
-      if (eventIndex !== -1 && scrollViewRef.current) {
-        // Более точный расчет высоты карточки + отступы
-        const cardHeight = 400; // высота карточки
-        const marginBottom = 20; // отступ снизу
-        const totalItemHeight = cardHeight + marginBottom;
-        
-        // Высота экрана (примерная)
-        const screenHeight = 800;
-        // Позиция карточки от начала контента
-        const cardPosition = eventIndex * totalItemHeight;
-        
-        // Рассчитываем позицию прокрутки так, чтобы карточка была по центру экрана
-        const centerOffset = (screenHeight - cardHeight) / 2;
-        let scrollToY = cardPosition - centerOffset;
-        
-        // Ограничиваем прокрутку границами контента
-        const totalContentHeight = userEvents.length * totalItemHeight - marginBottom + 20; // 20 - paddingBottom
-        const maxScrollY = Math.max(0, totalContentHeight - screenHeight);
-        
-        scrollToY = Math.max(0, Math.min(scrollToY, maxScrollY));
-        
-        logger.debug('Scrolling to center event', { scrollToY });
-        scrollViewRef.current.scrollTo({ y: scrollToY, animated: true });
-      }
-    }, 200);
-  };
+  }, [isEventPast]);
 
-  // Отладочная информация при каждом рендере
-  useEffect(() => {
-    logger.debug('useEffect showEventFeed', { showEventFeed });
-  }, [showEventFeed]);
+  // Отладочная информация при каждом рендере (убрано для уменьшения логов)
+  // useEffect(() => {
+  //   logger.debug('useEffect showEventFeed', { showEventFeed });
+  // }, [showEventFeed]);
   
   // Определяем какую коллекцию событий и папок показывать в ленте
   // Если выбрана папка или прошедшее событие - показываем Memories (папки + pastEvents)
@@ -606,43 +598,62 @@ export default function ProfileScreen() {
         items.push({ type: 'event', data: event });
       });
       
-      // Сортируем по дате: сначала самые новые (папки и события вместе по дате)
-      return items.sort((a, b) => {
-        let dateA: number;
-        let dateB: number;
-        
-        if (a.type === 'folder') {
-          const folder = a.data as EventFolder;
-          // Для папки используем дату создания или дату последнего события
-          dateA = new Date(folder.createdAt).getTime();
-        } else {
-          const event = a.data as Event;
-          dateA = new Date(event.date + 'T' + event.time + ':00').getTime();
-        }
-        
-        if (b.type === 'folder') {
-          const folder = b.data as EventFolder;
-          dateB = new Date(folder.createdAt).getTime();
-        } else {
-          const event = b.data as Event;
-          dateB = new Date(event.date + 'T' + event.time + ':00').getTime();
-        }
-        
-        // Сортируем по убыванию (самые новые первыми)
+      items.sort((a, b) => {
+        const dateA = a.type === 'folder'
+          ? new Date((a.data as EventFolder).createdAt).getTime()
+          : new Date((a.data as Event).date + 'T' + (a.data as Event).time + ':00').getTime();
+        const dateB = b.type === 'folder'
+          ? new Date((b.data as EventFolder).createdAt).getTime()
+          : new Date((b.data as Event).date + 'T' + (b.data as Event).time + ':00').getTime();
         return dateB - dateA;
       });
+      if (selectedEvent) {
+        const selected = items.filter(item => item.type === 'event' && (item.data as Event).id === selectedEvent.id);
+        const rest = items.filter(item => !(item.type === 'event' && (item.data as Event).id === selectedEvent.id));
+        if (selected.length > 0) return [...selected, ...rest];
+      }
+      return items;
     }
-    // Иначе показываем обычные события пользователя
-    return userEvents.map(event => ({ type: 'event' as const, data: event }));
+    // Сплошная лента: upcoming (organizer + participant) + folders + past events
+    const allItems: Array<{ type: 'folder' | 'event'; data: EventFolder | Event }> = [];
+
+    // Upcoming events
+    userEvents.forEach(event => {
+      allItems.push({ type: 'event', data: event });
+    });
+
+    // Folders
+    if (eventFolders && Array.isArray(eventFolders)) {
+      eventFolders.forEach((folder: EventFolder) => {
+        allItems.push({ type: 'folder', data: folder });
+      });
+    }
+
+    // Past events (not in folders)
+    pastEvents.forEach((event: Event) => {
+      allItems.push({ type: 'event', data: event });
+    });
+
+    if (selectedEvent) {
+      const selected = allItems.filter(item => item.type === 'event' && (item.data as Event).id === selectedEvent.id);
+      const rest = allItems.filter(item => !(item.type === 'event' && (item.data as Event).id === selectedEvent.id));
+      if (selected.length > 0) return [...selected, ...rest];
+    }
+    return allItems;
   }, [selectedFolder, selectedEvent, pastEvents, userEvents, isEventPast, eventFolders]);
 
   // КРИТИЧЕСКИ ВАЖНО: Все ранние возвраты должны быть ПОСЛЕ всех хуков
-  // Исправление: проверяем только authUser, getUserData всегда возвращает объект с дефолтными значениями
+  useEffect(() => {
+    if (!authUser && !authLoading) {
+      router.replace('/(auth)/login' as any);
+    }
+  }, [authUser, authLoading]);
+
   if (!authUser || !currentUserId) {
     return (
       <View style={styles.container}>
         <View style={styles.centered}>
-          <Text style={styles.emptyText}>Загрузка профиля...</Text>
+          <Text style={styles.emptyText}>{authLoading ? 'Загрузка профиля...' : ''}</Text>
         </View>
       </View>
     );
@@ -670,38 +681,32 @@ export default function ProfileScreen() {
             setShowEventFeed(false);
             setSelectedEvent(null);
             setSelectedFolder(null);
-            // Очищаем URL параметры если они есть
-            if (params.eventId) {
-              router.setParams({ eventId: undefined });
+            // КРИТИЧЕСКИ ВАЖНО: На вебе не используем router.setParams, только локальное состояние
+            // Очищаем URL параметры если они есть (только для мобильного)
+            if (params.eventId && Platform.OS !== 'web' && router.setParams && typeof router.setParams === 'function') {
+              try {
+                router.setParams({ eventId: undefined });
+              } catch (error) {
+                logger.warn('Failed to clear params:', error);
+              }
             }
             // Переходим на общую страницу профиля (таб)
             router.push('/(tabs)/profile');
           }}
         >
-          <Text style={styles.backText}>← {t.profile.backToProfile}</Text>
+          <Text style={styles.backText}>{t.profile.backToProfile}</Text>
         </TouchableOpacity>
-        <ScrollView 
-          ref={scrollViewRef} 
-          style={styles.feedContainer}
+        <FlatList
+          ref={feedListRef}
+          data={itemsToShow}
+          keyExtractor={(item) => item.type === 'folder' ? `folder-${(item.data as EventFolder).id}` : (item.data as Event).id}
           contentContainerStyle={styles.feedContentContainer}
           showsVerticalScrollIndicator={true}
-          bounces={true}
-          alwaysBounceVertical={true}
-          scrollEventThrottle={16}
-          removeClippedSubviews={false}
-        >
-          {/* Папки и события Memories */}
-          {itemsToShow.map((item, index) => {
+          renderItem={({ item, index }) => {
             if (item.type === 'folder') {
               const folder = item.data as EventFolder;
               return (
-                <View 
-                  key={`folder-${folder.id}`} 
-                  style={[
-                    styles.feedItemWrapper,
-                    index === itemsToShow.length - 1 && styles.lastFeedItem
-                  ]}
-                >
+                <View style={styles.feedItemWrapper} pointerEvents="box-none">
                   <FolderCard
                     folder={folder}
                     onPress={() => router.push(`/event-folder/${folder.id}`)}
@@ -709,44 +714,36 @@ export default function ProfileScreen() {
                   />
                 </View>
               );
-            } else {
-              const event = item.data as Event;
-              return (
-                <View 
-                  key={event.id} 
-                  style={[
-                    styles.eventCardWrapper,
-                    index === itemsToShow.length - 1 && styles.lastEventCard
-                  ]}
-                >
-                  <EventCard
-                    id={event.id}
-                    title={event.title}
-                    description={event.description}
-                    date={event.date}
-                    time={event.time}
-                    displayDate={event.displayDate}
-                    location={event.location}
-                    price={event.price}
-                    participants={event.participants}
-                    maxParticipants={event.maxParticipants}
-                    organizerAvatar={event.organizerAvatar}
-                    organizerId={event.organizerId}
-                    variant="default"
-                    showSwipeAction={true}
-                    context="own_profile"
-                    mediaUrl={event.mediaUrl}
-                    mediaType={event.mediaType}
-                    mediaAspectRatio={event.mediaAspectRatio}
-                    participantsList={event.participantsList}
-                    participantsData={event.participantsData}
-                  />
-                </View>
-              );
             }
-          })}
-          
-        </ScrollView>
+            const event = item.data as Event;
+            return (
+              <View style={styles.eventCardWrapper}>
+                <EventCard
+                  id={event.id}
+                  title={event.title}
+                  description={event.description}
+                  date={event.date}
+                  time={event.time}
+                  displayDate={event.displayDate}
+                  location={event.location}
+                  price={event.price}
+                  participants={event.participants}
+                  maxParticipants={event.maxParticipants}
+                  organizerAvatar={event.organizerAvatar}
+                  organizerId={event.organizerId}
+                  variant="default"
+                  showSwipeAction={true}
+                  context="explore"
+                  mediaUrl={event.mediaUrl}
+                  mediaType={event.mediaType}
+                  mediaAspectRatio={event.mediaAspectRatio}
+                  participantsList={event.participantsList}
+                  participantsData={event.participantsData}
+                />
+              </View>
+            );
+          }}
+        />
 
         {/* Панель действий в режиме select */}
         {selectMode && (
@@ -791,13 +788,14 @@ export default function ProfileScreen() {
       />
 
       <View style={{ flex: 1 }}>
-      <ScrollView 
+      <ScrollView
         style={styles.scrollContainer}
         showsVerticalScrollIndicator={true}
         bounces={true}
         alwaysBounceVertical={true}
         scrollEventThrottle={16}
         removeClippedSubviews={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF8D32" />}
         contentContainerStyle={[
           styles.scrollContentContainer,
           selectMode && { paddingBottom: 200 } // Дополнительный отступ когда активен режим выбора
@@ -806,20 +804,61 @@ export default function ProfileScreen() {
         {/* Информация о пользователе */}
         <View style={styles.userProfileContainer}>
         {/* Аватарка и кнопка настроек */}
-        <View style={styles.avatarContainer}>
-          <TouchableOpacity onPress={() => setShowAvatarModal(true)}>
-            <Image 
-              source={{ uri: userData.avatar }} 
-              style={styles.profileAvatar}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.settingsButton}
-            onPress={() => router.push('/settings')}
-          >
-            <Text style={styles.settingsIcon}>⚙️</Text>
-          </TouchableOpacity>
-        </View>
+        {Platform.OS === 'web' ? (
+          // Веб: аватарка по центру, минималистичный карандаш справа от неё
+          <View style={styles.avatarContainerWeb}>
+            <TouchableOpacity onPress={() => setShowAvatarModal(true)}>
+              <Image 
+                source={{ uri: userData.avatar }} 
+                style={styles.profileAvatar}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.settingsButtonWeb}
+              onPress={() => {
+                logger.debug('Navigating to settings');
+                if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                  window.location.href = '/settings';
+                } else {
+                  try {
+                    router.push('/settings');
+                  } catch (error) {
+                    logger.error('Error navigating to settings:', error);
+                  }
+                }
+              }}
+            >
+              <AppIcon name="edit" size={16} color={Palette.text} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          // Мобильные платформы: старый вариант с иконкой поверх аватарки
+          <View style={styles.avatarContainer}>
+            <TouchableOpacity onPress={() => setShowAvatarModal(true)}>
+              <Image 
+                source={{ uri: userData.avatar }} 
+                style={styles.profileAvatar}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.settingsButton}
+              onPress={() => {
+                logger.debug('Navigating to settings');
+                if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                  window.location.href = '/settings';
+                } else {
+                  try {
+                    router.push('/settings');
+                  } catch (error) {
+                    logger.error('Error navigating to settings:', error);
+                  }
+                }
+              }}
+            >
+              <AppIcon name="settings" size={18} color={Palette.text} />
+            </TouchableOpacity>
+          </View>
+        )}
         
         {/* Юзернейм */}
         <Text style={styles.username}>{formatUsername(userData.username)}</Text>
@@ -836,17 +875,35 @@ export default function ProfileScreen() {
         <View style={styles.statsContainer}>
           {/* Первый ряд */}
           <View style={styles.statsRow}>
-            <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/all-events/${currentUserId}`)}>
+            <TouchableOpacity style={styles.statItem} onPress={() => {
+              try {
+                expoRouter.push(`/all-events/${currentUserId}`);
+              } catch (error) {
+                logger.error('Failed to navigate to all-events:', error);
+              }
+            }}>
               <Text style={styles.statNumber}>{allUserEventsForStats.length}</Text>
               <Text style={styles.statLabel}>{t.profile.statsEvents}</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.statItem} onPress={() => router.push('/friends-list')}>
+            <TouchableOpacity style={styles.statItem} onPress={() => {
+              try {
+                expoRouter.push('/friends-list');
+              } catch (error) {
+                logger.error('Failed to navigate to friends-list:', error);
+              }
+            }}>
               <Text style={styles.statNumber}>{organizerStats?.friends ?? 0}</Text>
               <Text style={styles.statLabel}>{t.profile.statsFriends}</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.statItem} onPress={() => router.push('/my-complaints')}>
+            <TouchableOpacity style={styles.statItem} onPress={() => {
+              try {
+                expoRouter.push('/my-complaints');
+              } catch (error) {
+                logger.error('Failed to navigate to my-complaints:', error);
+              }
+            }}>
               <Text style={styles.statNumber}>{organizerStats?.complaints ?? 0}</Text>
               <Text style={styles.statLabel}>{t.profile.statsComplaints}</Text>
             </TouchableOpacity>
@@ -854,18 +911,30 @@ export default function ProfileScreen() {
           
           {/* Второй ряд - всегда видимый */}
           <View style={styles.statsRow}>
-            <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/organized-events/${currentUserId}`)}>
+            <TouchableOpacity style={styles.statItem} onPress={() => {
+              try {
+                expoRouter.push(`/organized-events/${currentUserId}`);
+              } catch (error) {
+                logger.error('Failed to navigate to organized-events:', error);
+              }
+            }}>
               <Text style={styles.statNumber}>{allOrganizedEvents.length}</Text>
               <Text style={styles.statLabel}>{t.profile.statsOrganized}</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/participated-events/${currentUserId}`)}>
+            <TouchableOpacity style={styles.statItem} onPress={() => {
+              try {
+                expoRouter.push(`/participated-events/${currentUserId}`);
+              } catch (error) {
+                logger.error('Failed to navigate to participated-events:', error);
+              }
+            }}>
               <Text style={styles.statNumber}>{allParticipatedEvents.length}</Text>
               <Text style={styles.statLabel}>{t.profile.statsParticipated}</Text>
             </TouchableOpacity>
             
             <TouchableOpacity style={styles.statItem} onPress={() => router.push('/passport-verification')}>
-              <Text style={styles.statNumber}>✓</Text>
+              <AppIcon name="check" size={18} color={Palette.accent} />
               <Text style={styles.statLabel}>{t.profile.statsVerified}</Text>
             </TouchableOpacity>
           </View>
@@ -879,19 +948,22 @@ export default function ProfileScreen() {
           <View style={styles.eventsContainer}>
             {filteredEvents.length > 0 ? (
               filteredEvents.map((event, index) => {
-                // Рассчитываем ширину карточки для трех колонок
-                const containerPadding = 40; // 20px с каждой стороны
-                const gap = 15; // Отступ между карточками
-                const availableWidth = SCREEN_WIDTH - containerPadding;
-                const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
+                const gap = 8; // Отступ между карточками
                 const isLastInRow = (index + 1) % 3 === 0;
                 
                 return (
                   <View
                     key={event.id}
                     style={[
-                      { width: cardWidth },
-                      !isLastInRow && { marginRight: gap }
+                      { 
+                        width: Platform.OS === 'web' ? '31%' : (SCREEN_WIDTH - 40 - 16) / 3,
+                        flexBasis: Platform.OS === 'web' ? '31%' : (SCREEN_WIDTH - 40 - 16) / 3,
+                        flexShrink: 0,
+                        flexGrow: 0,
+                        maxWidth: Platform.OS === 'web' ? '31%' : (SCREEN_WIDTH - 40 - 16) / 3,
+                      },
+                      !isLastInRow && { marginRight: gap },
+                      { marginBottom: gap }
                     ]}
                   >
                     <EventCard
@@ -927,304 +999,114 @@ export default function ProfileScreen() {
         </View>
       ) : (
         <>
-          <Text style={styles.sectionTitle}>{t.profile.organizer}</Text>
-          <View style={styles.eventsContainer}>
-            {organizedEvents.length > 0 ? (
-              organizedEvents.map((event, index) => {
-                // Рассчитываем ширину карточки для трех колонок
-                const containerPadding = 40; // 20px с каждой стороны
-                const gap = 15; // Отступ между карточками
-                const availableWidth = SCREEN_WIDTH - containerPadding;
-                const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
-                const isLastInRow = (index + 1) % 3 === 0;
-                
-                return (
-                  <View
-                    key={event.id}
-                    style={[
-                      { width: cardWidth },
-                      !isLastInRow && { marginRight: gap }
-                    ]}
-                  >
-                    <EventCard
-                      id={event.id}
-                      title={event.title}
-                      description={event.description}
-                      date={event.date}
-                      time={event.time}
-                      location={event.location}
-                      price={event.price}
-                      participants={event.participants}
-                      maxParticipants={event.maxParticipants}
-                      organizerAvatar={event.organizerAvatar}
-                      organizerId={event.organizerId}
-                      variant="miniature_1"
-                      showSwipeAction={false}
-                      showOrganizerAvatar={false}
-                      mediaUrl={event.mediaUrl}
-                      mediaType={event.mediaType}
-                      mediaAspectRatio={event.mediaAspectRatio}
-                      participantsList={event.participantsList}
-                      participantsData={event.participantsData}
-                      onMiniaturePress={() => handleMiniaturePress(event)}
-                    />
-                  </View>
-                );
-              })
-            ) : (
-              <Text style={styles.emptyText}>{t.profile.noOrganizedEvents}</Text>
-            )}
-          </View>
+          {/* Единая сплошная сетка — ручная раскладка по рядам */}
+          {(() => {
+            const GAP = 4;
+            const PADDING = 20;
+            const containerW = SCREEN_WIDTH - PADDING * 2;
+            const CARD_W = Math.floor((containerW - GAP * 2) / 3);
+            const FOLDER_W = CARD_W * 2 + GAP;
 
-          <Text style={styles.sectionTitle}>{t.profile.participant}</Text>
-          <View style={styles.eventsContainer}>
-            {participatedEvents.length > 0 ? (
-              participatedEvents.map((event, index) => {
-                // Рассчитываем ширину карточки для трех колонок
-                const containerPadding = 40; // 20px с каждой стороны
-                const gap = 15; // Отступ между карточками
-                const availableWidth = SCREEN_WIDTH - containerPadding;
-                const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
-                const isLastInRow = (index + 1) % 3 === 0;
-                
-                return (
-                  <View
-                    key={event.id}
-                    style={[
-                      { width: cardWidth },
-                      !isLastInRow && { marginRight: gap }
-                    ]}
-                  >
-                    <EventCard
-                      id={event.id}
-                      title={event.title}
-                      description={event.description}
-                      date={event.date}
-                      time={event.time}
-                      displayDate={event.displayDate}
-                      location={event.location}
-                      price={event.price}
-                      participants={event.participants}
-                      maxParticipants={event.maxParticipants}
-                      organizerAvatar={event.organizerAvatar}
-                      organizerId={event.organizerId}
-                      variant="miniature_1"
-                      showSwipeAction={false}
-                      mediaUrl={event.mediaUrl}
-                      mediaType={event.mediaType}
-                      mediaAspectRatio={event.mediaAspectRatio}
-                      participantsList={event.participantsList}
-                      participantsData={event.participantsData}
-                      onMiniaturePress={() => handleMiniaturePress(event)}
-                    />
-                  </View>
-                );
-              })
-            ) : (
-              <Text style={styles.emptyText}>{t.profile.noParticipatedEvents}</Text>
-            )}
-          </View>
+            const allGridItems: Array<{ type: 'event' | 'folder'; data: Event | EventFolder }> = [];
+            organizedEvents.forEach(e => allGridItems.push({ type: 'event', data: e }));
+            participatedEvents.forEach(e => {
+              if (!allGridItems.find(i => i.type === 'event' && (i.data as Event).id === e.id))
+                allGridItems.push({ type: 'event', data: e });
+            });
+            if (eventFolders?.length > 0) {
+              eventFolders.forEach((f: EventFolder) => allGridItems.push({ type: 'folder', data: f }));
+            }
+            pastEvents.forEach(e => {
+              if (!allGridItems.find(i => i.type === 'event' && (i.data as Event).id === e.id))
+                allGridItems.push({ type: 'event', data: e });
+            });
 
-          <Text style={styles.memoriesTitle}>{t.profile.memories}</Text>
-          <View style={styles.memoriesContainer}>
-            {(() => {
-              // Объединяем папки и события в один массив для правильного позиционирования
-              const containerPadding = 40;
-              const gap = 15;
-              const availableWidth = SCREEN_WIDTH - containerPadding;
-              const singleCardWidth = (availableWidth - gap * 2) / 3;
-              const folderWidth = singleCardWidth * 2 + gap;
-              
-              const items: Array<{ type: 'folder' | 'event'; data: EventFolder | Event; index: number }> = [];
-              
-              // Добавляем папки
-              if (eventFolders && eventFolders.length > 0) {
-                eventFolders.forEach((folder: EventFolder) => {
-                  items.push({ type: 'folder', data: folder, index: items.length });
-                });
+            // Раскладываем по рядам: каждый ряд = 3 слота. Папка = 2 слота.
+            const rows: Array<Array<{ type: 'event' | 'folder'; data: any }>> = [];
+            let currentRow: typeof rows[0] = [];
+            let slotsUsed = 0;
+
+            allGridItems.forEach(item => {
+              const slots = item.type === 'folder' ? 2 : 1;
+              if (slotsUsed + slots > 3) {
+                rows.push(currentRow);
+                currentRow = [];
+                slotsUsed = 0;
               }
-              
-              // Добавляем события
-              if (pastEvents.length > 0) {
-                pastEvents.forEach((event: Event) => {
-                  items.push({ type: 'event', data: event, index: items.length });
-                });
+              currentRow.push(item);
+              slotsUsed += slots;
+              if (slotsUsed >= 3) {
+                rows.push(currentRow);
+                currentRow = [];
+                slotsUsed = 0;
               }
-              
-              if (items.length === 0) {
-                return <Text style={styles.emptyText}>{t.profile.memoriesEmpty}</Text>;
-              }
-              
-              // Рендерим элементы с правильным позиционированием
-              let currentPosition = 0; // Текущая позиция в сетке (0, 1, 2 - три колонки)
-              const renderedItems: React.ReactNode[] = [];
-              
-              items.forEach((item, itemIndex) => {
-                if (item.type === 'folder') {
-                  const folder = item.data as EventFolder;
-                  // Папка занимает 2 места (позиции 0 и 1)
-                  // Если текущая позиция не 0, пропускаем до следующей строки
-                  if (currentPosition !== 0) {
-                    // Пропускаем оставшиеся позиции в текущей строке
-                    while (currentPosition < 3) {
-                      currentPosition++;
-                    }
-                    currentPosition = 0; // Переходим на новую строку
-                  }
-                  
-                  // Теперь currentPosition === 0, можем отобразить папку
-                  renderedItems.push(
-                    <View
-                      key={`folder-${folder.id}`}
-                      style={[
-                        { width: folderWidth },
-                        { marginRight: gap }
-                      ]}
-                    >
-                      <FolderCard
-                        folder={folder}
-                        onPress={() => {
-                          setSelectedFolder(folder);
-                          setSelectedEvent(null);
-                          setShowEventFeed(true);
-                          
-                          // Прокручиваем к папке после рендера
-                          setTimeout(() => {
-                            // Создаем временный массив items для поиска индекса
-                            const tempItems: Array<{ type: 'folder' | 'event'; data: EventFolder | Event }> = [];
-                            if (eventFolders && eventFolders.length > 0) {
-                              eventFolders.forEach((f: EventFolder) => {
-                                tempItems.push({ type: 'folder', data: f });
-                              });
-                            }
-                            pastEvents.forEach((e: Event) => {
-                              tempItems.push({ type: 'event', data: e });
-                            });
-                            
-                            const itemIndex = tempItems.findIndex(item => item.type === 'folder' && (item.data as EventFolder).id === folder.id);
-                            if (itemIndex !== -1 && scrollViewRef.current) {
-                              const folderHeight = 250; // Примерная высота папки в feed варианте
-                              const marginBottom = 15;
-                              const totalItemHeight = folderHeight + marginBottom;
-                              const scrollPosition = itemIndex * totalItemHeight;
-                              
-                              scrollViewRef.current.scrollTo({
-                                y: scrollPosition,
-                                animated: true
-                              });
-                            }
-                          }, 100);
-                        }}
-                        variant="profile"
-                      />
-                    </View>
-                  );
-                  // После папки следующая позиция - 2 (3-й квадрант)
-                  currentPosition = 2;
-                } else {
-                  const event = item.data as Event;
-                  const isLastInRow = currentPosition === 2;
-                  
-                  renderedItems.push(
-                    <View
-                      key={event.id}
-                      style={[
-                        { width: singleCardWidth },
-                        !isLastInRow && { marginRight: gap }
-                      ]}
-                    >
-                      <View style={selectMode ? styles.selectableCardWrapper : undefined}>
-                        {selectMode && isEventPast(event) && (
-                          <TouchableOpacity
-                            style={[
-                              styles.checkbox,
-                              selectedEventIds.has(event.id) && styles.checkboxChecked
-                            ]}
-                            onPress={() => {
-                              const newSelected = new Set(selectedEventIds);
-                              if (newSelected.has(event.id)) {
-                                newSelected.delete(event.id);
+            });
+            if (currentRow.length > 0) rows.push(currentRow);
+
+            return (
+              <View style={{ paddingHorizontal: PADDING }}>
+                {rows.map((row, rowIdx) => (
+                  <View key={rowIdx} style={{ flexDirection: 'row', marginBottom: GAP }}>
+                    {row.map((item, colIdx) => {
+                      const isFolder = item.type === 'folder';
+                      const w = isFolder ? FOLDER_W : CARD_W;
+                      const ml = colIdx > 0 ? GAP : 0;
+
+                      if (isFolder) {
+                        const folder = item.data as EventFolder;
+                        return (
+                          <View key={`f-${folder.id}`} style={{ width: w, height: CARD_W, marginLeft: ml, borderRadius: 14, overflow: 'hidden' }} pointerEvents="box-none">
+                            <FolderCard folder={folder} onPress={() => router.push(`/event-folder/${folder.id}`)} variant="profile" />
+                          </View>
+                        );
+                      }
+                      const event = item.data as Event;
+                      const isSelected = selectedEventIds.has(event.id);
+                      return (
+                        <View key={event.id} style={{ width: w, height: CARD_W, marginLeft: ml, borderRadius: 14, overflow: 'hidden' }}>
+                          <EventCard
+                            id={event.id} title={event.title} description={event.description}
+                            date={event.date} time={event.time} location={event.location}
+                            price={event.price} participants={event.participants}
+                            maxParticipants={event.maxParticipants}
+                            organizerAvatar={event.organizerAvatar} organizerId={event.organizerId}
+                            variant="miniature_1" showSwipeAction={false} showOrganizerAvatar={false}
+                            mediaUrl={event.mediaUrl} mediaType={event.mediaType}
+                            mediaAspectRatio={event.mediaAspectRatio}
+                            participantsList={event.participantsList}
+                            participantsData={event.participantsData}
+                            onMiniaturePress={() => {
+                              if (selectMode) {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                setSelectedEventIds(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(event.id)) next.delete(event.id);
+                                  else next.add(event.id);
+                                  return next;
+                                });
                               } else {
-                                newSelected.add(event.id);
+                                handleMiniaturePress(event);
                               }
-                              setSelectedEventIds(newSelected);
                             }}
-                          >
-                            {selectedEventIds.has(event.id) && (
-                              <Text style={styles.checkmark}>✓</Text>
-                            )}
-                          </TouchableOpacity>
-                        )}
-                        <EventCard
-                          id={event.id}
-                          title={event.title}
-                          description={event.description}
-                          date={event.date}
-                          time={event.time}
-                          displayDate={event.displayDate}
-                          location={event.location}
-                          price={event.price}
-                          participants={event.participants}
-                          maxParticipants={event.maxParticipants}
-                          organizerAvatar={event.organizerAvatar}
-                          organizerId={event.organizerId}
-                          variant="miniature_1"
-                          showSwipeAction={false}
-                          showOrganizerAvatar={false}
-                          mediaUrl={event.mediaUrl}
-                          mediaType={event.mediaType}
-                          mediaAspectRatio={event.mediaAspectRatio}
-                          participantsList={event.participantsList}
-                          participantsData={event.participantsData}
-                          context="memories"
-                          onMiniaturePress={() => {
-                            if (selectMode) {
-                              const newSelected = new Set(selectedEventIds);
-                              if (newSelected.has(event.id)) {
-                                newSelected.delete(event.id);
-                              } else {
-                                newSelected.add(event.id);
-                              }
-                              setSelectedEventIds(newSelected);
-                            } else {
-                              handleMemoryPress(event.id);
-                            }
-                          }}
-                          onLongPress={() => {
-                            // Режим select доступен только для прошедших событий
-                            if (!selectMode && isEventPast(event)) {
-                              logger.debug('Long press detected, entering select mode', { 
-                                eventId: event.id, 
-                                isPast: isEventPast(event),
-                                currentSelectMode: selectMode 
-                              });
-                              setSelectMode(true);
-                              setSelectedEventIds(new Set([event.id]));
-                              logger.debug('Select mode activated', { 
-                                selectModeAfter: true,
-                                selectedCount: 1 
-                              });
-                            } else {
-                              logger.debug('Long press ignored', { 
-                                eventId: event.id,
-                                isPast: isEventPast(event),
-                                currentSelectMode: selectMode
-                              });
-                            }
-                          }}
-                        />
-                      </View>
-                    </View>
-                  );
-                  
-                  // После события переходим на следующую позицию
-                  currentPosition = (currentPosition + 1) % 3;
-                }
-              });
-              
-              return renderedItems;
-            })()}
-          </View>
+                            onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSelectMode(true); setSelectedEventIds(new Set([event.id])); }}
+                          />
+                          {selectMode && (
+                            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 14, borderWidth: isSelected ? 3 : 0, borderColor: '#FF8D32', backgroundColor: isSelected ? 'transparent' : 'rgba(0,0,0,0.45)' }} pointerEvents="none">
+                              <View style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: isSelected ? '#FF8D32' : 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', borderWidth: isSelected ? 0 : 1, borderColor: 'rgba(255,255,255,0.4)' }}>
+                                {isSelected && <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>✓</Text>}
+                              </View>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </View>
+                ))}
+              </View>
+            );
+          })()}
+
+
         </>
       )}
       </ScrollView>
@@ -1267,66 +1149,55 @@ export default function ProfileScreen() {
       )}
 
       {/* Модальное окно создания папки */}
-      <Modal
+      <CreateFolderModal
         visible={showCreateFolderModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowCreateFolderModal(false)}
-      >
-        <CreateFolderModal
-          onClose={() => setShowCreateFolderModal(false)}
-          onSubmit={handleCreateFolderSubmit}
-        />
-      </Modal>
+        onClose={() => setShowCreateFolderModal(false)}
+        onSubmit={handleCreateFolderSubmit}
+      />
 
       {/* Модальное окно выбора папки для перемещения событий */}
-      <Modal
+      <AddToFolderModal
         visible={showAddToFolderModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowAddToFolderModal(false)}
-      >
-        <AddToFolderModal
-          eventIds={Array.from(selectedEventIds)}
-          onClose={() => {
-            setShowAddToFolderModal(false);
-            setSelectedFolderIds(new Set());
-          }}
-          onCreateNewFolder={() => {
-            setShowAddToFolderModal(false);
-            setShowCreateFolderModal(true);
-          }}
-          onSubmit={async (folderIds: string[]) => {
-            try {
-              const errors: string[] = [];
-              for (const folderId of folderIds) {
-                for (const eventId of Array.from(selectedEventIds)) {
-                  try {
-                    await addEventToFolder(folderId, eventId);
-                  } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка';
-                    logger.error(`Failed to add event ${eventId} to folder ${folderId}:`, error);
-                    errors.push(errorMessage);
-                  }
+        eventIds={Array.from(selectedEventIds)}
+        onClose={() => {
+          setShowAddToFolderModal(false);
+          setSelectedFolderIds(new Set());
+        }}
+        onCreateNewFolder={() => {
+          setShowAddToFolderModal(false);
+          setTimeout(() => setShowCreateFolderModal(true), 300);
+        }}
+        onSubmit={async (folderIds: string[]) => {
+          try {
+            const errors: string[] = [];
+            for (const folderId of folderIds) {
+              for (const eventId of Array.from(selectedEventIds)) {
+                try {
+                  await addEventToFolder(folderId, eventId);
+                } catch (error) {
+                  const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка';
+                  logger.error(`Failed to add event ${eventId} to folder ${folderId}:`, error);
+                  errors.push(errorMessage);
                 }
               }
-              
-              if (errors.length > 0) {
-                Alert.alert('Частичная ошибка', `Некоторые события не удалось добавить:\n${errors.slice(0, 3).join('\n')}${errors.length > 3 ? '\n...' : ''}`);
-              } else {
-                Alert.alert('Готово', `События добавлены в ${folderIds.length} ${folderIds.length === 1 ? 'папку' : 'папок'}`);
-              }
-              setShowAddToFolderModal(false);
-              setSelectMode(false);
-              setSelectedEventIds(new Set());
-            } catch (error) {
-              const errorMessage = error instanceof Error ? error.message : 'Не удалось добавить события в папку';
-              logger.error('Failed to add events to folders:', error);
-              Alert.alert('Ошибка', errorMessage);
             }
-          }}
-        />
-      </Modal>
+
+            if (errors.length > 0) {
+              Alert.alert('Частичная ошибка', `Некоторые события не удалось добавить:\n${errors.slice(0, 3).join('\n')}${errors.length > 3 ? '\n...' : ''}`);
+            } else {
+              Alert.alert('Готово', `События добавлены в ${folderIds.length} ${folderIds.length === 1 ? 'папку' : 'папок'}`);
+            }
+            await refreshEventFolders();
+            setShowAddToFolderModal(false);
+            setSelectMode(false);
+            setSelectedEventIds(new Set());
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Не удалось добавить события в папку';
+            logger.error('Failed to add events to folders:', error);
+            Alert.alert('Ошибка', errorMessage);
+          }
+        }}
+      />
 
       {/* Модальное окно для аватарки */}
       <Modal
@@ -1356,7 +1227,7 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   scrollContainer: {
     flex: 1,
@@ -1372,13 +1243,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 60,
     paddingBottom: 15,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   searchInputContainer: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 20,
     paddingHorizontal: 15,
     paddingVertical: 10,
@@ -1386,19 +1257,19 @@ const styles = StyleSheet.create({
   },
   searchIcon: {
     fontSize: 16,
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     marginRight: 8,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: '#FFF',
+    color: '#f4f4f5',
   },
   mapButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 10,
@@ -1410,7 +1281,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1423,15 +1294,44 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 20,
   },
+  avatarContainerWeb: {
+    position: 'relative',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
   avatarContainer: {
     position: 'relative',
     alignItems: 'center',
     marginBottom: 10,
   },
   profileAvatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 108,
+    height: 108,
+    borderRadius: 32,
+    borderWidth: 3,
+    borderColor: 'rgba(255,141,50,0.55)',
+  },
+  settingsButtonWeb: {
+    position: 'absolute',
+    top: 36,
+    left: 100,
+    width: 32,
+    height: 32,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#16161a',
+    backgroundColor: '#1c1c20',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  settingsIconWeb: {
+    fontSize: 16,
+    color: '#f4f4f5',
   },
   settingsButton: {
     position: 'absolute',
@@ -1440,32 +1340,35 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#121212',
+    borderColor: '#0a0a0c',
   },
   settingsIcon: {
     fontSize: 18,
   },
   username: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFF',
-    marginBottom: 5,
+    fontSize: 21,
+    fontWeight: '700',
+    color: '#f4f4f5',
+    marginBottom: 4,
+    letterSpacing: -0.3,
   },
   nameAndAge: {
-    fontSize: 16,
-    color: '#999',
-    marginBottom: 8,
+    fontSize: 14.5,
+    color: 'rgba(244,244,245,0.5)',
+    marginBottom: 10,
+    fontWeight: '500',
   },
   bio: {
     fontSize: 14,
-    color: '#CCC',
+    color: 'rgba(244,244,245,0.65)',
     textAlign: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 20,
+    marginBottom: 22,
+    paddingHorizontal: 28,
+    lineHeight: 20,
   },
   statsContainer: {
     alignItems: 'center',
@@ -1476,24 +1379,33 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     width: '100%',
     marginBottom: 10,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
+    gap: 8,
   },
   statItem: {
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
     flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 18,
   },
   statNumber: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FFF',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#f4f4f5',
+    letterSpacing: -0.2,
   },
   statLabel: {
-    fontSize: 10,
-    color: '#999',
-    marginTop: 2,
+    fontSize: 10.5,
+    color: 'rgba(244,244,245,0.48)',
+    marginTop: 3,
     textAlign: 'center',
+    fontWeight: '500',
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
   },
   // Результаты поиска
   searchResults: {
@@ -1502,7 +1414,7 @@ const styles = StyleSheet.create({
   searchResultsTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginHorizontal: 20,
     marginTop: 10,
     marginBottom: 15,
@@ -1510,11 +1422,12 @@ const styles = StyleSheet.create({
   // Обычные разделы
   sectionTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFF',
+    fontWeight: '700',
+    color: '#f4f4f5',
     marginHorizontal: 20,
-    marginTop: 20,
-    marginBottom: 10,
+    marginTop: 22,
+    marginBottom: 12,
+    letterSpacing: -0.3,
   },
   // Устаревшие стили, больше не используются
   eventsContainer: {
@@ -1522,12 +1435,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'flex-start',
+    width: '100%', // Ensure it takes full width of its parent for flexWrap to work
   },
   memoriesContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'flex-start',
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
     width: '100%',
     margin: 0,
     paddingHorizontal: 20,
@@ -1542,14 +1456,14 @@ const styles = StyleSheet.create({
   memoriesTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginHorizontal: 20,
     marginTop: 20,
     marginBottom: 10,
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     textAlign: 'center',
     marginTop: 20,
     marginHorizontal: 20,
@@ -1564,7 +1478,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   goToEventButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FF8D32',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
@@ -1572,7 +1486,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   goToEventText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: '600',
   },
@@ -1583,7 +1497,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   backText: {
-    color: '#007AFF',
+    color: '#FF8D32',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -1637,46 +1551,46 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: '#f4f4f5',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     zIndex: 1000,
     justifyContent: 'center',
     alignItems: 'center',
   },
   checkboxChecked: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
+    borderColor: '#FF8D32',
   },
   checkmark: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: 'bold',
   },
   // Панель действий в режиме select
   actionBar: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#1A1A1A',
-    borderTopWidth: 1,
-    borderTopColor: '#333333',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    paddingBottom: 34, // Отступ для безопасной зоны внизу
+    bottom: 90,
+    left: 12,
+    right: 12,
+    backgroundColor: '#1c1c20',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 10,
-    zIndex: 1000,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 20,
+    zIndex: 10000,
   },
   actionButton: {
     flex: 1,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 12,
@@ -1684,12 +1598,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   actionButtonText: {
-    color: '#FFFFFF',
+    color: '#0A0A0A',
     fontSize: 16,
     fontWeight: '600',
   },
   actionButtonDisabled: {
-    backgroundColor: '#333333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     opacity: 0.5,
   },
   cancelButton: {
@@ -1698,7 +1612,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cancelButtonText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 16,
   },
 });

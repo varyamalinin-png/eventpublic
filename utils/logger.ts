@@ -20,8 +20,8 @@ const LOG_LEVELS: Record<LogLevel, number> = {
 
 class Logger {
   private config: LoggerConfig = {
-    enabled: typeof __DEV__ !== 'undefined' ? __DEV__ : (process.env.NODE_ENV !== 'production'), // Включаем логи только в режиме разработки
-    level: 'debug',
+    enabled: typeof __DEV__ !== 'undefined' ? __DEV__ : (process.env.NODE_ENV !== 'production'),
+    level: 'warn', // debug/info не выводятся в терминал; для отладки установите level: 'debug'
   };
 
   private shouldLog(level: LogLevel): boolean {

@@ -67,7 +67,7 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginBottom: 8,
   },
   emptySubtext: {

@@ -11,6 +11,8 @@ import { useRouter } from 'expo-router';
 import { apiRequest } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { AppIcon } from '../components/ui/AppIcon';
+import { Palette } from '../constants/DesignSystem';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('MyComplaints');
@@ -39,7 +41,7 @@ interface Complaint {
 
 const STATUS_COLORS: Record<ComplaintStatus, string> = {
   PENDING: '#FFA500',
-  REVIEWED: '#007AFF',
+  REVIEWED: '#FF8D32',
   RESOLVED: '#34C759',
   REJECTED: '#FF3B30',
 };
@@ -92,8 +94,8 @@ export default function MyComplaintsScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backButton}>← Назад</Text>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+          <AppIcon name="chevronLeft" size={24} color={Palette.text} />
         </TouchableOpacity>
         <Text style={styles.title}>Мои жалобы</Text>
         <View style={styles.placeholder} />
@@ -122,9 +124,12 @@ export default function MyComplaintsScreen() {
             <View key={complaint.id} style={styles.complaintCard}>
               <View style={styles.complaintHeader}>
                 <View style={styles.complaintType}>
-                  <Text style={styles.complaintTypeText}>
-                    {complaint.type === 'EVENT' ? '📅 Событие' : '👤 Пользователь'}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <AppIcon name={complaint.type === 'EVENT' ? 'calendar' : 'user'} size={13} color={Palette.textDim} />
+                    <Text style={styles.complaintTypeText}>
+                      {complaint.type === 'EVENT' ? 'Событие' : 'Пользователь'}
+                    </Text>
+                  </View>
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: STATUS_COLORS[complaint.status] }]}>
                   <Text style={styles.statusText}>{STATUS_LABELS[complaint.status]}</Text>
@@ -174,7 +179,7 @@ export default function MyComplaintsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   header: {
     flexDirection: 'row',
@@ -183,16 +188,16 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingBottom: 15,
     paddingHorizontal: 20,
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#141417',
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   backButton: {
-    color: '#007AFF',
+    color: '#FF8D32',
     fontSize: 16,
   },
   title: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: 'bold',
   },
@@ -203,13 +208,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   complaintCard: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#141417',
     padding: 15,
     marginHorizontal: 15,
     marginTop: 15,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: 'rgba(255,255,255,0.07)',
   },
   complaintHeader: {
     flexDirection: 'row',
@@ -218,13 +223,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   complaintType: {
-    backgroundColor: '#2A2A2A',
+    backgroundColor: '#1c1c20',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
   },
   complaintTypeText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: '600',
   },
@@ -234,18 +239,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   statusText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: '600',
   },
   reasonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 8,
   },
   descriptionText: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     marginBottom: 10,
   },
@@ -253,39 +258,39 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   reportedLabel: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 12,
     marginBottom: 2,
   },
   reportedValue: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 14,
   },
   responseSection: {
-    backgroundColor: '#2A2A2A',
+    backgroundColor: '#1c1c20',
     padding: 12,
     borderRadius: 8,
     marginTop: 10,
     marginBottom: 10,
   },
   responseLabel: {
-    color: '#007AFF',
+    color: '#FF8D32',
     fontSize: 12,
     fontWeight: '600',
     marginBottom: 5,
   },
   responseText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 14,
   },
   complaintFooter: {
     marginTop: 10,
     paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: '#333',
+    borderTopColor: 'rgba(255,255,255,0.07)',
   },
   dateText: {
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     fontSize: 12,
   },
   emptyContainer: {
@@ -293,13 +298,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyText: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 10,
   },
   emptySubtext: {
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     fontSize: 14,
     textAlign: 'center',
   },

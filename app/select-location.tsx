@@ -1,25 +1,46 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useRouter } from 'expo-router';
 import { createLogger } from '../utils/logger';
+import { AppIcon } from '../components/ui/AppIcon';
+import { Palette } from '../constants/DesignSystem';
 
 const logger = createLogger('SelectLocation');
 
 // Глобальное хранилище для выбранного места
-let globalSelectedLocation: { latitude: number; longitude: number; address: string } | null = null;
+// На вебе используем window для синхронизации с веб-версией
+const getGlobalStorage = () => {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    if (!(window as any).__selectedLocationStorage) {
+      (window as any).__selectedLocationStorage = { location: null };
+    }
+    return (window as any).__selectedLocationStorage;
+  }
+  // Для мобильных используем локальную переменную
+  if (!(global as any).__selectedLocationStorage) {
+    (global as any).__selectedLocationStorage = { location: null };
+  }
+  return (global as any).__selectedLocationStorage;
+};
 
 // Функция для получения выбранного места
 export function getSelectedLocation() {
-  return globalSelectedLocation;
+  return getGlobalStorage().location;
 }
 
 // Функция для очистки выбранного места
 export function clearSelectedLocation() {
-  globalSelectedLocation = null;
+  getGlobalStorage().location = null;
 }
 
+// На вебе используем веб-версию через экспорт Platform.OS
 export default function SelectLocationScreen() {
+  if (Platform.OS === 'web') {
+    // Динамически импортируем веб-версию
+    const WebSelectLocationScreen = require('./select-location.web').default;
+    return <WebSelectLocationScreen />;
+  }
   const router = useRouter();
   const webViewRef = useRef<WebView>(null);
   const [selectedLocation, setSelectedLocation] = useState<{
@@ -75,7 +96,7 @@ export default function SelectLocationScreen() {
                 ].join('')
               }, {
                 preset: 'islands#circleDotIcon',
-                iconColor: '#8B5CF6'
+                iconColor: '#FF8D32'
               });
 
               myMap.geoObjects.add(placemark);
@@ -164,7 +185,7 @@ export default function SelectLocationScreen() {
     }
 
     // Сохраняем выбранное место в глобальное хранилище
-    globalSelectedLocation = selectedLocation;
+    getGlobalStorage().location = selectedLocation;
     router.back();
   };
 
@@ -207,9 +228,12 @@ export default function SelectLocationScreen() {
       {/* Выбранное место */}
       {selectedLocation && (
         <View style={styles.selectedLocationContainer}>
-          <Text style={styles.selectedLocationText}>
-            📍 {selectedLocation.address}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <AppIcon name="pin" size={13} color={Palette.textDim} />
+            <Text style={[styles.selectedLocationText, { flex: 1 }]}>
+              {selectedLocation.address}
+            </Text>
+          </View>
         </View>
       )}
 
@@ -230,7 +254,7 @@ export default function SelectLocationScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   header: {
     flexDirection: 'row',
@@ -238,35 +262,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 60,
     paddingBottom: 20,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   backButton: {
     marginRight: 15,
   },
   backButtonText: {
-    color: '#8B5CF6',
+    color: '#FF8D32',
     fontSize: 16,
     fontWeight: '600',
   },
   headerTitle: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: 'bold',
   },
   searchContainer: {
     paddingHorizontal: 20,
     paddingBottom: 10,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   searchInput: {
     height: 50,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#141417',
     borderRadius: 8,
     paddingHorizontal: 15,
     fontSize: 16,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: 'rgba(255,255,255,0.07)',
   },
   mapContainer: {
     flex: 1,
@@ -275,7 +299,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: 'rgba(255,255,255,0.07)',
   },
   mapWebView: {
     flex: 1,
@@ -283,33 +307,33 @@ const styles = StyleSheet.create({
   selectedLocationContainer: {
     paddingHorizontal: 20,
     paddingVertical: 10,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#141417',
     borderTopWidth: 1,
-    borderTopColor: '#333',
+    borderTopColor: 'rgba(255,255,255,0.07)',
   },
   selectedLocationText: {
-    color: '#8B5CF6',
+    color: '#FF8D32',
     fontSize: 14,
   },
   footer: {
     paddingHorizontal: 20,
     paddingVertical: 20,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
     borderTopWidth: 1,
-    borderTopColor: '#333',
+    borderTopColor: 'rgba(255,255,255,0.07)',
   },
   confirmButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
   },
   confirmButtonDisabled: {
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     opacity: 0.5,
   },
   confirmButtonText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
   },

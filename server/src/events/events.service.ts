@@ -782,11 +782,12 @@ export class EventsService {
       throw new BadRequestException('Membership not found for this event');
     }
 
-    // Проверяем количество участников ДО обновления статуса
+    // Проверяем количество участников ДО обновления статуса (организатор не считается)
     const acceptedCountBefore = await this.prisma.eventMembership.count({
       where: {
         eventId,
         status: MembershipStatus.ACCEPTED,
+        userId: { not: organizerId }, // Исключаем организатора из подсчета
       },
     });
 
@@ -810,37 +811,11 @@ export class EventsService {
         // Не прерываем выполнение, если создание чата не удалось
       }
     } else if (accept && acceptedCountBefore > 0) {
-      // Если чат уже существует, добавляем нового участника
+      // Если чат уже существует, синхронизируем всех участников события с чатом
       try {
-        const existingChat = await this.prisma.chat.findUnique({
-          where: { eventId },
-          include: { participants: true },
-        });
-
-        if (existingChat) {
-          const isParticipant = existingChat.participants.some(
-            p => p.userId === membership.userId,
-          );
-          if (!isParticipant) {
-            await this.prisma.chatParticipant.create({
-              data: {
-                chatId: existingChat.id,
-                userId: membership.userId,
-              },
-            });
-            console.log(`[EventsService] Added participant ${membership.userId} to event chat`);
-          }
-        } else {
-          // Если чат почему-то не существует, создаем его
-          await this.chatsService.createEventChat(
-            organizerId,
-            eventId,
-            [organizerId, membership.userId],
-          );
-          console.log(`[EventsService] Event chat created for event ${eventId} (late creation)`);
-        }
+        await this.syncEventMembersToChat(eventId);
       } catch (error) {
-        console.error(`[EventsService] Failed to add participant to event chat:`, error);
+        console.error(`[EventsService] Failed to sync event members to chat:`, error);
         // Не прерываем выполнение
       }
     }
@@ -910,11 +885,12 @@ export class EventsService {
     const event = membership.event;
     const user = membership.user;
 
-    // Проверка лимита участников
+    // Проверка лимита участников (организатор не считается)
     const acceptedCountBefore = await this.prisma.eventMembership.count({
       where: {
         eventId: event.id,
         status: MembershipStatus.ACCEPTED,
+        userId: { not: event.organizerId }, // Исключаем организатора из подсчета
       },
     });
 
@@ -959,37 +935,11 @@ export class EventsService {
         // Не прерываем выполнение
       }
     } else {
-      // Если чат уже существует, добавляем нового участника
+      // Если чат уже существует, синхронизируем всех участников события с чатом
       try {
-        const existingChat = await this.prisma.chat.findUnique({
-          where: { eventId: event.id },
-          include: { participants: true },
-        });
-
-        if (existingChat) {
-          const isParticipant = existingChat.participants.some(
-            p => p.userId === userId,
-          );
-          if (!isParticipant) {
-            await this.prisma.chatParticipant.create({
-              data: {
-                chatId: existingChat.id,
-                userId: userId,
-              },
-            });
-            console.log(`[EventsService] Added participant ${userId} to event chat (via invitation)`);
-          }
-        } else {
-          // Если чат почему-то не существует, создаем его
-          await this.chatsService.createEventChat(
-            event.organizerId,
-            event.id,
-            [event.organizerId, userId],
-          );
-          console.log(`[EventsService] Event chat created for event ${event.id} (late creation via invitation)`);
-        }
+        await this.syncEventMembersToChat(event.id);
       } catch (error) {
-        console.error(`[EventsService] Failed to add participant to event chat:`, error);
+        console.error(`[EventsService] Failed to sync event members to chat:`, error);
         // Не прерываем выполнение
       }
     }
@@ -1125,6 +1075,9 @@ export class EventsService {
         actorName: user.name || user.username,
       },
     );
+
+    // Удаляем пользователя из чата события и отправляем системное сообщение
+    await this.removeUserFromEventChat(eventId, userId, user.name || user.username || 'Пользователь');
 
     // Удаляем membership
     return this.prisma.eventMembership.delete({
@@ -1344,6 +1297,9 @@ export class EventsService {
       },
     );
     }
+
+    // Удаляем пользователя из чата события и отправляем системное сообщение
+    await this.removeUserFromEventChat(eventId, userId, user.name || user.username || 'Пользователь');
 
     return this.prisma.eventMembership.delete({ where: { id: membership.id } });
   }
@@ -1637,8 +1593,8 @@ export class EventsService {
         },
       });
 
-      // 2. Обновляем роли в memberships
-      // Старый организатор становится обычным участником
+      // 2. Удаляем старого организатора из участников полностью
+      // Старый организатор должен полностью выйти из события, а не стать участником
       const oldOrganizerMembership = await tx.eventMembership.findUnique({
         where: {
           userId_eventId: {
@@ -1649,10 +1605,22 @@ export class EventsService {
       });
 
       if (oldOrganizerMembership) {
-        await tx.eventMembership.update({
+        // Удаляем membership старого организатора
+        await tx.eventMembership.delete({
           where: { id: oldOrganizerMembership.id },
-          data: {
-            role: EventRole.PARTICIPANT,
+        });
+      }
+
+      // Удаляем старого организатора из профиля события
+      const eventProfile = await tx.eventProfile.findUnique({
+        where: { eventId },
+      });
+
+      if (eventProfile) {
+        await tx.eventProfileParticipant.deleteMany({
+          where: {
+            profileId: eventProfile.id,
+            userId: currentOrganizerId,
           },
         });
       }
@@ -2102,5 +2070,178 @@ export class EventsService {
     await this.recurringEventsService.cancelParticipation(eventId, userId);
 
     return { success: true };
+  }
+
+  // 🚪 УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ ИЗ ЧАТА СОБЫТИЯ И ОТПРАВКА СИСТЕМНОГО СООБЩЕНИЯ
+  private async removeUserFromEventChat(eventId: string, userId: string, userName: string) {
+    try {
+      // Находим чат события
+      const chat = await this.prisma.chat.findUnique({
+        where: { eventId },
+        include: {
+          participants: true,
+        },
+      });
+
+      if (!chat) {
+        logger.debug(`Chat not found for event ${eventId}, skipping chat removal`);
+        return;
+      }
+
+      // Проверяем, является ли пользователь участником чата
+      const participant = chat.participants.find(p => p.userId === userId);
+      if (!participant) {
+        logger.debug(`User ${userId} is not a participant of chat ${chat.id}`);
+        return;
+      }
+
+      // Отправляем системное сообщение о выходе пользователя
+      const systemMessage = await this.prisma.message.create({
+        data: {
+          chatId: chat.id,
+          senderId: userId, // Отправитель - покинувший пользователь
+          content: `${userName} покинул(а) событие`,
+        },
+        include: {
+          sender: true,
+        },
+      });
+
+      // Обновляем lastMessageId в чате
+      await this.prisma.chat.update({
+        where: { id: chat.id },
+        data: {
+          lastMessageId: systemMessage.id,
+          updatedAt: new Date(),
+        },
+      });
+
+      // Удаляем пользователя из участников чата
+      await this.prisma.chatParticipant.delete({
+        where: {
+          chatId_userId: {
+            chatId: chat.id,
+            userId: userId,
+          },
+        },
+      });
+
+      // Отправляем WebSocket событие о новом системном сообщении всем участникам чата
+      const remainingParticipantIds = chat.participants
+        .filter(p => p.userId !== userId)
+        .map(p => p.userId);
+      
+      if (remainingParticipantIds.length > 0) {
+        this.websocketService.emitToChat(chat.id, 'message:new', systemMessage);
+        this.websocketService.emitToUsers(remainingParticipantIds, 'chats:update', {});
+      }
+
+      logger.info(`User ${userId} removed from event chat ${chat.id}, system message sent`);
+    } catch (error) {
+      logger.error(`Error removing user from event chat:`, error);
+      // Не прерываем выполнение, если ошибка при работе с чатом
+    }
+  }
+
+  // 🔄 СИНХРОНИЗАЦИЯ ВСЕХ УЧАСТНИКОВ СОБЫТИЯ С ЧАТОМ
+  private async syncEventMembersToChat(eventId: string) {
+    try {
+      // Получаем всех участников события (ACCEPTED memberships + организатор)
+      const event = await this.prisma.event.findUnique({
+        where: { id: eventId },
+        include: {
+          memberships: {
+            where: { status: MembershipStatus.ACCEPTED },
+          },
+        },
+      });
+
+      if (!event) {
+        logger.debug(`Event ${eventId} not found, skipping chat sync`);
+        return;
+      }
+
+      // Находим чат события или создаем его, если нет
+      let chat = await this.prisma.chat.findUnique({
+        where: { eventId },
+        include: {
+          participants: true,
+        },
+      });
+
+      if (!chat) {
+        // Если чата нет, но есть участники - создаем его
+        const participants = event.memberships
+          .filter(m => m.userId !== event.organizerId)
+          .map(m => m.userId);
+        
+        if (participants.length > 0) {
+          logger.info(`Chat not found for event ${eventId}, creating new chat with ${participants.length} participants`);
+          try {
+            chat = await this.chatsService.createEventChat(
+              event.organizerId,
+              eventId,
+              [event.organizerId, ...participants],
+            );
+            logger.info(`Chat created for event ${eventId}: ${chat.id}`);
+          } catch (error) {
+            logger.error(`Failed to create chat for event ${eventId}:`, error);
+            return;
+          }
+        } else {
+          logger.debug(`Chat not found for event ${eventId} and no participants, skipping sync`);
+          return;
+        }
+      }
+
+      // Собираем всех участников события: организатор + все ACCEPTED memberships
+      const eventMemberIds = new Set<string>([event.organizerId]);
+      event.memberships.forEach(m => eventMemberIds.add(m.userId));
+
+      // Получаем текущих участников чата
+      const chatParticipantIds = new Set(chat.participants.map(p => p.userId));
+
+      // Добавляем участников события, которых нет в чате
+      const toAdd = Array.from(eventMemberIds).filter(id => !chatParticipantIds.has(id));
+      if (toAdd.length > 0) {
+        await this.prisma.chatParticipant.createMany({
+          data: toAdd.map(userId => ({
+            chatId: chat.id,
+            userId: userId,
+          })),
+          skipDuplicates: true,
+        });
+        logger.info(`Added ${toAdd.length} event members to chat ${chat.id}`);
+      }
+
+      // Удаляем участников чата, которых нет в событии (кроме организатора, он всегда должен быть)
+      const toRemove = Array.from(chatParticipantIds).filter(
+        id => !eventMemberIds.has(id) && id !== event.organizerId
+      );
+      if (toRemove.length > 0) {
+        await this.prisma.chatParticipant.deleteMany({
+          where: {
+            chatId: chat.id,
+            userId: { in: toRemove },
+          },
+        });
+        logger.info(`Removed ${toRemove.length} non-members from chat ${chat.id}`);
+      }
+
+      // Убеждаемся, что организатор всегда в чате
+      const organizerInChat = chatParticipantIds.has(event.organizerId);
+      if (!organizerInChat) {
+        await this.prisma.chatParticipant.create({
+          data: {
+            chatId: chat.id,
+            userId: event.organizerId,
+          },
+        });
+        logger.info(`Added organizer ${event.organizerId} to chat ${chat.id}`);
+      }
+    } catch (error) {
+      logger.error(`Error syncing event members to chat:`, error);
+      // Не прерываем выполнение, если ошибка при синхронизации
+    }
   }
 }

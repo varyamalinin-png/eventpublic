@@ -1,10 +1,11 @@
-import React, { useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, PanResponder } from 'react-native';
+import React from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { formatTimeAgo } from '../utils/timeAgo';
+import { AppIcon } from './ui/AppIcon';
 
 interface RequestItemProps {
   id: string;
@@ -13,511 +14,264 @@ interface RequestItemProps {
   userId?: string;
   isOutgoing?: boolean;
   status?: 'pending' | 'accepted' | 'rejected';
-  isInvite?: boolean; // Флаг для приглашений
-  isBusinessAccount?: boolean; // Флаг для бизнес-аккаунта
-  createdAt?: Date | string; // Дата создания запроса
+  isInvite?: boolean;
+  isBusinessAccount?: boolean;
+  createdAt?: Date | string;
   onAccept?: (id: string) => void;
   onDecline?: (id: string) => void;
   onPress?: () => void;
 }
 
-export default function RequestItem({ 
-  id, 
-  type, 
-  eventId, 
-  userId, 
-  isOutgoing = false,
-  status = 'pending',
-  isInvite = false,
-  isBusinessAccount = false,
-  createdAt,
-  onAccept, 
-  onDecline,
-  onPress
+function getRequestTypeConfig(type: string, isInvite: boolean, isOutgoing: boolean, status: string) {
+  if (isOutgoing) {
+    if (status === 'accepted') return { emoji: '✓', color: '#34C759' };
+    return { emoji: '↗', color: '#FF9500' };
+  }
+  if (isInvite) return { emoji: '✉', color: '#AF52DE' };
+  if (type === 'friend') return { emoji: '👤', color: '#5AC8FA' };
+  return { emoji: '＋', color: '#FF8D32' };
+}
+
+function RequestItem({
+  id, type, eventId, userId,
+  isOutgoing = false, status = 'pending',
+  isInvite = false, isBusinessAccount = false,
+  createdAt, onAccept, onDecline, onPress,
 }: RequestItemProps) {
   const router = useRouter();
   const { t } = useLanguage();
   const { events, getUserData, getEventPhotoForUser } = useEvents();
   const { user: authUser } = useAuth();
-  const translateX = useRef(new Animated.Value(0)).current;
-  
+
   const event = eventId ? events.find(e => e.id === eventId) : null;
-  
-  // Отладочная информация для исходящих запросов
-  if (isOutgoing && __DEV__) {
-    console.log('[RequestItem] Outgoing request:', {
-      type,
-      eventId,
-      userId,
-      isInvite,
-      hasEvent: !!event,
-      eventTitle: event?.title,
-    });
-  }
   const user = userId ? getUserData(userId) : null;
   const currentUserId = authUser?.id ?? null;
   const currentUser = currentUserId ? getUserData(currentUserId) : null;
 
-  const panResponder = PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gestureState) => {
-      return Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dy) < 50;
-    },
-    onPanResponderMove: (_, gestureState) => {
-      if (gestureState.dx < 0) {
-        translateX.setValue(Math.max(gestureState.dx, -120));
-      }
-    },
-    onPanResponderRelease: (_, gestureState) => {
-      if (gestureState.dx < -60) {
-        Animated.spring(translateX, {
-          toValue: -120,
-          useNativeDriver: true,
-        }).start();
-      } else {
-        Animated.spring(translateX, {
-          toValue: 0,
-          useNativeDriver: true,
-        }).start();
-      }
-    },
-  });
+  const typeConfig = getRequestTypeConfig(type, isInvite, isOutgoing, status);
+  const isPending = status === 'pending';
 
-  const handleUserPress = () => {
-    if (userId) {
-      router.push(`/profile/${userId}`);
-    }
+  const displayUser = isOutgoing ? currentUser : user;
+  const targetUser = isOutgoing ? user : null;
+
+  const handlePress = () => {
+    if (onPress) { onPress(); return; }
+    if (eventId) router.push(`/event-profile/${eventId}`);
+    else if (userId) router.push(`/profile/${userId}`);
   };
 
-  const handleEventPress = () => {
-    if (onPress) {
-      onPress();
-    } else if (eventId) {
-      // Переходим в аккаунт события
-      router.push(`/event-profile/${eventId}`);
-    }
+  const handleAvatarPress = () => {
+    const targetId = isOutgoing ? currentUserId : userId;
+    if (targetId) router.push(`/profile/${targetId}`);
   };
 
-  const getStatusIcon = () => {
-    switch (status) {
-      case 'accepted':
-        return '✓';
-      case 'pending':
-      default:
-        return '⏱';
+  const getRequestText = () => {
+    const name = isOutgoing
+      ? (currentUser?.name?.split(' ')[0] || t.requestItem?.you || 'You')
+      : (user?.name?.split(' ')[0] || t.requestItem?.user || 'User');
+
+    if (isOutgoing) {
+      if (type === 'friend') return { actor: name, action: t.requestItem?.sentFriendRequest || 'sent friend request' };
+      if (isInvite) return { actor: name, action: t.requestItem?.sentInvite || 'sent invite' };
+      return { actor: name, action: t.requestItem?.sentJoinRequest || 'requested to join' };
     }
+    if (type === 'friend') return { actor: name, action: t.requestItem?.wantsToBeFriend || 'wants to be friends' };
+    if (isInvite) return { actor: name, action: t.requestItem?.wantsToInviteYou || 'invites you to' };
+    if (isBusinessAccount) return { actor: name, action: t.requestItem?.joinedEvent || 'joined' };
+    return { actor: name, action: t.requestItem?.wantsToJoin || 'wants to join' };
   };
 
-  const getStatusColor = () => {
-    switch (status) {
-      case 'accepted':
-        return '#34C759';
-      case 'pending':
-      default:
-        return '#FF9500';
-    }
-  };
+  const eventMediaUrl = event ? (getEventPhotoForUser(event.id, currentUserId || '') || event.mediaUrl) : undefined;
+  const reqText = getRequestText();
 
   return (
-    <View style={styles.container}>
-      {/* Кнопки действий (скрыты за свайпом) - не показываем для бизнес-аккаунтов */}
-      {!isOutgoing && !isBusinessAccount && (
-        <View style={styles.swipeActions}>
-          <TouchableOpacity 
-            style={styles.declineButton}
-            onPress={() => onDecline?.(id)}
-          >
-            <Text style={styles.declineText}>✕</Text>
+    <TouchableOpacity
+      style={[styles.container, isPending && !isOutgoing && styles.containerPending]}
+      onPress={handlePress}
+      activeOpacity={0.72}
+    >
+      {isPending && !isOutgoing && <View style={styles.pendingBar} />}
+
+      <TouchableOpacity style={styles.avatarWrapper} onPress={handleAvatarPress} activeOpacity={0.7}>
+        {displayUser?.avatar ? (
+          <Image source={{ uri: displayUser.avatar }} style={styles.avatar} />
+        ) : (
+          <View style={[styles.avatar, styles.avatarPlaceholder]}>
+            <Text style={styles.avatarInitial}>{displayUser?.name?.[0]?.toUpperCase() || '?'}</Text>
+          </View>
+        )}
+        <View style={[styles.typeBadge, { backgroundColor: typeConfig.color }]}>
+          <Text style={styles.typeBadgeText}>{typeConfig.emoji}</Text>
+        </View>
+      </TouchableOpacity>
+
+      <View style={styles.textContainer}>
+        <Text style={styles.textMain} numberOfLines={2}>
+          <Text style={styles.actorName}>{reqText.actor} </Text>
+          <Text style={styles.actionText}>{reqText.action}</Text>
+          {event?.title ? <Text style={styles.eventName}> «{event.title}»</Text> : null}
+          {type === 'friend' && isOutgoing && targetUser?.name ? (
+            <Text style={styles.eventName}> {targetUser.name.split(' ')[0]}</Text>
+          ) : null}
+        </Text>
+        {createdAt && <Text style={styles.timeAgo}>{formatTimeAgo(createdAt)}</Text>}
+      </View>
+
+      {eventMediaUrl && (
+        <Image source={{ uri: eventMediaUrl }} style={styles.eventThumb} />
+      )}
+
+      {!isOutgoing && isPending && !isBusinessAccount && (
+        <View style={styles.actions}>
+          <TouchableOpacity style={styles.declineBtn} onPress={() => onDecline?.(id)}>
+            <AppIcon name="close" size={13} color="rgba(244,244,245,0.7)" />
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.acceptButton}
-            onPress={() => onAccept?.(id)}
-          >
-            <Text style={styles.acceptText}>✓</Text>
+          <TouchableOpacity style={styles.acceptBtn} onPress={() => onAccept?.(id)}>
+            <AppIcon name="check" size={13} color="#f4f4f5" />
           </TouchableOpacity>
         </View>
       )}
 
-      {/* Основной контент */}
-      <Animated.View 
-        style={[styles.requestItem, { transform: [{ translateX }] }]}
-        {...(!isBusinessAccount ? panResponder.panHandlers : {})}
-      >
-        {/* Аватарка пользователя */}
-        <TouchableOpacity 
-          style={styles.userAvatarContainer}
-          onPress={
-            isOutgoing
-              ? () => {
-                  if (currentUserId) {
-                    router.push('/(tabs)/profile');
-                  } else {
-                    router.push('/(auth)');
-                  }
-                }
-              : handleUserPress
-          }
-          activeOpacity={0.7}
-        >
-          <Image 
-            source={{
-              uri: isOutgoing
-                ? currentUser?.avatar || 'https://randomuser.me/api/portraits/men/1.jpg'
-                : user?.avatar || 'https://randomuser.me/api/portraits/men/1.jpg',
-            }} 
-            style={styles.userAvatar} 
-          />
-        </TouchableOpacity>
-
-        {/* Основной контент */}
-        <View style={styles.contentContainer}>
-          {/* Текст запроса */}
-          <View style={styles.textContainer}>
-            {isOutgoing ? (
-              // Исходящие запросы - новая структура
-              <View style={styles.outgoingRequestContent}>
-                <Text style={styles.requestText}>
-                  {type === 'friend' 
-                    ? t.requestItem.sentFriendRequest
-                    : isInvite
-                    ? t.requestItem.sentInvite
-                    : t.requestItem.sentJoinRequest
-                  }
-                </Text>
-                
-                {/* Аватар пользователя, которому отправлен запрос */}
-                {type === 'friend' && user ? (
-                  <TouchableOpacity 
-                    style={styles.inlineAvatar}
-                    onPress={handleUserPress}
-                    activeOpacity={0.7}
-                  >
-                    <Image 
-                      source={{ uri: user.avatar }} 
-                      style={styles.inlineAvatarImage} 
-                    />
-                  </TouchableOpacity>
-                ) : isInvite && user ? (
-                  <TouchableOpacity 
-                    style={styles.inlineAvatar}
-                    onPress={handleUserPress}
-                    activeOpacity={0.7}
-                  >
-                    <Image 
-                      source={{ uri: user.avatar }} 
-                      style={styles.inlineAvatarImage} 
-                    />
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            ) : (
-              // Входящие запросы
-              <Text style={styles.requestText}>
-                {type === 'friend' ? (
-                  // Запрос в друзья: "Имя Ф. хочет добавить в друзья"
-                  <>
-                    <Text style={styles.userName}>
-                      {user?.name ? `${user.name.split(' ')[0]} ${user.name.split(' ')[1]?.[0] || ''}.` : t.requestItem.user}
-                    </Text>
-                    {' '}{t.requestItem.wantsToBeFriend}
-                  </>
-                ) : isInvite ? (
-                  // Входящее приглашение: "Имя Ф. хочет пригласить вас на"
-                  <>
-                    <Text style={styles.userName}>
-                      {user?.name ? `${user.name.split(' ')[0]} ${user.name.split(' ')[1]?.[0] || ''}.` : t.requestItem.user}
-                    </Text>
-                    {' '}{t.requestItem.wantsToInviteYou}{' '}
-                  </>
-                ) : isBusinessAccount ? (
-                  // Для бизнес-аккаунтов: "(аватар) присоединился к (иконка события)"
-                  <Text style={styles.requestText}>присоединился к</Text>
-                ) : (
-                  // Запрос на событие: "Имя Ф. хочет присоединиться к"
-                  <>
-                    <Text style={styles.userName}>
-                      {user?.name ? `${user.name.split(' ')[0]} ${user.name.split(' ')[1]?.[0] || ''}.` : t.requestItem.user}
-                    </Text>
-                    {' '}{t.requestItem.wantsToJoin}
-                  </>
-                )}
-              </Text>
-            )}
-          </View>
-
-          {/* Микро-карточка события для входящих запросов (не показываем для бизнес-аккаунтов) */}
-          {!isOutgoing && type === 'event' && event && !isBusinessAccount && (
-            <TouchableOpacity 
-              style={styles.miniEventCard}
-              onPress={handleEventPress}
-              activeOpacity={0.7}
-            >
-              <Image 
-                source={{ uri: (() => {
-                  const viewerId = currentUserId ?? '';
-                  return getEventPhotoForUser(event.id, viewerId) || event.organizerAvatar;
-                })()}} 
-                style={styles.miniEventImage} 
-              />
-            </TouchableOpacity>
-          )}
-          
-          {/* Для бизнес-аккаунтов показываем иконку события после текста "присоединился к" */}
-          {!isOutgoing && type === 'event' && isBusinessAccount && event && (
-            <TouchableOpacity 
-              style={styles.inlineEventIcon}
-              onPress={handleEventPress}
-              activeOpacity={0.7}
-            >
-              <Image 
-                source={{ uri: (() => {
-                  const viewerId = currentUserId ?? '';
-                  return getEventPhotoForUser(event.id, viewerId) || event.organizerAvatar;
-                })()}} 
-                style={styles.inlineEventIconImage} 
-              />
-            </TouchableOpacity>
-          )}
-
-          {/* Иконка события, время и статус для исходящих запросов - в одну колонку справа */}
-          {isOutgoing && (
-            <View style={styles.rightColumnContainer}>
-              {/* Иконка события - если есть */}
-              {type === 'event' && event && (
-                <TouchableOpacity 
-                  style={styles.rightColumnEventIcon}
-                  onPress={handleEventPress}
-                  activeOpacity={0.7}
-                >
-                  <Image 
-                    source={{ uri: (() => {
-                      const viewerId = currentUserId ?? '';
-                      return getEventPhotoForUser(event.id, viewerId) || event.organizerAvatar;
-                    })()}} 
-                    style={styles.rightColumnEventIconImage} 
-                  />
-                </TouchableOpacity>
-              )}
-              {isInvite && event && (
-                <TouchableOpacity 
-                  style={styles.rightColumnEventIcon}
-                  onPress={handleEventPress}
-                  activeOpacity={0.7}
-                >
-                  <Image 
-                    source={{ uri: (() => {
-                      const viewerId = currentUserId ?? '';
-                      return getEventPhotoForUser(event.id, viewerId) || event.organizerAvatar;
-                    })()}} 
-                    style={styles.rightColumnEventIconImage} 
-                  />
-                </TouchableOpacity>
-              )}
-              {/* Время и статус */}
-              <View style={styles.timeAndStatusContainer}>
-                {createdAt && (
-                  <Text style={styles.timeAgo} numberOfLines={1}>
-                    {formatTimeAgo(createdAt)}
-                  </Text>
-                )}
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor() }]}>
-                  <Text style={styles.statusIcon}>{getStatusIcon()}</Text>
-                </View>
-              </View>
-            </View>
-          )}
-
-          {/* Время для входящих запросов */}
-          {!isOutgoing && createdAt && (
-            <Text style={styles.timeAgo} numberOfLines={1}>
-              {formatTimeAgo(createdAt)}
-            </Text>
-          )}
+      {isOutgoing && (
+        <View style={[styles.statusDot, { backgroundColor: typeConfig.color }]}>
+          <Text style={styles.statusDotText}>{status === 'accepted' ? '✓' : '⏱'}</Text>
         </View>
-      </Animated.View>
-    </View>
+      )}
+    </TouchableOpacity>
   );
 }
 
+export default React.memo(RequestItem);
+
 const styles = StyleSheet.create({
   container: {
-    position: 'relative',
-    marginHorizontal: 12, // Такие же отступы как у входящих
-    marginBottom: 1,
-  },
-  swipeActions: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#121212',
-    paddingRight: 8,
-  },
-  requestItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    backgroundColor: '#121212',
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-  },
-  userAvatarContainer: {
-    marginRight: 10,
-  },
-  userAvatar: {
-    width: 40,
-    height: 40,
+    marginHorizontal: 12,
+    marginBottom: 8,
     borderRadius: 20,
+    backgroundColor: '#16161a',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    overflow: 'hidden',
   },
-  contentContainer: {
-    flex: 1,
-    flexDirection: 'row',
+  containerPending: {
+    backgroundColor: 'rgba(255,141,50,0.07)',
+    borderColor: 'rgba(255,141,50,0.2)',
+  },
+  pendingBar: {
+    position: 'absolute',
+    left: 0,
+    top: 10,
+    bottom: 10,
+    width: 3,
+    borderRadius: 3,
+    backgroundColor: '#FF8D32',
+  },
+  avatarWrapper: {
+    position: 'relative',
+    marginRight: 12,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 17,
+    backgroundColor: '#3a3a3f',
+  },
+  avatarPlaceholder: {
+    justifyContent: 'center',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    minWidth: 0, // Позволяет контейнеру сжиматься
+  },
+  avatarInitial: {
+    color: '#f4f4f5',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  typeBadge: {
+    position: 'absolute',
+    bottom: -3,
+    right: -3,
+    width: 20,
+    height: 20,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#16161a',
+  },
+  typeBadgeText: {
+    fontSize: 9,
+    color: '#f4f4f5',
+    fontWeight: '700',
   },
   textContainer: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 6,
-    minWidth: 0, // Позволяет контейнеру сжиматься
-    overflow: 'hidden', // Предотвращает наслоение
-  },
-  requestText: {
-    fontSize: 13,
-    color: '#FFF',
-  },
-  userName: {
-    fontWeight: '600',
-    color: '#FFF',
-  },
-  eventTitle: {
-    fontWeight: '600',
-    color: '#FFF',
-  },
-  miniEventCard: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    marginLeft: 8,
     marginRight: 8,
-    overflow: 'hidden',
   },
-  miniEventImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
+  textMain: {
+    fontSize: 13.5,
+    lineHeight: 19,
+    marginBottom: 4,
   },
-  declineButton: {
+  actorName: {
+    color: '#f4f4f5',
+    fontWeight: '700',
+  },
+  actionText: {
+    color: 'rgba(244,244,245,0.6)',
+    fontWeight: '400',
+  },
+  eventName: {
+    color: '#FF8D32',
+    fontWeight: '600',
+  },
+  timeAgo: {
+    fontSize: 11.5,
+    color: 'rgba(244,244,245,0.35)',
+    fontWeight: '500',
+  },
+  eventThumb: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    marginLeft: 4,
+    marginRight: 4,
+    backgroundColor: '#1c1c20',
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 6,
+    marginLeft: 4,
+  },
+  declineBtn: {
     width: 32,
     height: 32,
-    borderRadius: 16,
-    backgroundColor: '#FF3B30',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,59,48,0.15)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
   },
-  declineText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  acceptButton: {
+  acceptBtn: {
     width: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: 12,
     backgroundColor: '#34C759',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  acceptText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  statusBadge: {
-    width: 20,
-    height: 20,
+  statusDot: {
+    width: 24,
+    height: 24,
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 6, // Перенесли статус к времени
-  },
-  statusIcon: {
-    color: '#FFF',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  timeAgo: {
-    fontSize: 12,
-    color: '#999',
-    minWidth: 50,
-    textAlign: 'right',
-  },
-  timeAndStatusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
-  targetUserAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginLeft: 8,
-    overflow: 'hidden',
-  },
-  targetUserAvatarImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  outgoingRequestContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    gap: 4,
-    paddingRight: 8, // Отступ справа для времени и статуса
-  },
-  rightColumnContainer: {
-    flexDirection: 'column',
-    alignItems: 'flex-end',
-    gap: 8,
-  },
-  rightColumnEventIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  rightColumnEventIconImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  inlineAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
     marginLeft: 4,
-    overflow: 'hidden',
   },
-  inlineAvatarImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  inlineEventIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    marginLeft: 4,
-    overflow: 'hidden',
-  },
-  inlineEventIconImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
+  statusDotText: {
+    fontSize: 11,
+    color: '#f4f4f5',
+    fontWeight: '700',
   },
 });

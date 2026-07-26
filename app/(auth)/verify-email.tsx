@@ -19,16 +19,21 @@ const logger = createLogger('VerifyEmail');
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ email?: string; addAccount?: string }>();
+  const params = useLocalSearchParams<{ email?: string; addAccount?: string; token?: string }>();
   const isAddingAccount = params.addAccount === 'true';
   const { resendVerificationEmail, verifyEmail, user, isAuthenticated } = useAuth();
   
+  // Извлекаем токен из URL параметров
+  // Expo Router автоматически декодирует URL параметры, но на всякий случай проверяем
+  const tokenFromUrl = params.token || '';
+  
   const [email, setEmail] = useState(params.email || user?.email || '');
-  const [token, setToken] = useState('');
+  const [token, setToken] = useState(tokenFromUrl);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [hasAutoVerified, setHasAutoVerified] = useState(false);
 
   // После успешного подтверждения и авторизации переходим в приложение или настройки
   useEffect(() => {
@@ -81,7 +86,26 @@ export default function VerifyEmailScreen() {
     setErrorMessage(null);
 
     try {
-      const result = await verifyEmail(token.trim());
+      // Токен должен быть уже декодирован expo-router, но на всякий случай пробуем декодировать
+      // Если декодирование не нужно, оно не сломает токен (токены hex не содержат %)
+      let processedToken = token.trim();
+      try {
+        // Пробуем декодировать только если токен содержит % (признак URL encoding)
+        if (processedToken.includes('%')) {
+          processedToken = decodeURIComponent(processedToken);
+        }
+      } catch (e) {
+        // Если декодирование не удалось, используем оригинальный токен
+        logger.warn('Failed to decode token, using original', e);
+      }
+      
+      logger.debug('Verifying token', { 
+        originalLength: token.trim().length, 
+        processedLength: processedToken.length,
+        tokenPreview: processedToken.substring(0, 20) + '...',
+        containsPercent: token.trim().includes('%')
+      });
+      const result = await verifyEmail(processedToken);
       
       // Если сервер вернул токены, пользователь автоматически залогинен
       if (result && result.accessToken && result.user) {
@@ -109,6 +133,18 @@ export default function VerifyEmailScreen() {
       setLoading(false);
     }
   }, [token, verifyEmail, router]);
+
+  // Если токен пришел из URL, автоматически пытаемся верифицировать (только один раз)
+  useEffect(() => {
+    if (tokenFromUrl && !loading && !isAuthenticated && !hasAutoVerified && tokenFromUrl === token) {
+      logger.debug('Token found in URL, attempting automatic verification', { tokenLength: tokenFromUrl.length });
+      setHasAutoVerified(true);
+      // Небольшая задержка чтобы убедиться что компонент полностью смонтирован
+      setTimeout(() => {
+        handleVerifyToken();
+      }, 500);
+    }
+  }, [tokenFromUrl, token, loading, isAuthenticated, hasAutoVerified, handleVerifyToken]);
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -163,7 +199,7 @@ export default function VerifyEmailScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Введите email"
-                placeholderTextColor="#777"
+                placeholderTextColor="rgba(244,244,245,0.35)"
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -178,7 +214,7 @@ export default function VerifyEmailScreen() {
               disabled={resending}
             >
               {resending ? (
-                <ActivityIndicator color="#FFF" />
+                <ActivityIndicator color="#f4f4f5" />
               ) : (
                 <Text style={styles.secondaryButtonText}>Отправить письмо повторно</Text>
               )}
@@ -196,7 +232,7 @@ export default function VerifyEmailScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Вставьте токен из письма"
-                placeholderTextColor="#777"
+                placeholderTextColor="rgba(244,244,245,0.35)"
                 value={token}
                 onChangeText={setToken}
                 autoCapitalize="none"
@@ -210,7 +246,7 @@ export default function VerifyEmailScreen() {
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#FFF" />
+                <ActivityIndicator color="#f4f4f5" />
               ) : (
                 <Text style={styles.primaryButtonText}>Подтвердить</Text>
               )}
@@ -233,7 +269,7 @@ export default function VerifyEmailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#0a0a0c',
   },
   scrollContent: {
     flexGrow: 1,
@@ -246,24 +282,24 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
     marginBottom: 24,
     textAlign: 'center',
   },
   instructionBox: {
-    backgroundColor: '#1f1f1f',
+    backgroundColor: '#141417',
     padding: 16,
     borderRadius: 12,
     marginBottom: 24,
   },
   instructionTitle: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 12,
@@ -272,7 +308,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   instructionItem: {
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     lineHeight: 20,
   },
@@ -300,13 +336,13 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   sectionTitle: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 8,
   },
   sectionDescription: {
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     marginBottom: 16,
   },
@@ -314,14 +350,14 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   inputLabel: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 8,
   },
   input: {
-    backgroundColor: '#1f1f1f',
-    color: '#FFF',
+    backgroundColor: '#141417',
+    color: '#f4f4f5',
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 12,
@@ -330,27 +366,27 @@ const styles = StyleSheet.create({
     borderColor: '#2a2a2a',
   },
   primaryButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 8,
   },
   primaryButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
   },
   secondaryButton: {
-    backgroundColor: '#1f1f1f',
+    backgroundColor: '#141417',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#8B5CF6',
+    borderColor: '#FF8D32',
   },
   secondaryButtonText: {
-    color: '#8B5CF6',
+    color: '#FF8D32',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -362,7 +398,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   linkText: {
-    color: '#8B5CF6',
+    color: '#FF8D32',
     fontSize: 14,
   },
 });

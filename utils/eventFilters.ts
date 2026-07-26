@@ -18,28 +18,11 @@ export function isUserEventParticipant(
 ): boolean {
   if (!event || !userId) return false;
 
-<<<<<<< HEAD
-  // Для будущих событий используем стандартную проверку
-  if (isEventUpcoming(event)) {
-    // Проверяем через organizerId и participantsData/participantsList
-    if (event.organizerId === userId) return true;
-    
-    if (event.participantsData && Array.isArray(event.participantsData)) {
-      return event.participantsData.some((p: any) => p.userId === userId || p.id === userId);
-    }
-    
-    if (event.participantsList && Array.isArray(event.participantsList)) {
-      return event.participantsList.includes(userId);
-    }
-    
-    return false;
-=======
   // Проверяем через organizerId и participantsData/participantsList
   if (event.organizerId === userId) return true;
   
   if (event.participantsData && Array.isArray(event.participantsData)) {
     return event.participantsData.some((p: any) => (p.userId || p.id) === userId);
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   }
   
   if (event.participantsList && Array.isArray(event.participantsList)) {

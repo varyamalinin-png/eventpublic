@@ -89,11 +89,11 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   actionText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
   },
   actionTextDisabled: {
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
   },
 });
 

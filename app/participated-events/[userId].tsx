@@ -11,7 +11,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export default function ParticipatedEventsScreen() {
   const { userId } = useLocalSearchParams();
   const router = useRouter();
-  const { events, getUserData, isUserAttendee, isUserOrganizer, isEventUpcoming, isEventPast, getUserRequestStatus } = useEvents();
+  const { events, eventProfiles, getUserData, isUserAttendee, isUserOrganizer, isEventUpcoming, isEventPast, getUserRequestStatus } = useEvents();
   const { user: authUser } = useAuth();
   const { t } = useLanguage();
   const [showEventFeed, setShowEventFeed] = useState(false);
@@ -34,33 +34,23 @@ export default function ParticipatedEventsScreen() {
 
   const userData = getUserData(targetUserId);
   
-  // Все события где я_участник (не организатор) (текущие и прошлые)
-  // КРИТИЧЕСКИ ВАЖНО: Используем ту же логику фильтрации, что и в профиле
+  // Все события где я_участник (не организатор). Для прошедших — по profile.participants (как в профиле и счетчиках).
   const participatedEvents = useMemo(() => {
     return events.filter(event => {
-      // Исключаем отклоненные/отмененные события
       const userStatus = getUserRequestStatus(event, targetUserId);
-      if (userStatus === 'rejected') {
-        return false;
-      }
-      
-      // Для текущих событий - проверяем обычным способом
+      if (userStatus === 'rejected') return false;
+
       if (isEventUpcoming(event)) {
         return isUserAttendee(event, targetUserId);
       }
-      
-      // Для прошедших событий - используем те же признаки, что и для предстоящих
       if (isEventPast(event)) {
-        // Организатор не считается участником
-        if (isUserOrganizer(event, targetUserId)) {
-          return false;
-        }
-        return isUserAttendee(event, targetUserId);
+        if (isUserOrganizer(event, targetUserId)) return false;
+        const profile = eventProfiles.find(p => p.eventId === event.id);
+        return profile ? profile.participants.includes(targetUserId) : false;
       }
-      
       return isUserAttendee(event, targetUserId);
     });
-  }, [events, targetUserId, isUserAttendee, isUserOrganizer, isEventUpcoming, isEventPast, getUserRequestStatus]);
+  }, [events, eventProfiles, targetUserId, isUserAttendee, isUserOrganizer, isEventUpcoming, isEventPast, getUserRequestStatus]);
 
   const handleEventPress = (event: Event) => {
     setSelectedEvent(event);
@@ -210,13 +200,13 @@ export default function ParticipatedEventsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   header: {
     paddingTop: 60,
     paddingBottom: 15,
     paddingHorizontal: 20,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -224,13 +214,13 @@ const styles = StyleSheet.create({
     marginRight: 15,
   },
   backText: {
-    color: '#007AFF',
+    color: '#FF8D32',
     fontSize: 16,
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: '#f4f4f5',
     flex: 1,
   },
   scrollView: {
@@ -247,7 +237,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     textAlign: 'center',
     marginTop: 20,
     width: '100%',

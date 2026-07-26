@@ -24,7 +24,6 @@ export default function AddAccountScreen() {
   const params = useLocalSearchParams<{ mode?: string }>();
   const initialMode = (params.mode === 'register' ? 'register' : 'login') as Mode;
   
-  console.log('[AddAccount] Screen mounted, mode:', initialMode, 'params:', params);
   
   const {
     login,
@@ -40,14 +39,15 @@ export default function AddAccountScreen() {
   const initialUserId = useRef<string | null>(null); // ID пользователя при первом монтировании
 
   // Инициализируем previousUserId и initialUserId при монтировании
+  // Важно: используем user в зависимостях, чтобы установить initialUserId когда user загрузится
   useEffect(() => {
     const currentUserId = user?.id || null;
     previousUserId.current = currentUserId;
-    if (initialUserId.current === null) {
+    // Устанавливаем initialUserId только если он еще не установлен И user загружен
+    if (initialUserId.current === null && currentUserId !== null) {
       initialUserId.current = currentUserId; // Сохраняем ID первого аккаунта
-      console.log('[AddAccount] Initial user ID set:', currentUserId);
     }
-  }, []);
+  }, [user?.id]);
 
   // После успешной авторизации второго аккаунта остаемся в нем и переходим в настройки
   // НО только если это новый аккаунт (userId изменился) или была попытка входа/регистрации
@@ -56,25 +56,26 @@ export default function AddAccountScreen() {
     // userId изменился только если он отличается от initialUserId (первого аккаунта)
     const userIdChanged = initialUserId.current !== null && currentUserId !== null && initialUserId.current !== currentUserId;
     
-    console.log('[AddAccount] useEffect check:', {
-      isAuthenticated,
-      emailVerified: user?.emailVerified,
-      userIdChanged,
-      hasAttemptedAuth: hasAttemptedAuth.current,
-      currentUserId,
-      initialUserId: initialUserId.current,
-    });
-    
     // Перенаправляем ТОЛЬКО если:
     // 1. Пользователь авторизован И
     // 2. Email подтвержден И
-    // 3. userId изменился (переключились на новый аккаунт) И
+    // 3. (userId изменился ИЛИ initialUserId был null и теперь установлен) И
     // 4. Флаг hasAttemptedAuth установлен (была попытка входа/регистрации)
     // НЕ обрабатываем неподтвержденный email здесь - это делает handleRegister/handleLogin напрямую
-    if (isAuthenticated && user?.emailVerified && userIdChanged && hasAttemptedAuth.current) {
-      console.log('[AddAccount] User authenticated after login/register, redirecting to settings');
+    const shouldRedirect = isAuthenticated && 
+                           user?.emailVerified && 
+                           hasAttemptedAuth.current &&
+                           (userIdChanged || (initialUserId.current === null && currentUserId !== null));
+    
+    if (shouldRedirect) {
       hasAttemptedAuth.current = false; // Сбрасываем флаг после перенаправления
-      router.replace('/settings');
+      
+      // На вебе используем window.location.href для надежной навигации
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.href = '/settings';
+      } else {
+        router.replace('/settings');
+      }
     }
     
     // Обновляем previousUserId
@@ -116,15 +117,6 @@ export default function AddAccountScreen() {
       const errorMsg = error?.body?.message || error?.message || error?.toString() || 'Не удалось войти';
       const errorMsgLower = errorMsg.toLowerCase();
       
-      console.log('[AddAccount] Full error object:', {
-        error,
-        errorMessage: error?.message,
-        errorBody: error?.body,
-        errorBodyMessage: error?.body?.message,
-        errorMsg,
-        errorMsgLower,
-      });
-      
       // Проверяем, является ли ошибка связанной с неподтвержденным email
       // Сервер возвращает: "Email address is not verified. A verification email has been sent..."
       const isEmailNotVerified = 
@@ -135,32 +127,20 @@ export default function AddAccountScreen() {
          errorMsgLower.includes('verification email has been sent') ||
          errorMsgLower.includes('подтвержден'));
       
-      console.log('[AddAccount] isEmailNotVerified check:', {
-        isEmailNotVerified,
-        hasEmail: errorMsgLower.includes('email'),
-        hasNotVerified: errorMsgLower.includes('not verified'),
-        hasVerificationEmail: errorMsgLower.includes('verification email'),
-      });
-      
       if (isEmailNotVerified) {
-        console.log('[AddAccount] ✅ Email not verified, automatically redirecting to verify page');
-        console.log('[AddAccount] Email:', loginEmail.trim());
         hasAttemptedAuth.current = false; // Сбрасываем флаг, так как переходим на verify
         
         // НЕМЕДЛЕННО переходим на страницу подтверждения
         // Сервер уже отправил письмо с токеном автоматически
         // Используем setTimeout, чтобы убедиться, что состояние обновилось
         setTimeout(() => {
-          console.log('[AddAccount] Calling router.push to /add-account-verify');
           router.push({
             pathname: '/add-account-verify',
             params: { email: loginEmail.trim() },
           });
-          console.log('[AddAccount] ✅ Navigation initiated');
         }, 100);
         return; // Выходим, не показываем ошибку
       } else {
-        console.log('[AddAccount] ❌ Not an email verification error, showing error message');
         hasAttemptedAuth.current = false; // Сбрасываем флаг при ошибке
         setErrorMessage(errorMsg);
       }
@@ -189,21 +169,16 @@ export default function AddAccountScreen() {
         name: registerName.trim() || undefined,
       });
       
-      console.log('[AddAccount] Register result:', result);
-      console.log('[AddAccount] requiresEmailVerification:', (result as any)?.requiresEmailVerification);
-      console.log('[AddAccount] isAuthenticated before navigation:', isAuthenticated);
       
       // После регистрации НЕМЕДЛЕННО переходим на подтверждение email
       // Сбрасываем флаг ПЕРЕД навигацией, чтобы useEffect не перенаправлял обратно
       hasAttemptedAuth.current = false;
       
-      console.log('[AddAccount] Navigating to verify page immediately, email:', registerEmail.trim());
       // Используем router.push вместо replace, чтобы можно было вернуться назад
       router.push({
         pathname: '/add-account-verify',
         params: { email: registerEmail.trim() },
       });
-      console.log('[AddAccount] Navigation initiated');
     } catch (error: any) {
       logger.error('register failed', error);
       hasAttemptedAuth.current = false; // Сбрасываем флаг при ошибке
@@ -219,7 +194,7 @@ export default function AddAccountScreen() {
           style={styles.backButton}
           onPress={() => router.back()}
         >
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color="#f4f4f5" />
           <Text style={styles.backButtonText}>Назад</Text>
         </TouchableOpacity>
 
@@ -269,7 +244,7 @@ export default function AddAccountScreen() {
             <TextInput
               style={styles.input}
               placeholder="Email"
-              placeholderTextColor="#777"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               keyboardType="email-address"
               autoCapitalize="none"
               value={loginEmail}
@@ -279,7 +254,7 @@ export default function AddAccountScreen() {
             <TextInput
               style={styles.input}
               placeholder="Пароль"
-              placeholderTextColor="#777"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               secureTextEntry
               value={loginPassword}
               onChangeText={setLoginPassword}
@@ -291,7 +266,7 @@ export default function AddAccountScreen() {
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#FFF" />
+                <ActivityIndicator color="#f4f4f5" />
               ) : (
                 <Text style={styles.primaryButtonText}>Войти</Text>
               )}
@@ -305,7 +280,7 @@ export default function AddAccountScreen() {
             <TextInput
               style={styles.input}
               placeholder="Email"
-              placeholderTextColor="#777"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               keyboardType="email-address"
               autoCapitalize="none"
               value={registerEmail}
@@ -315,7 +290,7 @@ export default function AddAccountScreen() {
             <TextInput
               style={styles.input}
               placeholder="Имя пользователя"
-              placeholderTextColor="#777"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               autoCapitalize="none"
               value={registerUsername}
               onChangeText={setRegisterUsername}
@@ -324,7 +299,7 @@ export default function AddAccountScreen() {
             <TextInput
               style={styles.input}
               placeholder="Имя (необязательно)"
-              placeholderTextColor="#777"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               value={registerName}
               onChangeText={setRegisterName}
               editable={!loading}
@@ -332,7 +307,7 @@ export default function AddAccountScreen() {
             <TextInput
               style={styles.input}
               placeholder="Пароль"
-              placeholderTextColor="#777"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               secureTextEntry
               value={registerPassword}
               onChangeText={setRegisterPassword}
@@ -344,7 +319,7 @@ export default function AddAccountScreen() {
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#FFF" />
+                <ActivityIndicator color="#f4f4f5" />
               ) : (
                 <Text style={styles.primaryButtonText}>Зарегистрироваться</Text>
               )}
@@ -360,7 +335,7 @@ const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     padding: 24,
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#0a0a0c',
     justifyContent: 'center',
   },
   backButton: {
@@ -372,7 +347,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   backButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     marginLeft: 8,
     fontWeight: '500',
@@ -380,13 +355,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
     marginBottom: 24,
     textAlign: 'center',
   },
@@ -394,7 +369,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginBottom: 24,
     borderRadius: 20,
-    backgroundColor: '#1f1f1f',
+    backgroundColor: '#141417',
     padding: 4,
   },
   tabButton: {
@@ -404,23 +379,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tabButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
   },
   tabButtonText: {
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     fontWeight: '500',
   },
   tabButtonTextActive: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontWeight: '600',
   },
   formBlock: {
     gap: 12,
   },
   input: {
-    backgroundColor: '#1f1f1f',
-    color: '#FFF',
+    backgroundColor: '#141417',
+    color: '#f4f4f5',
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 12,
@@ -429,14 +404,14 @@ const styles = StyleSheet.create({
     borderColor: '#2a2a2a',
   },
   primaryButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 8,
   },
   primaryButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
   },

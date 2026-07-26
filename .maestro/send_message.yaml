@@ -1,0 +1,11 @@
+appId: com.varyamalinina.iwent
+---
+- launchApp
+- tapOn:
+    id: "inbox-tab"
+- tapOn: "Nastya"
+- tapOn:
+    id: "message-input"
+- inputText: "Maestro test message"
+- tapOn:
+    id: "send-button"

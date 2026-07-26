@@ -1,0 +1,9 @@
+appId: com.varyamalinina.iwent
+---
+- launchApp
+- tapOn: "Email"
+- inputText: "varya.malinina.2003@mail.ru"
+- tapOn: "Пароль"
+- inputText: "00000000"
+- tapOn: "Войти"
+- assertVisible: "Search"

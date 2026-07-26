@@ -4,6 +4,8 @@ import { useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
 import { createLogger } from '../utils/logger';
+import { AppIcon } from './ui/AppIcon';
+import { Palette } from '../constants/DesignSystem';
 
 const logger = createLogger('RequestMiniCard');
 
@@ -17,7 +19,7 @@ interface RequestMiniCardProps {
   onPress?: () => void;
 }
 
-export default function RequestMiniCard({ 
+function RequestMiniCard({
   id, 
   type, 
   eventId, 
@@ -137,21 +139,23 @@ export default function RequestMiniCard({
             onDecline(id);
           }}
         >
-          <Text style={styles.declineText}>✕</Text>
+          <AppIcon name="close" size={15} color={Palette.text} />
         </TouchableOpacity>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.acceptButton}
           onPress={(e) => {
             e.stopPropagation();
             onAccept(id);
           }}
         >
-          <Text style={styles.acceptText}>✓</Text>
+          <AppIcon name="check" size={15} color={Palette.text} />
         </TouchableOpacity>
       </View>
     </TouchableOpacity>
   );
 }
+
+export default React.memo(RequestMiniCard);
 
 const styles = StyleSheet.create({
   miniatureCard: {
@@ -194,7 +198,7 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: '#FFF',
+    borderColor: 'rgba(255,255,255,0.15)',
   },
   miniatureInfo: {
     position: 'absolute',
@@ -205,7 +209,7 @@ const styles = StyleSheet.create({
   miniatureTitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginBottom: 2,
     lineHeight: 14,
   },
@@ -235,7 +239,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   declineText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -248,7 +252,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   acceptText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: 'bold',
   },

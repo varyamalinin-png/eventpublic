@@ -1,9 +1,18 @@
 import type { Metadata } from 'next';
 import '../styles/globals.css';
+import { Providers } from './providers';
+import { DesktopSidebar } from '../components/DesktopSidebar';
+import { DesktopRightRail } from '../components/DesktopRightRail';
+import { NavigationProgress } from '../components/NavigationProgress';
 
 export const metadata: Metadata = {
-  title: 'Event App',
+  title: 'iwent',
   description: 'Event management application',
+  icons: {
+    icon: '/favicon.png',
+    shortcut: '/favicon.png',
+    apple: '/favicon.png',
+  },
 };
 
 export default function RootLayout({
@@ -18,6 +27,8 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+        <meta name="p:domain_verify" content="2964b9e6c9db6925615b5343c0777c8e" />
         {/* Определяем __DEV__ глобально ДО загрузки других скриптов */}
         <script
           dangerouslySetInnerHTML={{
@@ -32,8 +43,14 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body style={{ margin: 0, padding: 0, overflow: 'hidden' }}>{children}</body>
+      <body style={{ margin: 0, padding: 0, overflowX: 'hidden', overflowY: 'auto' }}>
+        <NavigationProgress />
+        <Providers>
+          <DesktopSidebar />
+          <DesktopRightRail />
+          {children}
+        </Providers>
+      </body>
     </html>
   );
 }
-

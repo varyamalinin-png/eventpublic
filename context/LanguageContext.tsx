@@ -56,18 +56,16 @@ export function LanguageProvider({ children }: LanguageProviderProps) {
     }
   };
 
-  if (isLoading) {
-    return null; // Или можно показать загрузчик
-  }
+  // ВАЖНО: Не возвращаем null, чтобы контекст всегда был доступен
+  // Вместо этого возвращаем Provider с дефолтными значениями во время загрузки
+  const contextValue = {
+    language,
+    setLanguage,
+    t: translations[language] || translations.en, // Fallback на английский, если язык не загружен
+  };
 
   return (
-    <LanguageContext.Provider
-      value={{
-        language,
-        setLanguage,
-        t: translations[language],
-      }}
-    >
+    <LanguageContext.Provider value={contextValue}>
       {children}
     </LanguageContext.Provider>
   );
@@ -75,7 +73,7 @@ export function LanguageProvider({ children }: LanguageProviderProps) {
 
 export function useLanguage() {
   const context = useContext(LanguageContext);
-  if (context === undefined) {
+  if (context === undefined || context === null) {
     throw new Error('useLanguage must be used within a LanguageProvider');
   }
   return context;

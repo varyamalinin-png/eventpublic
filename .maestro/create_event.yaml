@@ -1,0 +1,7 @@
+appId: com.varyamalinina.iwent
+---
+- launchApp
+- tapOn: "Create"
+- tapOn: "For example: Walk in the park"
+- inputText: "Test Event from Maestro"
+- assertVisible: "Test Event from Maestro"

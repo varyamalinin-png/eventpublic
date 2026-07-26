@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>iwent</title>
+  <rect width="512" height="512" fill="none"/>
+  <g fill="#F4B400">
+    <circle cx="256" cy="150" r="54"/>
+    <path fill-rule="evenodd" d="
+      M 92 372
+      L 160 212
+      L 256 304
+      L 352 212
+      L 420 372
+      L 370 394
+      L 318 276
+      L 256 340
+      L 194 276
+      L 142 394
+      Z
+
+      M 256 346
+      A 72 72 0 0 0 184 418
+      L 184 460
+      A 114 114 0 0 1 256 434
+      A 114 114 0 0 1 328 460
+      L 328 418
+      A 72 72 0 0 0 256 346
+      Z
+    "/>
+  </g>
+</svg>

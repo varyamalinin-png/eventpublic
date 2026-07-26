@@ -109,15 +109,9 @@ export const useEventRequests = ({
       const actualToken = currentAccessTokenRef.current;
       const actualUserId = currentUserIdRef.current;
       
-      if (!actualToken || !actualUserId) {
-        logger.debug('refreshPendingJoinRequests: нет токена или userId, пропускаем');
-        return;
-      }
+      if (!actualToken || !actualUserId) return;
       
       try {
-        // 📥 ИСПОЛЬЗУЕМ НОВЫЙ API ДЛЯ ПОЛУЧЕНИЯ ПРИГЛАШЕНИЙ
-        // Получаем входящие приглашения (где меня пригласили)
-        logger.debug('refreshPendingJoinRequests: запрашиваем входящие приглашения для userId:', actualUserId);
         const incomingInvitations = await apiRequest(
           `/events/requests/user?type=incoming`,
           {},
@@ -129,8 +123,6 @@ export const useEventRequests = ({
           logger.warn('Failed to fetch incoming invitations:', error);
           return [];
         });
-        
-        logger.debug('refreshPendingJoinRequests: получено входящих приглашений:', Array.isArray(incomingInvitations) ? incomingInvitations.length : 0);
 
         // Получаем исходящие приглашения (где я пригласил других)
         const outgoingInvitations = await apiRequest(
@@ -158,8 +150,6 @@ export const useEventRequests = ({
           logger.warn('Failed to fetch outgoing join requests:', error);
           return [];
         });
-        
-        logger.debug('refreshPendingJoinRequests: получено исходящих join-запросов:', Array.isArray(outgoingJoinRequests) ? outgoingJoinRequests.length : 0);
 
         // Получаем события, где пользователь является организатором (для запросов на участие)
         // Исключаем временные события (preview-event-temp и т.д.)
@@ -238,16 +228,6 @@ export const useEventRequests = ({
             // fromUserId = кто пригласил (invitedBy или organizerId из event)
             // toUserId = кого пригласили (userId из membership)
             const fromUserId = (membership.invitedBy || membership.event?.organizerId || '') as string;
-            
-            logger.debug('📥 Входящее приглашение:', {
-              id: membership.id,
-              eventId: membership.eventId,
-              fromUserId,
-              toUserId: membership.userId,
-              status,
-              invitedBy: membership.invitedBy,
-            });
-            
             return {
               id: membership.id,
               type: 'invite' as const,
@@ -259,8 +239,6 @@ export const useEventRequests = ({
               userId: membership.userId || '',
             };
           });
-        
-        logger.debug('refreshPendingJoinRequests: маппировано входящих приглашений:', mappedIncomingInvitations.length);
 
         // Маппим исходящие приглашения с сервера
         const mappedOutgoingInvitations: EventRequest[] = (Array.isArray(outgoingInvitations) ? outgoingInvitations : [])
@@ -301,15 +279,6 @@ export const useEventRequests = ({
             const statusRaw = String(membership?.status ?? 'pending').toLowerCase();
             const status: EventRequest['status'] =
               statusRaw === 'accepted' || statusRaw === 'rejected' ? statusRaw : 'pending';
-            
-            logger.debug('📤 Исходящий join-запрос:', {
-              id: membership.id,
-              eventId: membership.eventId || membership.event?.id || '',
-              fromUserId: membership.userId || '',
-              toUserId: membership.event?.organizerId || '',
-              status,
-            });
-            
             return {
               id: membership.id,
               type: 'join' as const,
@@ -321,8 +290,6 @@ export const useEventRequests = ({
               userId: membership.userId || '',
             };
           });
-        
-        logger.debug('refreshPendingJoinRequests: маппировано исходящих join-запросов:', mappedOutgoingJoinRequests.length);
 
         const allRequests = [
           ...organizerRequestsByEvent.flat(),
@@ -331,11 +298,6 @@ export const useEventRequests = ({
           ...mappedOutgoingJoinRequests, // Добавляем исходящие join-запросы
         ];
 
-        logger.debug('refreshPendingJoinRequests: всего запросов после маппинга:', allRequests.length);
-        logger.debug('refreshPendingJoinRequests: входящих приглашений:', mappedIncomingInvitations.length);
-        logger.debug('refreshPendingJoinRequests: исходящих приглашений:', mappedOutgoingInvitations.length);
-        logger.debug('refreshPendingJoinRequests: исходящих join-запросов:', mappedOutgoingJoinRequests.length);
-        
         setEventRequests(prev => {
           const byId = new Map<string, EventRequest>();
           
@@ -367,12 +329,7 @@ export const useEventRequests = ({
               byId.set(req.id, req);
             }
           });
-          
-          const finalRequests = Array.from(byId.values());
-          logger.debug('refreshPendingJoinRequests: итоговое количество запросов:', finalRequests.length);
-          logger.debug('refreshPendingJoinRequests: локальных join-запросов сохранено:', 
-            prev.filter(r => r.type === 'join' && r.fromUserId === actualUserId && r.status === 'pending').length);
-          return finalRequests;
+          return Array.from(byId.values());
         });
       } catch (error) {
         if (await handleUnauthorizedError(error)) {
@@ -874,6 +831,29 @@ export const useEventRequests = ({
   const cancelEventParticipation = useCallback(async (eventId: string, userId: string) => {
     const actualToken = currentAccessTokenRef.current;
     const actualUserId = currentUserIdRef.current;
+    
+    // Проверка на временные события - не делаем запрос к серверу
+    if (eventId.includes('-temp') || eventId.startsWith('preview-')) {
+      logger.debug('Temporary event, skipping participation cancellation on server');
+      // Удаляем локально
+      setEvents(prev => prev.map(e => {
+        if (e.id !== eventId) return e;
+        const updatedParticipantsList = e.participantsList?.filter(id => id !== userId) || [];
+        const updatedParticipantsData = e.participantsData?.filter(p => {
+          const pUserId = (p as any).userId || (p as any).id;
+          return pUserId !== userId;
+        }) || [];
+        const updatedParticipants = Math.max(0, e.participants - 1);
+        return {
+          ...e,
+          participantsList: updatedParticipantsList,
+          participantsData: updatedParticipantsData,
+          participants: updatedParticipants,
+        };
+      }));
+      return;
+    }
+    
     if (!actualToken || !actualUserId || userId !== actualUserId) {
       logger.warn('Cannot cancel participation: invalid user or no access');
       return;
@@ -885,7 +865,29 @@ export const useEventRequests = ({
 
     try {
       // Новый упрощенный эндпоинт: сервер сам находит membership по eventId+userId
-      await apiRequest(`/events/${eventId}/participation`, { method: 'DELETE' }, actualToken);
+      const response = await apiRequest(`/events/${eventId}/participation`, { method: 'DELETE' }, actualToken);
+      
+      // КРИТИЧЕСКИ ВАЖНО: Проверяем, было ли событие полностью удалено (последний участник)
+      if (response?.eventDeleted) {
+        logger.info(`✅ Событие полностью удалено с сервера (был последний участник)`);
+        // Удаляем событие из всех локальных состояний
+        setEvents(prev => prev.filter(e => e.id !== eventId));
+        setEventProfiles(prev => prev.filter(p => p.eventId !== eventId));
+        setEventRequests(prev => prev.filter(req => req.eventId !== eventId));
+        setChats(prev => prev.filter(c => c.eventId !== eventId));
+        
+        // Синхронизируем с сервером после удаления
+        if (syncEventsFromServer) {
+          try {
+            await syncEventsFromServer();
+          } catch (syncError) {
+            logger.warn(`Ошибка при синхронизации после удаления события:`, syncError);
+          }
+        }
+        
+        logger.info('✅ Событие полностью удалено из локального состояния');
+        return;
+      }
       
       // КРИТИЧЕСКИ ВАЖНО: Сразу обновляем локальное состояние события,
       // удаляя пользователя из списка участников, чтобы событие не появилось обратно в ленте
@@ -960,6 +962,36 @@ export const useEventRequests = ({
       // КРИТИЧЕСКИ ВАЖНО: Событие НЕ удаляется у других участников
       // Только текущий пользователь удаляется из списка участников
       if (isPastEvent) {
+        // Проверяем количество участников ДО обновления
+        const currentProfile = eventProfiles.find(p => p.eventId === eventId);
+        const currentParticipantsCount = currentProfile?.participants.length || 0;
+        const willHaveZeroParticipants = currentParticipantsCount <= 1; // Если был 1 участник, после удаления будет 0
+        
+        // Если будет 0 участников, удаляем событие полностью
+        if (willHaveZeroParticipants) {
+          logger.info(`✅ Будет 0 участников после удаления - удаляем событие полностью`);
+          setEvents(prev => prev.filter(e => e.id !== eventId));
+          setEventProfiles(prev => prev.filter(p => p.eventId !== eventId));
+          setEventRequests(prev => prev.filter(req => req.eventId !== eventId));
+          setChats(prev => prev.filter(c => c.eventId !== eventId));
+          
+          // Синхронизируем с сервером после удаления
+          if (syncEventsFromServer) {
+            setTimeout(async () => {
+              try {
+                await syncEventsFromServer();
+                logger.info('✅ Синхронизация завершена после удаления события');
+              } catch (syncError) {
+                logger.warn(`Ошибка при синхронизации после удаления события:`, syncError);
+              }
+            }, 100);
+          }
+          
+          logger.info('✅ Событие полностью удалено из локального состояния (0 участников)');
+          return; // Прерываем выполнение, так как событие уже удалено
+        }
+        
+        // Если участников больше 0, просто обновляем список участников
         setEventProfiles(prev => prev.map(profile => {
           if (profile.eventId === eventId) {
             // Удаляем только текущего пользователя из списка участников

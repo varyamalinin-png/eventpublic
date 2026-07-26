@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, Image, Modal, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, Image, Modal, Alert, Platform, ActivityIndicator, InteractionManager, type ImageStyle, type ViewStyle } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
@@ -7,10 +7,17 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PinchGestureHandler, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ApiError } from '../services/api';
 import { createLogger } from '../utils/logger';
+import { AppIcon } from '../components/ui/AppIcon';
 
 const logger = createLogger('Calendar');
 
 const { width, height } = Dimensions.get('window');
+
+// Календарь по умолчанию открывается на текущий месяц,
+// но общий диапазон месяцев начинается примерно за год до текущей даты
+const now = new Date();
+const DEFAULT_CALENDAR_OPEN = new Date(now.getFullYear(), now.getMonth(), 1);
+const CALENDAR_START = new Date(now.getFullYear() - 1, now.getMonth(), 1);
 
 interface MonthData {
   month: number;
@@ -18,7 +25,7 @@ interface MonthData {
   days: DayData[];
 }
 
-import type { Event } from '../../context/EventsContext';
+import type { Event } from '../context/EventsContext';
 
 interface DayData {
   day: number;
@@ -37,6 +44,7 @@ export default function CalendarScreen() {
   const { t } = useLanguage();
   const { 
     events, 
+    eventProfiles,
     eventRequests,
     getMyEventParticipationStatus,
     sendEventRequest,
@@ -62,10 +70,7 @@ export default function CalendarScreen() {
     },
     [calendarUserId, currentUserId, getEventPhotoForUser],
   );
-  const [selectedDate, setSelectedDate] = useState(() => {
-    // Используем текущую дату в реальном времени
-    return new Date();
-  });
+  const [selectedDate, setSelectedDate] = useState(() => new Date(DEFAULT_CALENDAR_OPEN.getTime()));
   
   // Получаем userId из параметров (если не указан - текущий пользователь)
   const previewEventId = params.eventId as string | undefined; // ID события для предпросмотра
@@ -83,6 +88,7 @@ export default function CalendarScreen() {
   const weekScrollViewRef = useRef<ScrollView>(null);
   const [showDayEventsModal, setShowDayEventsModal] = useState(false);
   const [modalEvents, setModalEvents] = useState<any[]>([]);
+  const [readyToRender, setReadyToRender] = useState(Platform.OS === 'web');
 
   const openDayEventsModal = (date: Date) => {
     const dayEvents = getEventsForDay(date);
@@ -98,6 +104,12 @@ export default function CalendarScreen() {
     }
   };
 
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const handle = InteractionManager.runAfterInteractions(() => setReadyToRender(true));
+    return () => handle.cancel();
+  }, []);
+
   // Инициализируем дату из параметров
   useEffect(() => {
     if (params.date) {
@@ -112,29 +124,143 @@ export default function CalendarScreen() {
     }
   }, [params.date]);
 
-  // Инициализация режима/даты из параметров и автоскролл в week view
+  // Инициализация режима/даты из параметров и автоскролл в week view (только в week/preview, не в month)
   useEffect(() => {
     if (params.date) {
       const date = new Date(params.date as string);
       setSelectedDate(date);
     }
-    if (params.mode === 'week' || params.mode === 'preview') {
-      setCalendarMode(params.mode as 'week' | 'preview');
-      setTimeout(() => {
-        if (weekScrollViewRef.current && params.date) {
-          const date = new Date(params.date as string);
-          const hour = date.getHours() || 0;
-          const hourIndex = Math.max(0, hour);
-          const scrollPosition = hourIndex * 70; // примерная высота строки часа
-          weekScrollViewRef.current.scrollTo({ y: scrollPosition, animated: true });
+    const isWeekOrPreview = params.mode === 'week' || params.mode === 'preview';
+    if (!isWeekOrPreview) return;
+
+    setCalendarMode(params.mode as 'week' | 'preview');
+
+    const scrollToEventTime = (attempt: number = 1) => {
+        if (!params.date) return;
+        
+        const date = new Date(params.date as string);
+        const hour = date.getHours() || 0;
+        const hourIndex = Math.max(0, hour);
+        // Высота строки часа: paddingVertical (15*2) + borderBottom (1) + content (~40) ≈ 70px
+        const hourHeight = 70;
+        // Высота заголовка недели (weekHeader) + недели (weekContainer) ≈ 200px
+        const headerHeight = Platform.OS === 'web' ? 200 : 200;
+        const viewportHeight = Platform.OS === 'web' ? (typeof window !== 'undefined' ? window.innerHeight : 800) : height;
+        // Прокручиваем так, чтобы час был виден в центре видимой области ScrollView
+        // Учитываем высоту заголовка и недели
+        const scrollPosition = Math.max(0, hourIndex * hourHeight - (viewportHeight - headerHeight) / 2 + hourHeight / 2);
+        
+        // Стандартный способ через React Native ScrollView
+        if (weekScrollViewRef.current) {
+          try {
+            weekScrollViewRef.current.scrollTo({ 
+              y: scrollPosition, 
+              animated: attempt === 1 && Platform.OS !== 'web' 
+            });
+          } catch (e) {
+            logger.warn(`[Calendar] Error scrolling via ScrollView (attempt ${attempt}):`, e);
+          }
         }
-      }, 300);
-    }
+        
+        // Для веб-версии используем прямое обращение к DOM
+        if (Platform.OS === 'web') {
+          try {
+            // Сначала пытаемся получить элемент через ref
+            let scrollElement: HTMLElement | null = null;
+            
+            // Метод 1: через getScrollableNode
+            if (weekScrollViewRef.current) {
+              const node = (weekScrollViewRef.current as any)?.getScrollableNode?.();
+              if (node) scrollElement = node;
+            }
+            
+            // Метод 2: через _component
+            if (!scrollElement && weekScrollViewRef.current) {
+              const component = (weekScrollViewRef.current as any)?._component;
+              if (component) {
+                const node = component.getScrollableNode?.();
+                if (node) scrollElement = node;
+              }
+            }
+            
+            // Метод 3: через data-testid
+            if (!scrollElement) {
+              scrollElement = document.querySelector('[data-testid="week-scroll-view"]') as HTMLElement;
+            }
+            
+            // Метод 4: ищем все прокручиваемые div элементы
+            if (!scrollElement) {
+              const divs = Array.from(document.querySelectorAll('div'));
+              for (const div of divs) {
+                const style = window.getComputedStyle(div);
+                if ((style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflow === 'auto' || style.overflow === 'scroll') &&
+                    div.scrollHeight > div.clientHeight) {
+                  scrollElement = div;
+                  break;
+                }
+              }
+            }
+            
+            // Прокручиваем найденный элемент (без smooth, чтобы не было видимого дёргания)
+            if (scrollElement) {
+              scrollElement.scrollTop = scrollPosition;
+            } else {
+              logger.warn(`[Calendar] ScrollView element not found (attempt ${attempt})`);
+              
+              // Последняя попытка: ищем через все возможные селекторы
+              if (attempt >= 3) {
+                const allDivs = Array.from(document.querySelectorAll('div'));
+                for (const div of allDivs) {
+                  const rect = div.getBoundingClientRect();
+                  const style = window.getComputedStyle(div);
+                  // Ищем div, который содержит список часов и может прокручиваться
+                  if (div.textContent?.includes('00:00') && div.scrollHeight > div.clientHeight) {
+                    (div as HTMLElement).scrollTop = scrollPosition;
+                    logger.debug(`[Calendar] Found scrollable div via content search, scrolled to: ${scrollPosition}`);
+                    break;
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            logger.warn(`[Calendar] Error scrolling via DOM (attempt ${attempt}):`, e);
+          }
+        }
+      };
+      
+      // Первая попытка через 300ms
+      const timeout1 = setTimeout(() => scrollToEventTime(1), 300);
+      
+      // Дополнительные попытки для веб-версии
+      const timeouts: NodeJS.Timeout[] = [timeout1];
+      if (Platform.OS === 'web') {
+        timeouts.push(setTimeout(() => scrollToEventTime(2), 600));
+        timeouts.push(setTimeout(() => scrollToEventTime(3), 1200));
+        timeouts.push(setTimeout(() => scrollToEventTime(4), 2000));
+      }
+      
+    return () => {
+      timeouts.forEach(timeout => clearTimeout(timeout));
+    };
   }, [params.date, params.mode]);
 
+  // На вебе в month view фиксируем скролл окна/body, чтобы не было дёргания при открытии
+  useEffect(() => {
+    if (Platform.OS !== 'web' || calendarMode !== 'month') return;
+    const reset = () => {
+      if (typeof window !== 'undefined') {
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+      }
+    };
+    reset();
+    const t = setTimeout(reset, 50);
+    return () => clearTimeout(t);
+  }, [calendarMode]);
+
   // КАЛЕНДАРЬ: я_член_события (показываем все события, где я член - организатор или принятый участник)
-  // Используем те же признаки для всех событий
-  // КРИТИЧЕСКИ ВАЖНО: Добавляем eventRequests в зависимости, чтобы userEvents обновлялся при изменении статуса запросов
+  // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий проверяем через eventProfiles, чтобы учесть удаление
   const userEvents = useMemo(() => {
     const userId = calendarUserId ?? currentUserId;
     if (!userId) return [];
@@ -143,38 +269,35 @@ export default function CalendarScreen() {
       // Проверяем отношения пользователя к событию
       const relationship = getUserRelationship(event, userId);
       
-      // ОТЛАДКА: Логируем для событий, которые должны быть waiting
-      if (event.id === 'ddcb8b5d-bb8c-4dbb-8c71-d2e62773152c') {
-        console.log(`[Calendar] 🔵 userEvents: событие ${event.id} (${event.title}), relationship=${relationship}`);
-      }
-      
       // Включаем события, где пользователь:
       // - организатор (organizer)
       // - участник (accepted)
       // - в ожидании (waiting) - запланировал событие
       // - приглашен (invited)
-      return relationship === 'organizer' || relationship === 'accepted' || relationship === 'waiting' || relationship === 'invited';
+      if (relationship === 'organizer' || relationship === 'accepted' || relationship === 'waiting' || relationship === 'invited') {
+        return true;
+      }
+      
+      // Для прошедших событий: организатор или участник по profile.participants (единый принцип с профилем)
+      if (isEventPast(event)) {
+        if (event.organizerId === userId) return true;
+        const profile = eventProfiles.find(p => p.eventId === event.id);
+        return profile ? profile.participants.includes(userId) : false;
+      }
+      
+      return false;
     });
     
     // Убираем дубликаты по id - оставляем только первое вхождение каждого события
     const seen = new Set<string>();
-    const result = filtered.filter(event => {
+    return filtered.filter(event => {
       if (seen.has(event.id)) {
         return false;
       }
       seen.add(event.id);
       return true;
     });
-    
-    // ОТЛАДКА: Логируем результат
-    if (result.some(e => e.id === 'ddcb8b5d-bb8c-4dbb-8c71-d2e62773152c')) {
-      console.log(`[Calendar] ✅ userEvents: событие ddcb8b5d-bb8c-4dbb-8c71-d2e62773152c включено в userEvents`);
-    } else {
-      console.log(`[Calendar] ❌ userEvents: событие ddcb8b5d-bb8c-4dbb-8c71-d2e62773152c НЕ включено в userEvents`);
-    }
-    
-    return result;
-  }, [events, calendarUserId, currentUserId, getUserRelationship, eventRequests]); // Добавляем eventRequests для обновления при изменении статуса запросов
+  }, [events, eventProfiles, calendarUserId, currentUserId, getUserRelationship, isEventPast]);
 
   // Проверяем, прошедшее ли событие (с учётом времени)
   const isPastEvent = (event: any): boolean => {
@@ -410,12 +533,6 @@ export default function CalendarScreen() {
     
     // Получаем события дня один раз
     const dayEvents = getEventsForDay(date);
-    
-    // ОТЛАДКА: Логируем dayEvents для нужного события
-    if (dayEvents.some(e => e.id === 'ddcb8b5d-bb8c-4dbb-8c71-d2e62773152c')) {
-      console.log(`[Calendar] ✅ getEventsForHour: событие ddcb8b5d-bb8c-4dbb-8c71-d2e62773152c найдено в dayEvents для даты ${dateKey}, час ${hour}`);
-    }
-    
     // СНАЧАЛА добавляем preview событие (если передано через GO)
     // Это приоритетно, чтобы оно показывалось с кнопкой
     // НО только если статус еще не waiting (запрос уже отправлен)
@@ -457,7 +574,6 @@ export default function CalendarScreen() {
         // ПРИОРИТЕТ 1: Если это waiting (пользователь отправил запрос на участие) - показываем с оранжевым значком
         // КРИТИЧЕСКИ ВАЖНО: Добавляем waiting события из dayEvents, а не пропускаем их!
         if (relationship === 'waiting') {
-          console.log(`[Calendar] ✅ Добавляем waiting событие ${event.id} (${event.title}) из dayEvents для часа ${hour}`);
           result.push({ ...event, isPending: true, participationStatus: 'pending', relationshipType: 'waiting' });
           addedEventIds.add(event.id);
           return; // Важно: возвращаемся, чтобы не проверять дальше
@@ -505,13 +621,11 @@ export default function CalendarScreen() {
           
           // ОТЛАДКА: Логируем для событий, которые могут быть waiting
           if (currentUserId && eventRequests.some(req => req.eventId === event.id && req.type === 'join' && req.fromUserId === currentUserId)) {
-            console.log(`[Calendar] 🔵 Событие ${event.id} (${event.title}): relationship=${relationship}, pendingRequests=${eventRequests.filter(req => req.eventId === event.id && req.type === 'join' && req.fromUserId === currentUserId).length}`);
           }
           
           // ПРИОРИТЕТ 1: Если это waiting (пользователь отправил запрос на участие) - показываем с оранжевым значком
           // Это должно быть ПЕРЕД проверкой invited, чтобы события не терялись после присоединения
           if (relationship === 'waiting') {
-            console.log(`[Calendar] ✅ Добавляем событие ${event.id} (${event.title}) со статусом waiting`);
             result.push({ ...event, isPending: true, participationStatus: 'pending', relationshipType: 'waiting' });
             addedEventIds.add(event.id);
             return; // Важно: возвращаемся, чтобы не проверять дальше
@@ -557,98 +671,35 @@ export default function CalendarScreen() {
     return date.toDateString() === today.toDateString();
   };
 
-  // Генерируем месяцы для month view
+  // Генерируем месяцы для month view: первый месяц в списке — текущий (индекс 0), затем будущие, затем прошлые.
+  // Так при открытии календаря scrollTop=0 сразу показывает нужный месяц — без программного скролла и дёрганий.
   const months: MonthData[] = useMemo(() => {
     const monthsArray: MonthData[] = [];
-    const today = new Date(); // Текущая дата
-    
-    for (let i = -12; i <= 12; i++) {
-      const date = new Date(today.getFullYear(), today.getMonth() + i, 1);
+    const start = new Date(CALENDAR_START.getTime());
+    const buildMonth = (i: number) => {
+      const date = new Date(start.getFullYear(), start.getMonth() + i, 1);
       const year = date.getFullYear();
       const month = date.getMonth();
-      
       const lastDay = new Date(year, month + 1, 0).getDate();
       const firstDayWeekday = new Date(year, month, 1).getDay();
-      
       const days: DayData[] = [];
-      
-      // Пустые дни в начале месяца
       for (let j = 0; j < firstDayWeekday; j++) {
-        days.push({
-          day: 0,
-          date: new Date(),
-          events: []
-        });
+        days.push({ day: 0, date: new Date(), events: [] });
       }
-      
-      // Дни месяца
       for (let day = 1; day <= lastDay; day++) {
         const currentDate = new Date(year, month, day);
-        // Форматируем дату в локальное время без часового пояса
         const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        
-        days.push({
-          day,
-          date: currentDate,
-          events: eventsByDate[dateKey] || []
-        });
+        days.push({ day, date: currentDate, events: eventsByDate[dateKey] || [] });
       }
-      
-      monthsArray.push({
-        month,
-        year,
-        days
-      });
+      return { month, year, days };
+    };
+    // Генерируем диапазон месяцев начиная примерно за год до текущей даты
+    // (например, если сейчас март 2026, то начнётся с марта 2025).
+    for (let i = 0; i <= 60; i++) {
+      monthsArray.push(buildMonth(i));
     }
-    
     return monthsArray;
   }, [eventsByDate]);
-
-  // Автоматически скроллим к текущему месяцу при загрузке календаря
-  useEffect(() => {
-    if (scrollViewRef.current && calendarMode === 'month' && months.length > 0) {
-      // Устанавливаем selectedDate на текущую дату, если она не была установлена из params
-      if (!params.date && !params.mode) {
-        setSelectedDate(new Date());
-      }
-
-      // Вычисляем индекс текущего месяца в массиве months
-      const today = new Date();
-      const currentYear = today.getFullYear();
-      const currentMonth = today.getMonth();
-
-      let currentMonthIndex = -1;
-      for (let i = 0; i < months.length; i++) {
-        if (months[i].year === currentYear && months[i].month === currentMonth) {
-          currentMonthIndex = i;
-          break;
-        }
-      }
-
-      if (currentMonthIndex === -1) {
-        currentMonthIndex = 12; // Индекс текущего месяца (i=0 означает i=-12, i=12 означает текущий месяц)
-      }
-
-      // Вычисляем приблизительную высоту одного месяца с учетом компактных размеров
-      const monthHeaderHeight = 50;
-      const weekDaysHeaderHeight = 30;
-      const weekRowHeight = 80;
-      const estimatedWeeks = 6;
-      const monthHeight = monthHeaderHeight + weekDaysHeaderHeight + estimatedWeeks * weekRowHeight + 60;
-
-      // Прокручиваем к текущему месяцу, центрируя его на экране
-      const scrollToPosition = currentMonthIndex * monthHeight - height / 2 + monthHeight / 2;
-
-      setTimeout(() => {
-        if (scrollViewRef.current) {
-          scrollViewRef.current.scrollTo({
-            y: Math.max(0, scrollToPosition),
-            animated: true,
-          });
-        }
-      }, 500);
-    }
-  }, [calendarMode, months, params.date, params.mode, height]);
 
   const getMonthName = (month: number) => {
     return t.calendar.months[month];
@@ -656,7 +707,18 @@ export default function CalendarScreen() {
 
   const renderMonth = (monthData: MonthData) => {
     const monthName = getMonthName(monthData.month);
-    const cellWidth = (width - 40) / 7;
+    // Для веб-версии используем ограниченную ширину контейнера (500px), для мобильных - полную ширину экрана
+    const getContainerWidth = () => {
+      if (Platform.OS === 'web') {
+        return Math.min(width, 500);
+      }
+      return width;
+    };
+    const containerWidth = getContainerWidth();
+    // Для веб-версии учитываем padding (20px с каждой стороны = 40px)
+    // Для мобильных padding уже учтен в width
+    const padding = Platform.OS === 'web' ? 40 : 40;
+    const cellWidth = (containerWidth - padding) / 7;
 
     const weeks: DayData[][] = [];
     // Правильно разбиваем дни на недели, заполняя последнюю неделю пустыми днями если нужно
@@ -691,15 +753,22 @@ export default function CalendarScreen() {
 
         {weeks.map((week, weekIndex) => (
           <View key={`week-${weekIndex}`} style={styles.weekRow}>
-            {week.map((dayData, dayIndex) => (
+            {week.map((dayData, dayIndex) => {
+              const dateKeyStr = dayData.day > 0
+                ? `${dayData.date.getFullYear()}-${String(dayData.date.getMonth() + 1).padStart(2, '0')}-${String(dayData.date.getDate()).padStart(2, '0')}`
+                : '';
+              return (
               <TouchableOpacity 
                 key={`day-${dayIndex}`} 
                 style={[styles.dayCell, { width: cellWidth }]}
                 onPress={() => {
                   if (dayData.day > 0) {
                     setTouchedCellDate(dayData.date);
+                    setSelectedDate(dayData.date);
+                    if (Platform.OS === 'web' || (typeof window !== 'undefined')) setCalendarMode('week');
                   }
                 }}
+                {...(Platform.OS === 'web' && dateKeyStr ? { dataSet: { calendarDay: dateKeyStr } } : {})}
               >
                 {dayData.day > 0 && (
                   dayData.events.length > 0 ? (
@@ -709,19 +778,21 @@ export default function CalendarScreen() {
                         isPastEvent(dayData.events[0]) && styles.pastEventCircle
                       ]}
                       onPress={() => {
+                        setTouchedCellDate(dayData.date);
+                        setSelectedDate(dayData.date);
+                        if (Platform.OS === 'web' || typeof window !== 'undefined') setCalendarMode('week');
                         // Если несколько событий — открываем модалку со списком
                         if (dayData.events.length > 1) {
                           openDayEventsModal(dayData.date);
                           return;
                         }
                         // Одно событие — переход на аккаунт события
-                        setTouchedCellDate(dayData.date);
                         router.push(`/event-profile/${dayData.events[0].id}`);
                       }}
                     >
                       <Image
-                        source={{ uri: getEventPhoto(dayData.events[0].id) || 'https://via.placeholder.com/50' }}
-                        style={styles.eventPhotoCircle}
+                        source={{ uri: getEventPhoto(dayData.events[0].id) || '' }}
+                        style={styles.eventPhotoCircle as ImageStyle}
                       />
                       {(() => {
                         const dateKeyStr = `${dayData.date.getFullYear()}-${String(dayData.date.getMonth()+1).padStart(2,'0')}-${String(dayData.date.getDate()).padStart(2,'0')}`;
@@ -749,7 +820,7 @@ export default function CalendarScreen() {
                       const existingInEvents = dayData.events.length > 0;
                       if (dayPending && dayPending.length > 0 && !existingInEvents) {
                         const ev = dayPending[0];
-                        const src = getEventPhoto(ev.id) || 'https://via.placeholder.com/80';
+                        const src = getEventPhoto(ev.id) || '';
                         return (
                           <TouchableOpacity 
                             style={[styles.eventCircleContainer]}
@@ -758,7 +829,7 @@ export default function CalendarScreen() {
                               router.push(`/event-profile/${ev.id}`);
                             }}
                           >
-                            <Image source={{ uri: src }} style={styles.eventPhotoCircle} />
+                            <Image source={{ uri: src }} style={styles.eventPhotoCircle as ImageStyle} />
                             <View pointerEvents="none" style={styles.pendingBWOverlay} />
                             {/* Дата по центру кружочка (как в недельной раскладке) */}
                             <View style={styles.dayNumberCentered}>
@@ -772,25 +843,58 @@ export default function CalendarScreen() {
                   )
                 )}
               </TouchableOpacity>
-            ))}
+              );
+            })}
           </View>
         ))}
       </View>
     );
   };
 
+  const monthHeightRef = useRef(0);
+  const hasScrolledRef = useRef(false);
+
+  const currentMonthIndex = useMemo(() => {
+    if (!months.length) return 0;
+    const cy = DEFAULT_CALENDAR_OPEN.getFullYear();
+    const cm = DEFAULT_CALENDAR_OPEN.getMonth();
+    const first = months[0];
+    return (cy - first.year) * 12 + (cm - first.month);
+  }, [months]);
+
+  const handleMonthLayout = useCallback((e: any, index: number) => {
+    if (index === 0 && e.nativeEvent.layout.height > 0) {
+      monthHeightRef.current = e.nativeEvent.layout.height;
+    }
+    if (index === 1 && !hasScrolledRef.current && monthHeightRef.current > 0) {
+      hasScrolledRef.current = true;
+      const offset = currentMonthIndex * monthHeightRef.current;
+      setTimeout(() => {
+        scrollViewRef.current?.scrollTo({ y: offset, animated: false });
+      }, 50);
+    }
+  }, [currentMonthIndex]);
+
   const renderMonthView = () => {
     return (
       <ScrollView
         ref={scrollViewRef}
+        nativeID="calendar-month-scroll"
+        testID="calendar-month-scroll"
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
       >
-        {months.map(monthData => renderMonth(monthData))}
+        {months.map((monthData, idx) => (
+          <View key={`${monthData.year}-${monthData.month}`} onLayout={(e) => handleMonthLayout(e, idx)}>
+            {renderMonth(monthData)}
+          </View>
+        ))}
       </ScrollView>
     );
   };
+
+  // Scroll handled by onLayout in renderMonthView
 
   const renderWeekView = () => {
     const monthName = getMonthName(selectedDate.getMonth());
@@ -846,8 +950,8 @@ export default function CalendarScreen() {
                         }}
                       >
                         <Image
-                          source={{ uri: getEventPhoto(allDayEvents[0].id) || 'https://via.placeholder.com/50' }}
-                          style={styles.weekEventCircle}
+                          source={{ uri: getEventPhoto(allDayEvents[0].id) || '' }}
+                          style={styles.weekEventCircle as ImageStyle}
                         />
                         {(() => {
                           const event = allDayEvents[0];
@@ -867,8 +971,8 @@ export default function CalendarScreen() {
                         }}
                       >
                         <Image
-                          source={{ uri: getEventPhoto(allDayEvents[0].id) || 'https://via.placeholder.com/50' }}
-                          style={styles.weekEventCircle}
+                          source={{ uri: getEventPhoto(allDayEvents[0].id) || '' }}
+                          style={styles.weekEventCircle as ImageStyle}
                         />
                         {(() => {
                           const event = allDayEvents[0];
@@ -897,7 +1001,13 @@ export default function CalendarScreen() {
         </View>
 
         {/* День по часам внизу */}
-        <ScrollView ref={weekScrollViewRef} style={styles.dayView}>
+        <ScrollView 
+          ref={weekScrollViewRef} 
+          style={styles.dayView}
+          data-testid="week-scroll-view"
+          nestedScrollEnabled={true}
+          showsVerticalScrollIndicator={true}
+        >
           {hourSlots.map((slot, index) => {
             // Форматируем дату и время для передачи в create
             const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
@@ -944,8 +1054,8 @@ export default function CalendarScreen() {
                           <View style={styles.eventItemContent}>
                             {getEventPhoto(event.id) && (
                               <Image
-                                source={{ uri: getEventPhoto(event.id) || 'https://via.placeholder.com/50' }}
-                                style={styles.eventPhotoCircle}
+                                source={{ uri: getEventPhoto(event.id) || '' }}
+                                style={styles.eventPhotoCircle as ImageStyle}
                                 onError={(e) => {
                                   logger.debug('Error loading event photo:', e.nativeEvent.error);
                                 }}
@@ -1083,14 +1193,14 @@ export default function CalendarScreen() {
                           {photoUrl ? (
                             <Image
                               source={{ uri: photoUrl }}
-                              style={styles.eventPhotoCircle}
+                              style={styles.eventPhotoCircle as ImageStyle}
                               onError={(e) => {
                                 logger.debug('Error loading event photo:', e.nativeEvent.error);
                               }}
                             />
                           ) : (
-                            <View style={[styles.eventPhotoCircle, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
-                              <Text style={{ color: '#fff', fontSize: 20 }}>📅</Text>
+                            <View style={[styles.eventPhotoCircle, { backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center' }]}>
+                              <AppIcon name="calendar" size={20} color="#f4f4f5" />
                             </View>
                           )}
                           <View style={styles.eventTextContainer}>
@@ -1131,14 +1241,14 @@ export default function CalendarScreen() {
                         {photoUrl ? (
                           <Image
                             source={{ uri: photoUrl }}
-                            style={styles.eventPhotoCircle}
+                            style={styles.eventPhotoCircle as ImageStyle}
                             onError={(e) => {
                               logger.debug('Error loading event photo:', e.nativeEvent.error);
                             }}
                           />
                         ) : (
-                          <View style={[styles.eventPhotoCircle, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
-                            <Text style={{ color: '#fff', fontSize: 20 }}>📅</Text>
+                          <View style={[styles.eventPhotoCircle, { backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center' }]}>
+                            <AppIcon name="calendar" size={20} color="#f4f4f5" />
                           </View>
                         )}
                         <View style={styles.eventTextContainer}>
@@ -1166,6 +1276,15 @@ export default function CalendarScreen() {
     );
   };
 
+  if (!readyToRender) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#FF8D32" />
+        <Text style={{ color: 'rgba(244,244,245,0.55)', marginTop: 12, fontSize: 14 }}>{t?.common?.loading ?? 'Загрузка…'}</Text>
+      </View>
+    );
+  }
+
   return (
     <GestureHandlerRootView style={styles.container}>
       <PinchGestureHandler
@@ -1186,7 +1305,7 @@ export default function CalendarScreen() {
           if (event.nativeEvent.oldState === 4) {
             Animated.spring(scale, {
               toValue: 1,
-              useNativeDriver: true,
+              useNativeDriver: Platform.OS !== 'web',
             }).start();
           }
         }}
@@ -1217,7 +1336,7 @@ export default function CalendarScreen() {
                     router.push(`/event-profile/${ev.id}`);
                   }}
                 >
-                  <Image source={{ uri: getEventPhoto(ev.id) || 'https://via.placeholder.com/80' }} style={styles.dayEventThumb} />
+                  <Image source={{ uri: getEventPhoto(ev.id) || '' }} style={styles.dayEventThumb as ImageStyle} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.dayEventTitle} numberOfLines={1}>{ev.title}</Text>
                     <Text style={styles.dayEventMeta} numberOfLines={1}>{ev.time} • {ev.location}</Text>
@@ -1238,7 +1357,12 @@ export default function CalendarScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
+    ...(Platform.OS === 'web' && ({
+      height: '100vh',
+      overflowY: 'auto',
+      WebkitOverflowScrolling: 'touch',
+    } as unknown as ViewStyle)),
   },
   previewCtaContainer: {
     position: 'absolute',
@@ -1258,7 +1382,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
   },
   previewCtaText: {
-    color: '#fff',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -1268,23 +1392,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 40,
     paddingHorizontal: 20,
-    paddingBottom: 10,
+    paddingBottom: 14,
   },
   weekMonthName: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    letterSpacing: -0.4,
   },
   addEventButton: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: '#007AFF',
+    borderRadius: 14,
+    backgroundColor: '#FF8D32',
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#FF8D32',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.32,
+    shadowRadius: 12,
   },
   addEventButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 28,
     fontWeight: 'bold',
   },
@@ -1294,7 +1423,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   weekDay: {
     flex: 1,
@@ -1355,12 +1484,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   weekCountText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 8,
     fontWeight: 'bold',
   },
   weekDayName: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 12,
     position: 'absolute',
     top: 5,
@@ -1370,7 +1499,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   weekDayNumber: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 11,
     fontWeight: 'bold',
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
@@ -1388,7 +1517,7 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   weekDayNumberCenteredText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 11,
     fontWeight: 'bold',
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
@@ -1397,6 +1526,11 @@ const styles = StyleSheet.create({
   },
   dayView: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      overflowY: 'auto' as any,
+      maxHeight: '100%',
+      WebkitOverflowScrolling: 'touch' as any,
+    }),
   },
   hourSlot: {
     flexDirection: 'row',
@@ -1406,7 +1540,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#1E1E1E',
   },
   hourLabel: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     width: 60,
     fontWeight: '600',
@@ -1430,21 +1564,21 @@ const styles = StyleSheet.create({
   },
   previewEventItem: {
     borderWidth: 1,
-    borderColor: '#8B5CF6',
+    borderColor: '#FF8D32',
     backgroundColor: '#1B1236',
   },
   eventTitle: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 4,
   },
   eventLocation: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
   },
   placeholderText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
     textAlign: 'center',
     marginTop: 100,
@@ -1457,38 +1591,56 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 20,
     paddingBottom: 40,
+    width: '100%',
+    maxWidth: 500,
+    alignSelf: 'center',
+    ...(Platform.OS === 'web' ? ({ 
+      boxSizing: 'border-box',
+      margin: '0 auto',
+    } as unknown as ViewStyle) : {}),
   },
   monthHeader: {
-    marginBottom: 15,
+    marginBottom: 18,
     alignItems: 'center',
   },
   monthTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontSize: 26,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+    color: '#f4f4f5',
   },
   weekDaysHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
+    justifyContent: 'flex-start',
+    marginBottom: 8,
+    width: '100%',
+    paddingHorizontal: 0,
   },
   weekDayHeaderCell: {
     alignItems: 'center',
+    flexShrink: 0,
+    minWidth: 0,
   },
   weekDayHeaderText: {
-    color: '#999999',
-    fontSize: 12,
-    fontWeight: '600',
+    color: 'rgba(244,244,245,0.4)',
+    fontSize: 11.5,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   weekRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
+    justifyContent: 'flex-start',
+    marginBottom: 4,
+    width: '100%',
+    paddingHorizontal: 0,
   },
   dayCell: {
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 70,
+    minHeight: 52,
+    flexShrink: 0,
+    minWidth: 0,
   },
   eventCircleContainer: {
     alignItems: 'center',
@@ -1497,11 +1649,13 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   eventPhotoCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 42,
+    height: 42,
+    borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: '#333',
+    backgroundColor: '#1c1c20',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   dayNumberBadgeButton: {
     position: 'absolute',
@@ -1510,7 +1664,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   dayNumberBadge: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 11,
     fontWeight: 'bold',
     paddingHorizontal: 6,
@@ -1530,7 +1684,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   countText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 8,
     fontWeight: 'bold',
   },
@@ -1545,7 +1699,7 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   dayNumberCenteredText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 11,
     fontWeight: 'bold',
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
@@ -1577,7 +1731,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   inboxStatusIcon: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -1590,10 +1744,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 8,
     borderWidth: 1,
-    borderColor: '#FFFFFF',
+    borderColor: '#f4f4f5',
   },
   confirmButtonText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1610,12 +1764,12 @@ const styles = StyleSheet.create({
   },
   dayEventsModal: {
     width: '90%',
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#141417',
     borderRadius: 16,
     padding: 16,
   },
   dayEventsTitle: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 12,
@@ -1633,13 +1787,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   dayEventTitle: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 2,
   },
   dayEventMeta: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 12,
   },
   closeModalBtn: {
@@ -1649,10 +1803,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#666',
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   closeModalText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 14,
   },
 });

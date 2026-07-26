@@ -114,6 +114,8 @@ export type CreateEventInput = {
     reach?: number;
     responses?: number;
   };
+  // Для веба: File объект для загрузки (используется вместо mediaUrl/originalMediaUrl)
+  selectedFile?: File | null;
 };
 
 type UserProfilePatch = Partial<{
@@ -140,6 +142,8 @@ type UserProfile = {
 
 interface EventsContextType {
   events: Event[];
+  syncEventsFromServer: () => Promise<void>;
+  syncChatsFromServer: () => Promise<void>;
   createEvent: (input: CreateEventInput) => Promise<Event | null>;
   updateEvent: (id: string, updates: Partial<Event>) => void;
   deleteEvent: (id: string) => Promise<void>;
@@ -196,6 +200,8 @@ interface EventsContextType {
   getChatMessages: (chatId: string) => ChatMessage[];
   getChat: (chatId: string) => Chat | null;
   getChatsForUser: (userId: string) => Chat[];
+  fetchMessagesForChat: (chatId: string, force?: boolean) => Promise<void>;
+  markChatAsRead: (chatId: string) => Promise<void>;
   addParticipantToChat: (eventId: string, userId: string) => Promise<void>;
   // Система профилей событий
   eventRequests: EventRequest[];
@@ -248,7 +254,7 @@ interface EventsContextType {
   setPersonalEventPhoto: (eventId: string, userId: string, photoUrl: string) => void;
   // Сохраненные события
   savedEvents: string[];
-  saveEvent: (eventId: string) => void;
+  saveEvent: (eventId: string, eventObject?: Event) => void;
   removeSavedEvent: (eventId: string) => void;
   isEventSaved: (eventId: string) => boolean;
   getSavedEvents: () => Event[];
@@ -277,7 +283,7 @@ const EventsContext = createContext<EventsContextType | undefined>(undefined);
 
 export const useEvents = () => {
   const context = useContext(EventsContext);
-  if (context === undefined) {
+  if (context === undefined || context === null) {
     throw new Error('useEvents must be used within an EventsProvider');
   }
   return context;
@@ -291,10 +297,14 @@ interface EventsProviderProps {
 
 export function EventsProvider({ children }: EventsProviderProps) {
   const { accessToken, refreshToken, initializing: authInitializing, user: authUser, logout, refreshSession } = useAuth();
+  const authInitializingRef = useRef(authInitializing);
+  authInitializingRef.current = authInitializing;
   const { language } = useLanguage();
   const currentUserId = authUser?.id ?? null;
   const [isSyncing, setIsSyncing] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
+  // КРИТИЧЕСКИ ВАЖНО: Отслеживаем удаленные события, чтобы они не вернулись при синхронизации
+  const deletedEventIdsRef = useRef<Set<string>>(new Set());
   // userFolders и setUserFolders теперь в useUserFolders хуке
   // messageFolders и setMessageFolders теперь в useMessageFolders хуке
   // Состояние чатов теперь в useChats хуке
@@ -320,6 +330,8 @@ export function EventsProvider({ children }: EventsProviderProps) {
   const handleUnauthorizedError = useCallback(
     async (error: unknown) => {
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        // Не вызываем logout во время инициализации auth (гонка с bootstrapSession)
+        if (authInitializingRef.current) return false;
         // КРИТИЧЕСКИ ВАЖНО: Сначала пытаемся обновить токен
         // Только если refresh не удался - вызываем logout
         if (refreshToken && refreshToken.trim() !== '' && refreshSession) {
@@ -386,15 +398,29 @@ export function EventsProvider({ children }: EventsProviderProps) {
   const normalizeMediaUrl = useCallback((input?: string | null): string | undefined => {
     if (!input) return undefined;
     try {
-      // Получаем storage URL из переменной окружения или используем дефолтный
-      const storageUrl = process.env.EXPO_PUBLIC_STORAGE_URL || 'http://192.168.0.39:9000';
+      // Получаем storage URL из переменной окружения (поддерживаем и EXPO_PUBLIC для мобильных, и NEXT_PUBLIC для веба)
+      const storageUrl = (typeof process !== 'undefined' && process.env) 
+        ? (process.env.NEXT_PUBLIC_STORAGE_URL || process.env.EXPO_PUBLIC_STORAGE_URL || 'https://iwent.ru/storage')
+        : 'https://iwent.ru/storage';
       
       // Заменяем старые origin на актуальный, остальную часть пути сохраняем
       let normalized = input;
+
+      // Исправляем известные “битые” demo-URL (Wikimedia иногда удаляет/перемещает файлы → 404).
+      // Делаем это здесь, чтобы починить и кэшированные на клиенте карточки.
+      const DEMO_URL_FIXES: Record<string, string> = {
+        'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f9/Phoenicopterus_ruber_ruber.jpg/1200px-Phoenicopterus_ruber_ruber.jpg':
+          'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cf/Phoenicopterus_ruber_Bonaire_1.jpg/1200px-Phoenicopterus_ruber_Bonaire_1.jpg',
+        'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2d/Siberian_tiger_at_Columbus_Zoo.jpg/1200px-Siberian_tiger_at_Columbus_Zoo.jpg':
+          'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/Siberian_Tiger_by_Malene_Th.jpg/1200px-Siberian_Tiger_by_Malene_Th.jpg',
+      };
+      normalized = DEMO_URL_FIXES[normalized] ?? normalized;
+
       // Заменяем старые IP адреса на актуальный
       normalized = normalized.replace(/http:\/\/192\.168\.0\.\d+:9000/g, storageUrl);
       normalized = normalized.replace(/http:\/\/192\.168\.0\.\d+:4000/g, storageUrl);
-      
+      normalized = normalized.replace(/https?:\/\/(www\.)?iventapp\.ru/gi, 'https://iwent.ru');
+
       return normalized || undefined;
     } catch {
       return input || undefined;
@@ -764,6 +790,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     getChatsForUser,
     addParticipantToChat,
     fetchMessagesForChat,
+    markChatAsRead,
     setChats,
     setChatMessages,
   } = useChats({
@@ -902,15 +929,8 @@ export function EventsProvider({ children }: EventsProviderProps) {
     return { complaints, friends };
   };
 
-  // Кэш для количества жалоб по пользователям
+  // Кэш для количества жалоб по пользователям (ref — без ре-рендеров при обновлении)
   const complaintsCountCache = useRef<Record<string, number>>({});
-  const [organizerStatsCache, setOrganizerStatsCache] = useState<Record<string, {
-    totalEvents: number;
-    organizedEvents: number;
-    participatedEvents: number;
-    complaints: number;
-    friends: number;
-  }>>({});
 
   // Загружаем статистику жалоб для пользователя
   const loadComplaintsCount = useCallback(async (userId: string) => {
@@ -1037,20 +1057,12 @@ export function EventsProvider({ children }: EventsProviderProps) {
     // Получаем количество жалоб из кэша (загружается асинхронно)
     const complaintsCount = complaintsCountCache.current[organizerId] ?? 0;
 
-    // Загружаем жалобы асинхронно, если еще не загружены
+    // Загружаем жалобы асинхронно, если еще не загружены.
+    // ВАЖНО: НЕ вызываем setOrganizerStatsCache — это вызывало re-render всех подписчиков
+    // контекста (в т.ч. всех EventCard) при каждом ответе /complaints/count.
+    // Теперь обновляем только ref-кэш: данные появятся при следующем вызове getOrganizerStats.
     if (complaintsCountCache.current[organizerId] === undefined && accessToken) {
-      loadComplaintsCount(organizerId).then(count => {
-        setOrganizerStatsCache(prev => ({
-          ...prev,
-          [organizerId]: {
-            totalEvents: allUserEvents.length,
-            organizedEvents: organizedEvents.length,
-            participatedEvents: participatedEvents.length,
-            complaints: count,
-            friends: friendsCount,
-          }
-        }));
-      });
+      loadComplaintsCount(organizerId); // результат сохраняется в complaintsCountCache.current
     }
 
     return {
@@ -1106,22 +1118,23 @@ export function EventsProvider({ children }: EventsProviderProps) {
     const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 часа назад
     
     const filtered = events.filter(event => {
-<<<<<<< HEAD
-=======
       // Исключаем preview-события из ленты
       if (event.id === 'preview-event-temp' || event.id.includes('-temp') || event.id.startsWith('preview-')) {
         return false;
       }
       
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
       // предстоящее
       if (!isEventUpcoming(event)) return false;
       // не_набрано
       if (isEventFull(event)) return false;
       
-      // Исключаем отклоненные события
+      // Исключаем отклоненные события и отклонённые приглашения
       const userStatus = getUserRequestStatus(event, viewerId);
       if (userStatus === 'rejected') return false;
+      const hasRejectedRequest = eventRequests.some(
+        r => r.eventId === event.id && (r.fromUserId === viewerId || r.toUserId === viewerId) && r.status === 'rejected'
+      );
+      if (hasRejectedRequest) return false;
       
       // Для остальных событий применяем обычные фильтры:
       // !я_член_события (скрываем все события, где мы уже участники, но не организаторы)
@@ -1211,7 +1224,9 @@ export function EventsProvider({ children }: EventsProviderProps) {
 
     const start = serverEvent.startTime ? new Date(serverEvent.startTime) : null;
     const date = start ? start.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-    const time = start ? start.toISOString().slice(11, 16) : '00:00';
+    // ВРЕМЯ: используем локальное время устройства, а не UTC,
+    // чтобы совпадало с тем, что пользователь выбирает при создании события.
+    const time = start ? start.toTimeString().slice(0, 5) : '00:00';
 
     // Фильтруем только ACCEPTED memberships - pending приглашения не должны показываться как участники
     const participantsData = (serverEvent.memberships ?? [])
@@ -1372,6 +1387,10 @@ export function EventsProvider({ children }: EventsProviderProps) {
     refreshPendingJoinRequests,
     syncEventsFromServer: syncEventsFromServerWrapper,
     getEventParticipants: getEventParticipantsWrapper,
+    markEventAsDeleted: (eventId: string) => {
+      deletedEventIdsRef.current.add(eventId);
+      logger.debug(`Событие ${eventId} помечено как удаленное`);
+    },
     events,
     eventProfiles,
     language,
@@ -1388,6 +1407,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     removeSavedEvent,
     isEventSaved,
     getSavedEvents,
+    clearAllSavedEvents,
   } = useSavedEvents({
     events,
   });
@@ -2078,83 +2098,25 @@ export function EventsProvider({ children }: EventsProviderProps) {
   // Показываем только события НЕ-друзей
   // Обновленная логика GLOB согласно новой системе
   const getGlobalEvents = (): Event[] => {
-    const now = new Date();
-    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 часа назад
-    
     const filtered = events.filter(event => {
       // Исключаем preview-события из ленты
       if (event.id === 'preview-event-temp' || event.id.includes('-temp') || event.id.startsWith('preview-')) {
-        logger.debug(`[getGlobalEvents] Event ${event.id} filtered: preview event`);
         return false;
       }
-      
       // предстоящее
-      if (!isEventUpcoming(event)) {
-        logger.debug(`[getGlobalEvents] Event ${event.id} filtered: not upcoming`);
-        return false;
-      }
+      if (!isEventUpcoming(event)) return false;
       // не_набрано
-      if (isEventFull(event)) {
-        logger.debug(`[getGlobalEvents] Event ${event.id} filtered: full`);
-        return false;
-      }
-      
-      // Используем getUserRelationship для определения отношений
+      if (isEventFull(event)) return false;
       const relationship = getUserRelationship(event, currentUserId);
-      
-      // Скрываем отклоненные приглашения
-      if (relationship === 'rejected') {
-        logger.debug(`[getGlobalEvents] Event ${event.id} filtered: rejected`);
-        return false;
-      }
-      
-      // События, где я организатор И которые были созданы недавно (за последние 24 часа)
-      // ИЛИ регулярные события (они всегда актуальны)
-      if (relationship === 'organizer') {
-        const eventCreatedAt = event.createdAt instanceof Date ? event.createdAt : new Date(event.createdAt);
-        // Для регулярных событий показываем всегда (они актуальны)
-        if (event.isRecurring) {
-          logger.debug(`[getGlobalEvents] Event ${event.id} included: organizer, recurring`);
-          return true;
-        }
-        // Для обычных событий показываем только если созданы за последние 24 часа
-        if (eventCreatedAt >= oneDayAgo) {
-          logger.debug(`[getGlobalEvents] Event ${event.id} included: organizer, recent`);
-          return true;
-        } else {
-          logger.debug(`[getGlobalEvents] Event ${event.id} filtered: organizer, too old`);
-        }
-      }
-      
-      // ПРАВИЛО: я_участник = исчезает из лент (скрываем все события, где мы уже участники, но не организаторы)
-      if (relationship === 'accepted') {
-        logger.debug(`[getGlobalEvents] Event ${event.id} filtered: accepted`);
-        return false;
-      }
-      
-      // КРИТИЧЕСКИ ВАЖНО: События друзей НЕ показываются в глобальной ленте, даже если нас пригласили
-      // Глобальная лента только для не-друзей
-      if (currentUserId && isFriendOfOrganizer(event, currentUserId)) {
-        logger.debug(`[getGlobalEvents] Event ${event.id} filtered: friend of organizer (not shown in global feed)`);
-        return false;
-      }
-      
-      // Показываем приглашения (invited) - только от не-друзей
-      if (relationship === 'invited') {
-        logger.debug(`[getGlobalEvents] Event ${event.id} included: invited (from non-friend)`);
-        return true;
-      }
-      
-      // Показываем запланированные события (waiting) - только от не-друзей
-      if (relationship === 'waiting') {
-        logger.debug(`[getGlobalEvents] Event ${event.id} included: waiting (from non-friend)`);
-        return true;
-      }
-      
-      logger.debug(`[getGlobalEvents] Event ${event.id} included: default`);
+      if (relationship === 'rejected') return false;
+      // События, где я организатор: показываем все предстоящие (уже отфильтровано по isEventUpcoming выше)
+      if (relationship === 'organizer') return true;
+      if (relationship === 'accepted') return false;
+      if (currentUserId && isFriendOfOrganizer(event, currentUserId)) return false;
+      if (relationship === 'invited') return true;
+      if (relationship === 'waiting') return true;
       return true;
     });
-    
     // Сортируем: сначала события, где я организатор (недавно созданные), затем остальные
     return filtered.sort((a, b) => {
       const aIsMyOrganizer = currentUserId ? isUserOrganizer(a, currentUserId) : false;
@@ -2233,43 +2195,11 @@ const isHttpUrl = (value?: string | null): boolean => {
         const outgoingInvitations: EventRequest[] = [];
         
         response.forEach((serverEvent: any) => {
-          // Логируем координаты для отладки
-          if (serverEvent.latitude != null || serverEvent.longitude != null) {
-            logger.debug(`Server event ${serverEvent.id} has coordinates:`, {
-              latitude: serverEvent.latitude,
-              longitude: serverEvent.longitude,
-              title: serverEvent.title
-            });
-          } else {
-            logger.debug(`Server event ${serverEvent.id} has NO coordinates:`, {
-              latitude: serverEvent.latitude,
-              longitude: serverEvent.longitude,
-              title: serverEvent.title,
-              hasCoordinatesField: 'coordinates' in serverEvent
-            });
-          }
-          
           if (serverEvent?.organizer) {
-            // КРИТИЧЕСКИ ВАЖНО: Логируем данные организатора для отладки
-            if (!serverEvent.organizer.username && !serverEvent.organizer.name) {
-              logger.warn('⚠️ syncEventsFromServer: организатор без username и name', {
-                eventId: serverEvent.id,
-                organizerId: serverEvent.organizer.id,
-                organizer: JSON.stringify(serverEvent.organizer).substring(0, 200)
-              });
-            }
             applyServerUserDataToState(serverEvent.organizer);
           }
           (serverEvent?.memberships ?? []).forEach((membership: any) => {
             if (membership?.user) {
-              // КРИТИЧЕСКИ ВАЖНО: Логируем данные участника для отладки
-              if (!membership.user.username && !membership.user.name) {
-                logger.warn('⚠️ syncEventsFromServer: участник без username и name', {
-                  eventId: serverEvent.id,
-                  userId: membership.user.id,
-                  user: JSON.stringify(membership.user).substring(0, 200)
-                });
-              }
               applyServerUserDataToState(membership.user);
             }
             
@@ -2319,20 +2249,48 @@ const isHttpUrl = (value?: string | null): boolean => {
         
         // ВАЖНО: Объединяем события с сервера с существующими, чтобы сохранить прошедшие события
         // Прошедшие события могут не возвращаться с сервера, но должны оставаться в локальном состоянии
+        // КРИТИЧЕСКИ ВАЖНО: Удаляем preview-event-temp и временные события ПЕРЕД объединением
+        // Также НЕ сохраняем недавно созданные события, если они уже есть на сервере (чтобы избежать дублей)
         setEvents(prev => {
+          // Удаляем временные события (preview-event-temp) ДО синхронизации
+          const filteredPrev = prev.filter(event => 
+            !event.id.includes('-temp') && 
+            !event.id.startsWith('preview-')
+          );
+          
           const serverEventIds = new Set(mapped.map(e => e.id));
           const serverEventsMap = new Map(mapped.map(e => [e.id, e]));
+          const now = Date.now();
+          const RECENT_EVENT_THRESHOLD = 5 * 60 * 1000; // 5 минут
           
           // Сохраняем прошедшие события, которых нет в ответе сервера
-          const pastEventsToKeep = prev.filter(event => {
+          // КРИТИЧЕСКИ ВАЖНО: НЕ сохраняем удаленные события
+          const pastEventsToKeep = filteredPrev.filter(event => {
             const isPast = isEventPast(event);
             const notInServer = !serverEventIds.has(event.id);
-            return isPast && notInServer;
+            const isDeleted = deletedEventIdsRef.current.has(event.id);
+            // Сохраняем только прошедшие события, которых нет на сервере И которые не были удалены
+            return isPast && notInServer && !isDeleted;
+          });
+          
+          // КРИТИЧЕСКИ ВАЖНО: НЕ сохраняем недавно созданные события, если они уже есть на сервере
+          // Это предотвращает дублирование - если событие есть на сервере, используем версию с сервера
+          // Сохраняем только те недавно созданные события, которых НЕТ на сервере (например, если они еще не индексированы)
+          const recentEventsToKeep = filteredPrev.filter(event => {
+            const notInServer = !serverEventIds.has(event.id);
+            if (!notInServer) return false; // Уже есть на сервере - не сохраняем локальную версию
+            
+            // Проверяем, создано ли событие недавно
+            const eventCreatedAt = event.createdAt?.getTime() || 0;
+            const isRecent = (now - eventCreatedAt) < RECENT_EVENT_THRESHOLD;
+            
+            // Сохраняем только будущие недавно созданные события (прошедшие уже сохранены выше)
+            return isRecent && !isEventPast(event);
           });
           
           // Обновляем персональные фото в событиях с сервера, объединяя с локальными
           const mappedWithMergedPhotos = mapped.map(serverEvent => {
-            const prevEvent = prev.find(e => e.id === serverEvent.id);
+            const prevEvent = filteredPrev.find(e => e.id === serverEvent.id);
             if (prevEvent && prevEvent.personalPhotos && serverEvent.personalPhotos) {
               // Объединяем персональные фото: приоритет у серверных, но сохраняем локальные если их нет на сервере
               return {
@@ -2346,16 +2304,28 @@ const isHttpUrl = (value?: string | null): boolean => {
             return serverEvent;
           });
           
-          // Объединяем: события с сервера (с обновленными фото) + сохраненные прошедшие события
-          const merged = [...mappedWithMergedPhotos, ...pastEventsToKeep];
+          // Объединяем: события с сервера (с обновленными фото) + сохраненные прошедшие события + недавно созданные события
+          const merged = [...mappedWithMergedPhotos, ...pastEventsToKeep, ...recentEventsToKeep];
+          
+          // КРИТИЧЕСКИ ВАЖНО: Фильтруем удаленные события, чтобы они не вернулись при синхронизации
+          const filteredMerged = merged.filter(event => {
+            const isDeleted = deletedEventIdsRef.current.has(event.id);
+            if (isDeleted) {
+              logger.warn(`⚠️ Удаленное событие ${event.id} пытается вернуться при синхронизации, фильтруем его`);
+              return false;
+            }
+            return true;
+          });
           
           logger.debug('syncEventsFromServer: объединено событий', {
             fromServer: mapped.length,
             pastEventsKept: pastEventsToKeep.length,
-            total: merged.length
+            totalBeforeFilter: merged.length,
+            totalAfterFilter: filteredMerged.length,
+            deletedCount: deletedEventIdsRef.current.size
           });
           
-          return merged;
+          return filteredMerged;
         });
         
         // Update eventRequests with pending invitations (both incoming and outgoing)
@@ -2377,16 +2347,11 @@ const isHttpUrl = (value?: string | null): boolean => {
           // Add/update incoming invitations
           pendingInvitations.forEach(inv => byId.set(inv.id, inv));
           // Add/update outgoing invitations - ВАЖНО: сохраняем исходящие приглашения
-          outgoingInvitations.forEach(inv => {
-            byId.set(inv.id, inv);
-            logger.debug('✅ Сохранено исходящее приглашение:', { id: inv.id, eventId: inv.eventId, toUserId: inv.toUserId });
-          });
-          const result = Array.from(byId.values());
-          logger.debug('Обновлено eventRequests:', result.length, 'исходящих приглашений:', outgoingInvitations.length);
-          return result;
+          outgoingInvitations.forEach(inv => byId.set(inv.id, inv));
+          return Array.from(byId.values());
         });
-        
-        await refreshPendingJoinRequests(mapped);
+        // Не ждём загрузки запросов по событиям — календарь и лента показываются сразу по событиям
+        refreshPendingJoinRequests(mapped).catch(err => logger.warn('refreshPendingJoinRequests after sync:', err));
       }
     } catch (error) {
       // Проверяем только 401/403 - другие ошибки не должны вызывать logout
@@ -2536,7 +2501,7 @@ const isHttpUrl = (value?: string | null): boolean => {
       setChatMessages([]);
       setEventRequests([]);
       setNotifications([]);
-      setSavedEvents([]);
+      clearAllSavedEvents();
       setSavedMemoryPosts([]);
       // loadedChatMessages теперь в useChats хуке, очистка происходит через setChatMessages([])
       // Очищаем userFriendsMap, оставляя только данные для нового пользователя
@@ -2544,12 +2509,14 @@ const isHttpUrl = (value?: string | null): boolean => {
     }
 
     // Only sync if user/accessToken changed, not on every render
+    // Также синхронизируем если токен установлен, но еще не было синхронизации для этого пользователя
     const shouldSync =
       !authInitializing &&
       accessToken &&
       currentUserId &&
       (lastSyncRef.current.userId !== currentUserId ||
-        lastSyncRef.current.accessToken !== accessToken);
+        lastSyncRef.current.accessToken !== accessToken ||
+        (lastSyncRef.current.userId === null && currentUserId !== null)); // Первый вход для нового пользователя
 
     if (shouldSync) {
       lastSyncRef.current = { userId: currentUserId, accessToken };
@@ -2591,7 +2558,7 @@ const isHttpUrl = (value?: string | null): boolean => {
       setEventRequests([]);
       setEventProfiles([]);
       setNotifications([]);
-      setSavedEvents([]);
+      clearAllSavedEvents();
       setSavedMemoryPosts([]);
       // loadedChatMessages теперь в useChats хуке, очистка происходит через setChatMessages([])
       lastSyncRef.current = { userId: null, accessToken: null };
@@ -2612,6 +2579,7 @@ const isHttpUrl = (value?: string | null): boolean => {
     syncUserFoldersFromServer,
     refreshPendingJoinRequests,
     refreshNotifications,
+    clearAllSavedEvents,
   ]);
 
   useEffect(() => {
@@ -2710,6 +2678,17 @@ const isHttpUrl = (value?: string | null): boolean => {
     socket.on('message:new', handleMessageNew);
     eventHandlers.push({ event: 'message:new', handler: handleMessageNew });
 
+    const handleMessagesRead = (data: { chatId: string; userId: string; messageIds: string[] }) => {
+      if (!data?.messageIds?.length) return;
+      setChatMessages(prev => prev.map(msg =>
+        data.messageIds.includes(msg.id) && !msg.readBy?.includes(data.userId)
+          ? { ...msg, readBy: [...(msg.readBy || []), data.userId] }
+          : msg
+      ));
+    };
+    socket.on('messages:read', handleMessagesRead);
+    eventHandlers.push({ event: 'messages:read', handler: handleMessagesRead });
+
     // Подписка на обновление списка чатов
     const handleChatsUpdate = () => {
       logger.debug('🔄 Получено обновление списка чатов через WebSocket');
@@ -2782,6 +2761,8 @@ const isHttpUrl = (value?: string | null): boolean => {
       // Удаляем событие из состояния
       if (eventData.eventId) {
         const eventId = eventData.eventId;
+        // КРИТИЧЕСКИ ВАЖНО: Помечаем событие как удаленное, чтобы оно не вернулось при синхронизации
+        deletedEventIdsRef.current.add(eventId);
         setEvents(prev => prev.filter(event => event.id !== eventId));
         // Также удаляем из сохраненных
         setSavedEvents(prev => prev.filter(id => id !== eventId));
@@ -3045,125 +3026,152 @@ const isHttpUrl = (value?: string | null): boolean => {
     }
   }, [accessToken, currentUserId]);
 
+  const contextValue = useMemo(() => ({
+    events,
+    createEvent,
+    updateEvent,
+    deleteEvent,
+    getUserData,
+    updateUserData,
+    getOrganizerStats,
+    friends,
+    friendRequests,
+    sendFriendRequest,
+    removeFriend,
+    respondToFriendRequest,
+    getFriendsList,
+    getUserFriendsList,
+    isFriend,
+    getFriendsForEvents,
+    userFolders,
+    addUserToFolder,
+    removeUserFromFolder,
+    createUserFolder,
+    deleteUserFolder,
+    getEventsByUserFolder,
+    eventFolders,
+    createEventFolder,
+    updateEventFolder,
+    deleteEventFolder,
+    addEventToFolder,
+    removeEventFromFolder,
+    getEventFolderById,
+    refreshEventFolders,
+    messageFolders,
+    refreshMessageFolders: syncMessageFolders,
+    createMessageFolder,
+    addChatsToMessageFolder,
+    removeChatFromMessageFolder,
+    chats,
+    chatMessages,
+    createEventChat,
+    createEventChatWithParticipants,
+    createPersonalChat,
+    sendChatMessage,
+    deleteChat,
+    sendEventToChats,
+    sendMemoryPostToChats,
+    getChatMessages,
+    getChat,
+    getChatsForUser,
+    fetchMessagesForChat,
+    markChatAsRead,
+    addParticipantToChat,
+    eventRequests,
+    eventProfiles,
+    sendEventRequest,
+    sendEventInvite,
+    acceptInvitation,
+    rejectInvitation,
+    respondToEventRequest,
+    cancelEventRequest,
+    removeEventRequestById,
+    cancelEventParticipation,
+    cancelEvent,
+    cancelOrganizerParticipation,
+    transferOrganizerRole,
+    removeParticipantFromEvent,
+    getEventProfile,
+    fetchEventProfile,
+    createEventProfile,
+    addEventProfilePost,
+    updateEventProfile,
+    updateEventProfilePost,
+    addPostComment,
+    getEventParticipants,
+    canEditEventProfile,
+    getMyEventRequests,
+    getEventOrganizer,
+    getMyEventParticipationStatus,
+    isUserParticipant,
+    getMyCalendarEvents,
+    getUserCalendarEvents,
+    getGlobalEvents,
+    isEventUpcoming,
+    isEventPast,
+    isEventFull,
+    isEventNotFull,
+    isUserOrganizer,
+    isUserAttendee,
+    isUserEventMember,
+    getUserRequestStatus,
+    getUserRelationship,
+    isFriendOfOrganizer,
+    getAcceptedParticipants,
+    getEventPhotoForUser,
+    setPersonalEventPhoto,
+    savedEvents,
+    saveEvent,
+    removeSavedEvent,
+    isEventSaved,
+    getSavedEvents,
+    savedMemoryPosts,
+    saveMemoryPost,
+    removeSavedMemoryPost,
+    isMemoryPostSaved,
+    getSavedMemoryPosts,
+    deleteEventProfilePost,
+    reportMemoryPost,
+    notifications,
+    unreadNotificationsCount,
+    refreshNotifications,
+    markNotificationAsRead,
+    markAllNotificationsAsRead,
+    deleteNotification,
+    syncEventsFromServer: syncEventsFromServerWrapper,
+    syncChatsFromServer,
+    findUserByUsername,
+    isUsernameAvailable,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [
+    // State/data dependencies that trigger context consumers to re-render
+    events, friends, friendRequests, userFolders, eventFolders, messageFolders,
+    chats, chatMessages, eventRequests, eventProfiles,
+    savedEvents, savedMemoryPosts, notifications, unreadNotificationsCount,
+    // Stable callbacks from hooks (useCallback-wrapped, included for correctness)
+    createEvent, updateEvent, deleteEvent, cancelEvent, cancelOrganizerParticipation,
+    transferOrganizerRole, removeParticipantFromEvent,
+    sendFriendRequest, removeFriend, respondToFriendRequest,
+    addUserToFolder, removeUserFromFolder, createUserFolder, deleteUserFolder,
+    createEventFolder, updateEventFolder, deleteEventFolder, addEventToFolder,
+    removeEventFromFolder, getEventFolderById, refreshEventFolders,
+    syncMessageFolders, createMessageFolder, addChatsToMessageFolder, removeChatFromMessageFolder,
+    createEventChat, createEventChatWithParticipants, createPersonalChat, sendChatMessage,
+    deleteChat, getChatMessages, getChat, getChatsForUser, fetchMessagesForChat,
+    markChatAsRead, addParticipantToChat,
+    sendEventRequest, sendEventInvite, acceptInvitation, rejectInvitation,
+    respondToEventRequest, cancelEventRequest, removeEventRequestById, cancelEventParticipation,
+    getEventProfile, fetchEventProfile, createEventProfile, addEventProfilePost,
+    updateEventProfile, updateEventProfilePost, addPostComment, canEditEventProfile,
+    deleteEventProfilePost, setPersonalEventPhoto,
+    saveEvent, removeSavedEvent, saveMemoryPost, removeSavedMemoryPost,
+    refreshNotifications, markNotificationAsRead, markAllNotificationsAsRead, deleteNotification,
+    reportMemoryPost, findUserByUsername, isUsernameAvailable,
+    getUserData, getOrganizerStats,
+  ]);
+
   return (
-    <EventsContext.Provider value={{ 
-      events, 
-      createEvent, 
-      updateEvent, 
-      deleteEvent, 
-      getUserData,
-      updateUserData,
-      getOrganizerStats,
-      friends,
-      friendRequests,
-      sendFriendRequest,
-      removeFriend,
-      respondToFriendRequest,
-      getFriendsList,
-      getUserFriendsList,
-      isFriend,
-      getFriendsForEvents,
-      userFolders,
-      addUserToFolder,
-      removeUserFromFolder,
-      createUserFolder,
-      deleteUserFolder,
-      getEventsByUserFolder,
-      eventFolders,
-      createEventFolder,
-      updateEventFolder,
-      deleteEventFolder,
-      addEventToFolder,
-      removeEventFromFolder,
-      getEventFolderById,
-      refreshEventFolders,
-      messageFolders,
-      refreshMessageFolders: syncMessageFolders,
-      createMessageFolder,
-      addChatsToMessageFolder,
-      removeChatFromMessageFolder,
-      chats,
-      chatMessages,
-      createEventChat,
-      createEventChatWithParticipants,
-      createPersonalChat,
-      sendChatMessage,
-      deleteChat,
-      sendEventToChats,
-      sendMemoryPostToChats,
-      getChatMessages,
-      getChat,
-      getChatsForUser,
-      addParticipantToChat,
-      eventRequests,
-      eventProfiles,
-      sendEventRequest,
-      sendEventInvite,
-      acceptInvitation,
-      rejectInvitation,
-      respondToEventRequest,
-      cancelEventRequest,
-      removeEventRequestById,
-      cancelEventParticipation,
-      cancelEvent,
-      cancelOrganizerParticipation,
-      transferOrganizerRole,
-      removeParticipantFromEvent,
-      getEventProfile,
-      fetchEventProfile,
-      createEventProfile,
-      addEventProfilePost,
-      updateEventProfile,
-      updateEventProfilePost,
-      addPostComment,
-      getEventParticipants,
-      canEditEventProfile,
-      getMyEventRequests,
-      getEventOrganizer,
-      getMyEventParticipationStatus,
-      isUserParticipant,
-      getMyCalendarEvents,
-      getUserCalendarEvents,
-      getGlobalEvents,
-      // Новая декларативная система состояний
-      isEventUpcoming,
-      isEventPast,
-      isEventFull,
-      isEventNotFull,
-      isUserOrganizer,
-      isUserAttendee,
-      isUserEventMember,
-      getUserRequestStatus,
-      getUserRelationship,
-      isFriendOfOrganizer,
-      getAcceptedParticipants,
-      // Персонализированные фото событий
-      getEventPhotoForUser,
-      setPersonalEventPhoto,
-      // Сохраненные события
-      savedEvents,
-      saveEvent,
-      removeSavedEvent,
-      isEventSaved,
-      getSavedEvents,
-      savedMemoryPosts,
-      saveMemoryPost,
-      removeSavedMemoryPost,
-      isMemoryPostSaved,
-      getSavedMemoryPosts,
-      deleteEventProfilePost,
-      reportMemoryPost,
-      // Система уведомлений
-      notifications,
-      unreadNotificationsCount,
-      refreshNotifications,
-      markNotificationAsRead,
-      markAllNotificationsAsRead,
-      deleteNotification,
-      // Поиск пользователей по username
-      findUserByUsername,
-      isUsernameAvailable
-    }}>
+    <EventsContext.Provider value={contextValue}>
       {children}
     </EventsContext.Provider>
   );

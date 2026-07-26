@@ -6,12 +6,15 @@ import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { API_BASE_URL } from '../../services/api';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { suggestAddresses, geocodeAddress } from '../../utils/yandexGeocoder';
 import { getSelectedLocation, clearSelectedLocation } from '../select-location';
 import EventCard from '../../components/EventCard';
 import { createLogger } from '../../utils/logger';
-import { createEventStyles } from './create.styles';
+import { createEventStyles } from '../../styles/create.styles';
+import { AppIcon } from '../../components/ui/AppIcon';
+import { Palette } from '../../constants/DesignSystem';
 import { usePathname } from 'expo-router';
 
 const logger = createLogger('CreateEvent');
@@ -75,6 +78,7 @@ export default function CreateEventScreen() {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false); // КРИТИЧЕСКИ ВАЖНО: Ref для защиты от повторных вызовов
+  const calendarScrollViewRef = useRef<ScrollView>(null); // Ref для ScrollView календаря
   const [showRecurringOptions, setShowRecurringOptions] = useState(false);
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [selectedCustomDates, setSelectedCustomDates] = useState<Date[]>([]);
@@ -351,8 +355,7 @@ export default function CreateEventScreen() {
   const steps = [
     { number: 1, title: t.createEvent.steps.basicInfo },
     { number: 2, title: t.createEvent.steps.participants },
-    { number: 3, title: t.createEvent.steps.media },
-    { number: 4, title: t.createEvent.steps.preview }
+    { number: 3, title: t.createEvent.steps.preview }
   ];
 
   // Функция генерации дефолтного изображения
@@ -362,13 +365,13 @@ export default function CreateEventScreen() {
     // Используем placeholder service (можно заменить на реальный API)
     const encodedPrompt = encodeURIComponent(prompt);
     // TODO: Заменить на реальный API для генерации изображений
-    return `https://via.placeholder.com/800x600/8B5CF6/FFFFFF?text=${encodedPrompt}`;
+    return `0x600/8B5CF6/FFFFFF?text=${encodedPrompt}`;
   }, []);
 
   // Генерируем дефолтное изображение, если нет медиа
   useEffect(() => {
     const previewMediaUrl = formData.selectedImage || formData.mediaUrl;
-    if (!previewMediaUrl && formData.title && !defaultImageUrl && currentStep === 4) {
+    if (!previewMediaUrl && formData.title && !defaultImageUrl && currentStep === 3) {
       generateDefaultImage(formData.title, formData.description).then(url => {
         setDefaultImageUrl(url);
       });
@@ -402,9 +405,9 @@ export default function CreateEventScreen() {
 
   // Создаем preview-событие через useMemo для синхронного доступа
   const previewEventData = useMemo(() => {
-    // ВСЕГДА создаем preview данные, даже если currentStep !== 4 (для отладки)
-    // Но возвращаем null только если явно не на шаге 4
-    if (currentStep !== 4) {
+    // ВСЕГДА создаем preview данные, даже если currentStep !== 3 (для отладки)
+    // Но возвращаем null только если явно не на шаге 3
+    if (currentStep !== 3) {
       return null;
     }
     
@@ -450,7 +453,7 @@ export default function CreateEventScreen() {
         price: formData.price || t.createEvent.defaultPrice || '0',
         participants: 0,
         maxParticipants: parseInt(String(formData.maxParticipants)) || 10,
-        organizerAvatar: authUser?.avatarUrl || 'https://randomuser.me/api/portraits/women/68.jpg',
+        organizerAvatar: authUser?.avatarUrl || '',
         organizerId: currentUserId || 'preview-organizer',
         mediaUrl: finalMediaUrl,
         originalMediaUrl: formData.originalMediaUrl || finalMediaUrl,
@@ -580,9 +583,66 @@ export default function CreateEventScreen() {
   // Используем useRef для отслеживания, было ли событие уже добавлено
   const previewEventAddedRef = React.useRef<string | null>(null);
   
-  // Добавляем preview-событие в контекст СРАЗУ при переходе на шаг 4
+  // Прокручиваем календарь к текущему месяцу при открытии
+  useEffect(() => {
+    if (showCustomDatePicker && calendarScrollViewRef.current) {
+      // Используем setTimeout для гарантии, что ScrollView уже отрендерен
+      setTimeout(() => {
+        if (calendarScrollViewRef.current) {
+          // Определяем текущий месяц и год
+          const today = new Date();
+          const currentYear = today.getFullYear();
+          const currentMonth = today.getMonth();
+          
+          // Генерируем те же месяцы, что и в рендере, чтобы найти индекс текущего месяца
+          // Месяцы генерируются от -12 до +12 от текущего месяца
+          const months: Array<{ month: number; year: number }> = [];
+          for (let i = -12; i <= 12; i++) {
+            const date = new Date(today.getFullYear(), today.getMonth() + i, 1);
+            months.push({
+              month: date.getMonth(),
+              year: date.getFullYear(),
+            });
+          }
+          
+          // Находим индекс текущего месяца в массиве
+          const currentMonthIndex = months.findIndex(
+            m => m.month === currentMonth && m.year === currentYear
+          );
+          
+          // Если не нашли (не должно произойти), используем индекс 12 (текущий месяц)
+          const monthIndex = currentMonthIndex >= 0 ? currentMonthIndex : 12;
+          
+          // Более точная высота месяца:
+          // - Заголовок месяца: padding (16px * 2) + высота текста (~20px) = ~52px
+          // - Заголовок дней недели: ~40px
+          // - Недели: максимум 6 недель * ~50px каждая = ~300px
+          // - marginBottom: 32px
+          // Итого: ~424px на месяц
+          const monthHeaderHeight = 52; // padding + title
+          const weekDaysHeaderHeight = 40; // заголовок дней недели
+          const weekHeight = 50; // высота строки недели
+          const maxWeeks = 6; // максимум недель в месяце
+          const monthMarginBottom = 32;
+          const estimatedMonthHeight = monthHeaderHeight + weekDaysHeaderHeight + (maxWeeks * weekHeight) + monthMarginBottom;
+          
+          // Прокручиваем к текущему месяцу
+          const scrollToY = monthIndex * estimatedMonthHeight;
+          
+          logger.debug(`Scrolling calendar to current month: ${currentMonth + 1}/${currentYear}, index: ${monthIndex} (from ${months.length} months), scrollToY: ${scrollToY}px`);
+          
+          calendarScrollViewRef.current.scrollTo({
+            y: scrollToY,
+            animated: true,
+          });
+        }
+      }, 300); // Увеличиваем задержку для гарантии рендера всех месяцев
+    }
+  }, [showCustomDatePicker]);
+  
+  // Добавляем preview-событие в контекст СРАЗУ при переходе на шаг 3
   React.useLayoutEffect(() => {
-    if (currentStep === 4 && previewEventData) {
+    if (currentStep === 3 && previewEventData) {
       // Проверяем, не добавляли ли мы уже это событие
       const eventKey = `${previewEventData.id}-${previewEventData.title}-${previewEventData.date}`;
       if (previewEventAddedRef.current === eventKey) {
@@ -597,7 +657,7 @@ export default function CreateEventScreen() {
       } catch (error) {
         console.error('[CreateEvent] ❌ Error updating preview event:', error);
       }
-    } else if (currentStep !== 4) {
+    } else if (currentStep !== 3) {
       // Удаляем временное событие при выходе из шага превью
       previewEventAddedRef.current = null;
       try {
@@ -611,12 +671,114 @@ export default function CreateEventScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep, previewEventData?.id]);
 
-  // Проверяем выбранное место каждые 500мс
+  // Восстанавливаем состояние формы из sessionStorage при возврате (для веба)
   useEffect(() => {
-    const interval = setInterval(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        const savedFormData = sessionStorage.getItem('eventFormData');
+        if (savedFormData) {
+          const parsed = JSON.parse(savedFormData);
+          // Восстанавливаем только если форма пустая или данные есть
+          if (parsed.formData) {
+            // Восстанавливаем даты
+            if (parsed.formData.date) {
+              parsed.formData.date = new Date(parsed.formData.date);
+            }
+            if (parsed.formData.time) {
+              parsed.formData.time = new Date(parsed.formData.time);
+            }
+            if (parsed.selectedCustomDates) {
+              parsed.selectedCustomDates = parsed.selectedCustomDates.map((d: string) => new Date(d));
+            }
+            
+            // ВАЖНО: Сохраняем выбранное местоположение, если оно есть в глобальном хранилище
+            const selectedLocation = getSelectedLocation();
+            if (selectedLocation) {
+              parsed.formData.location = selectedLocation.address;
+              parsed.formData.coordinates = {
+                latitude: selectedLocation.latitude,
+                longitude: selectedLocation.longitude
+              };
+            }
+            
+            setFormData(parsed.formData);
+            if (parsed.currentStep) setCurrentStep(parsed.currentStep);
+            if (parsed.showRecurringOptions !== undefined) setShowRecurringOptions(parsed.showRecurringOptions);
+            if (parsed.selectedCustomDates) setSelectedCustomDates(parsed.selectedCustomDates);
+            if (parsed.showWeekdayPicker !== undefined) setShowWeekdayPicker(parsed.showWeekdayPicker);
+            if (parsed.showMonthDayPicker !== undefined) setShowMonthDayPicker(parsed.showMonthDayPicker);
+            if (parsed.isEditMode !== undefined) setIsEditMode(parsed.isEditMode);
+            if (parsed.editingEventId) setEditingEventId(parsed.editingEventId);
+            if (parsed.defaultImageUrl) setDefaultImageUrl(parsed.defaultImageUrl);
+            if (parsed.paymentCompleted !== undefined) setPaymentCompleted(parsed.paymentCompleted);
+            if (parsed.paymentData) setPaymentData(parsed.paymentData);
+            
+            // Удаляем сохраненные данные после восстановления
+            sessionStorage.removeItem('eventFormData');
+            
+            // Очищаем выбранное местоположение после применения
+            if (selectedLocation) {
+              clearSelectedLocation();
+            }
+          }
+        } else {
+          // Если нет сохраненных данных, проверяем выбранное местоположение напрямую
+          const selectedLocation = getSelectedLocation();
+          if (selectedLocation) {
+            setFormData(prev => ({
+              ...prev,
+              location: selectedLocation.address,
+              coordinates: {
+                latitude: selectedLocation.latitude,
+                longitude: selectedLocation.longitude
+              }
+            }));
+            clearSelectedLocation();
+          }
+        }
+      } catch (error) {
+        logger.warn('Failed to restore form data from sessionStorage:', error);
+        // Очищаем поврежденные данные
+        try {
+          sessionStorage.removeItem('eventFormData');
+        } catch (e) {
+          // Ignore
+        }
+      }
+    }
+  }, []);
+
+  // Проверяем выбранное место каждые 200мс (для быстрой реакции на вебе)
+  useEffect(() => {
+    // Сразу проверяем при монтировании
+    const checkLocation = () => {
+      // Сначала проверяем sessionStorage (более надежно при перезагрузке)
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        try {
+          const savedLocation = sessionStorage.getItem('selectedLocation');
+          if (savedLocation) {
+            const parsed = JSON.parse(savedLocation);
+            logger.debug('Found saved location in sessionStorage', parsed);
+            setFormData(prev => ({
+              ...prev,
+              location: parsed.address,
+              coordinates: {
+                latitude: parsed.latitude,
+                longitude: parsed.longitude
+              }
+            }));
+            sessionStorage.removeItem('selectedLocation');
+            return true;
+          }
+        } catch (error) {
+          logger.warn('Failed to read location from sessionStorage:', error);
+        }
+      }
+      
+      // Затем проверяем глобальное хранилище
       const selectedLocation = getSelectedLocation();
       if (selectedLocation) {
-        logger.debug('Found selected location', selectedLocation);
+        logger.debug('Found selected location in global storage', selectedLocation);
         setFormData(prev => ({
           ...prev,
           location: selectedLocation.address,
@@ -626,10 +788,23 @@ export default function CreateEventScreen() {
           }
         }));
         clearSelectedLocation();
+        return true;
       }
-    }, 500);
+      
+      return false;
+    };
 
-    return () => clearInterval(interval);
+    // Проверяем сразу при монтировании
+    if (!checkLocation()) {
+      // Если не найдено сразу, проверяем через интервал
+      const interval = setInterval(() => {
+        if (checkLocation()) {
+          clearInterval(interval);
+        }
+      }, 200);
+
+      return () => clearInterval(interval);
+    }
   }, []);
 
   // Обработка изменения адреса с автодополнением
@@ -799,18 +974,33 @@ export default function CreateEventScreen() {
       }
 
       const originalAsset = originalResult.assets[0];
-      const originalUri = originalAsset.uri;
-      logger.debug('Оригинальное фото выбрано', { uri: originalUri });
+      let finalUri = originalAsset.uri;
+      logger.debug('Оригинальное фото выбрано', { uri: finalUri });
 
-      // Используем оригинальное фото для карточки (без обрезки)
-      setFormData(prev => ({ 
-        ...prev, 
-        selectedImage: originalUri,
-        originalMediaUrl: originalUri,
-        mediaUrl: originalUri, // Используем оригинальное фото для карточки
+      // Resize large images to max 1200px width to reduce upload size
+      if (originalAsset.width && originalAsset.width > 1200) {
+        try {
+          const manipulated = await ImageManipulator.manipulateAsync(
+            originalAsset.uri,
+            [{ resize: { width: 1200 } }],
+            { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG }
+          );
+          finalUri = manipulated.uri;
+          logger.debug('Фото уменьшено для загрузки', { originalWidth: originalAsset.width, newUri: finalUri });
+        } catch (resizeError) {
+          logger.warn('Не удалось уменьшить фото, используем оригинал', resizeError);
+        }
+      }
+
+      // Используем оригинальное (или уменьшенное) фото для карточки
+      setFormData(prev => ({
+        ...prev,
+        selectedImage: finalUri,
+        originalMediaUrl: finalUri,
+        mediaUrl: finalUri,
         mediaType: 'image'
       }));
-      logger.debug('Оригинальное фото установлено в formData для карточки и профиля');
+      logger.debug('Фото установлено в formData для карточки и профиля');
 
       // Проверяем, что данные действительно установлены
       setTimeout(() => {
@@ -933,9 +1123,9 @@ export default function CreateEventScreen() {
       'Добавить медиа',
       'Выберите тип медиа и источник:',
       [
-        { text: '📷 Фото из галереи', onPress: pickImage },
+        { text: 'Фото из галереи', onPress: pickImage },
         { text: '🎥 Видео из галереи', onPress: pickVideo },
-        { text: '📸 Сделать фото', onPress: takePhoto },
+        { text: 'Сделать фото', onPress: takePhoto },
         { text: '🎬 Снять видео', onPress: takeVideo },
         { text: 'Отмена', style: 'cancel' }
       ]
@@ -943,7 +1133,7 @@ export default function CreateEventScreen() {
   };
 
   const handleNext = () => {
-    if (currentStep < 4) {
+    if (currentStep < 3) {
       setCurrentStep(currentStep + 1);
     }
   };
@@ -955,6 +1145,27 @@ export default function CreateEventScreen() {
   };
 
   const handleLocationSelect = () => {
+    // Сохраняем состояние формы в sessionStorage перед переходом (для веба)
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('eventFormData', JSON.stringify({
+          formData,
+          currentStep,
+          showRecurringOptions,
+          selectedCustomDates: selectedCustomDates.map(d => d.toISOString()),
+          showWeekdayPicker,
+          showMonthDayPicker,
+          isEditMode,
+          editingEventId,
+          defaultImageUrl,
+          paymentCompleted,
+          paymentData,
+          tags: formData.tags,
+        }));
+      } catch (error) {
+        logger.warn('Failed to save form data to sessionStorage:', error);
+      }
+    }
     // Переход на карту для выбора места
     router.push('/select-location');
   };
@@ -984,12 +1195,7 @@ export default function CreateEventScreen() {
       logger.warn('⚠️ handleSubmit уже выполняется (state), игнорируем повторный вызов');
       return;
     }
-    
-    // Устанавливаем флаг ДО любых асинхронных операций
-    submittingRef.current = true;
-
     if (!formData.title || !formData.description || !formData.location) {
-      submittingRef.current = false; // КРИТИЧЕСКИ ВАЖНО: Сбрасываем ref при раннем возврате
       Alert.alert(t.createEvent.error, t.createEvent.fillRequiredFields);
       return;
     }
@@ -1002,7 +1208,6 @@ export default function CreateEventScreen() {
     }
 
     if (!currentUserId) {
-      submittingRef.current = false; // КРИТИЧЕСКИ ВАЖНО: Сбрасываем ref при раннем возврате
       Alert.alert('Требуется вход', 'Авторизуйтесь, чтобы создавать события.', [
         { text: 'OK', onPress: () => router.push('/(auth)') },
       ]);
@@ -1014,7 +1219,6 @@ export default function CreateEventScreen() {
     const isBusinessAccount = authUser?.accountType === 'business';
     
     if (maxParticipants > 100 && !isBusinessAccount) {
-      submittingRef.current = false; // КРИТИЧЕСКИ ВАЖНО: Сбрасываем ref при раннем возврате
       Alert.alert(
         'Массовые события недоступны',
         'Для создания событий с более чем 100 участниками требуется бизнес-аккаунт. Пожалуйста, зарегистрируйте бизнес-аккаунт.',
@@ -1080,6 +1284,9 @@ export default function CreateEventScreen() {
       return;
     }
 
+    // Устанавливаем флаг ДО асинхронных операций создания/обновления события
+    submittingRef.current = true;
+
     const mediaAspectRatio = formData.mediaUrl ? 1.33 : undefined;
 
     // Логируем данные формы перед отправкой
@@ -1087,45 +1294,14 @@ export default function CreateEventScreen() {
 
     setSubmitting(true);
     try {
-      logger.info('🚀 handleSubmit начал выполнение');
-      // КРИТИЧЕСКИ ВАЖНО: Разная логика для веба и мобильного приложения
-      // Для веба: загружаем файл на сервер перед созданием события
-      // Для мобильного: передаем локальные URI в payload, useEventActions.ts загрузит их
       let finalMediaUrl: string | undefined = undefined;
       let finalOriginalMediaUrl: string | undefined = undefined;
       
-      logger.debug('📸 Проверка медиа перед созданием события:', {
-        platform: Platform.OS,
-        hasSelectedFile: !!formData.selectedFile,
-        selectedFileName: formData.selectedFile?.name,
-        hasMediaUrl: !!formData.mediaUrl,
-        mediaUrlType: formData.mediaUrl ? (formData.mediaUrl.startsWith('http') ? 'HTTP' : formData.mediaUrl.startsWith('data:') ? 'DATA' : 'LOCAL') : 'NONE',
-        hasAccessToken: !!accessToken,
-      });
-      
-      if (Platform.OS === 'web' && formData.selectedFile) {
-        // Для веба: загружаем файл на сервер перед созданием события
+      // Для веба: загружаем файл на сервер перед созданием события
+      if (Platform.OS === 'web' && formData.selectedFile && accessToken) {
         try {
-          logger.info('📤 Начинаем загрузку файла для веба:', {
-            fileName: formData.selectedFile.name,
-            fileSize: formData.selectedFile.size,
-            fileType: formData.selectedFile.type,
-            hasAccessToken: !!accessToken,
-            accessTokenLength: accessToken?.length || 0,
-          });
-          
-          if (!accessToken) {
-            logger.error('❌ Нет accessToken для загрузки файла!');
-            throw new Error('No access token');
-          }
-          
           const uploadFormData = new FormData();
           uploadFormData.append('file', formData.selectedFile);
-          
-          logger.debug('📤 Отправляем FormData на сервер:', {
-            formDataKeys: Array.from(uploadFormData.keys()),
-            apiUrl: `${API_BASE_URL}/events/media`,
-          });
           
           const uploadResponse = await fetch(`${API_BASE_URL}/events/media`, {
             method: 'POST',
@@ -1135,75 +1311,19 @@ export default function CreateEventScreen() {
             body: uploadFormData,
           });
           
-          logger.debug('📥 Получен ответ от сервера при загрузке файла:', {
-            ok: uploadResponse.ok,
-            status: uploadResponse.status,
-            statusText: uploadResponse.statusText,
-          });
-          
           if (uploadResponse.ok) {
             const uploadData = await uploadResponse.json();
-            logger.debug('📥 Данные ответа сервера:', uploadData);
-            finalMediaUrl = uploadData.url || uploadData.mediaUrl || uploadData.publicUrl;
-            finalOriginalMediaUrl = uploadData.url || uploadData.mediaUrl || uploadData.publicUrl;
-            logger.info('✅ Файл загружен на сервер для веба:', {
-              finalMediaUrl,
-              finalOriginalMediaUrl,
-              startsWithHttp: finalMediaUrl?.startsWith('http'),
-            });
-            
-            if (!finalMediaUrl || !finalMediaUrl.startsWith('http')) {
-              logger.error('❌ КРИТИЧЕСКАЯ ОШИБКА: URL не начинается с http!', {
-                finalMediaUrl,
-                uploadData,
-              });
-            }
-          } else {
-            const errorText = await uploadResponse.text();
-            logger.error('❌ Ошибка загрузки файла на сервер:', {
-              status: uploadResponse.status,
-              statusText: uploadResponse.statusText,
-              error: errorText
-            });
-            finalMediaUrl = undefined;
-            finalOriginalMediaUrl = undefined;
+            finalMediaUrl = uploadData.url;
+            finalOriginalMediaUrl = uploadData.url;
           }
-        } catch (uploadError: any) {
-          logger.error('❌ Исключение при загрузке файла на сервер:', {
-            error: uploadError?.message || uploadError,
-            stack: uploadError?.stack,
-          });
-          finalMediaUrl = undefined;
-          finalOriginalMediaUrl = undefined;
+        } catch (error) {
+          logger.error('Ошибка загрузки файла:', error);
         }
-      } else if (Platform.OS === 'web') {
-        logger.warn('⚠️ Для веба нет selectedFile, но возможно есть mediaUrl:', {
-          hasMediaUrl: !!formData.mediaUrl,
-          mediaUrl: formData.mediaUrl?.substring(0, 50),
-        });
-        // Если для веба нет selectedFile, но есть mediaUrl (data URL), используем его
-        // Но для веба лучше загружать файл на сервер
-        if (formData.mediaUrl && formData.mediaUrl.startsWith('http')) {
-          finalMediaUrl = formData.mediaUrl;
-          finalOriginalMediaUrl = formData.originalMediaUrl;
-        }
-      } else {
+      } else if (Platform.OS !== 'web') {
         // Для мобильного приложения: передаем локальные URI в payload
-        // useEventActions.ts загрузит их на сервер
-        if (formData.mediaUrl) {
-          finalMediaUrl = formData.mediaUrl;
-        }
-        if (formData.originalMediaUrl) {
-          finalOriginalMediaUrl = formData.originalMediaUrl;
-        }
+        finalMediaUrl = formData.mediaUrl;
+        finalOriginalMediaUrl = formData.originalMediaUrl;
       }
-      
-      logger.debug('📸 Итоговые URL медиа после загрузки:', {
-        finalMediaUrl,
-        finalOriginalMediaUrl,
-        finalMediaUrlStartsWithHttp: finalMediaUrl?.startsWith('http'),
-        finalOriginalMediaUrlStartsWithHttp: finalOriginalMediaUrl?.startsWith('http'),
-      });
       
       const payload = {
         title: formData.title,
@@ -1315,13 +1435,14 @@ export default function CreateEventScreen() {
         }
         
         if (Platform.OS === 'web') {
-          // КРИТИЧЕСКИ ВАЖНО: На вебе используем window.location.href для перезагрузки страницы
-          // Это необходимо, так как router.push может не работать в веб-версии Next.js
-          // Синхронизация уже завершилась выше, поэтому событие сохранено на сервере
-          logger.debug('Переход в explore на вебе (перезагрузка страницы)');
+          // КРИТИЧЕСКИ ВАЖНО: На вебе НЕ используем router.push сразу, чтобы не размонтировать компонент
+          // Используем window.location или setTimeout для навигации после завершения всех операций
+          logger.debug('Переход в explore на вебе (с задержкой для завершения синхронизации)');
           setTimeout(() => {
             if (typeof window !== 'undefined') {
               window.location.href = '/explore';
+            } else {
+              router.push('/explore');
             }
           }, 500);
         } else {
@@ -1360,6 +1481,21 @@ export default function CreateEventScreen() {
       case 1:
         return (
           <View style={styles.stepContent}>
+            {/* Обложка события — показывается первым полем, как в прототипе дизайна */}
+            {formData.selectedImage ? (
+              <View style={styles.imageContainer}>
+                <Image source={{ uri: formData.selectedImage }} style={styles.selectedImage} />
+                <TouchableOpacity style={styles.removeImageButton} onPress={removeImage}>
+                  <AppIcon name="close" size={16} color={Palette.text} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.addImageButton} onPress={showMediaOptions}>
+                <AppIcon name="camera" size={26} color="rgba(244,244,245,0.4)" />
+                <Text style={styles.addImageText}>{t.createEvent.addPhoto || 'Добавить обложку'}</Text>
+              </TouchableOpacity>
+            )}
+
             <Text style={styles.label}>{t.createEvent.eventRequired}</Text>
             <TextInput
               style={styles.input}
@@ -1367,7 +1503,11 @@ export default function CreateEventScreen() {
               onChangeText={(value) => handleInputChange('title', value)}
               placeholder={t.createEvent.exampleEventTitle}
               placeholderTextColor="#999"
+              maxLength={100}
             />
+            <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', textAlign: 'right', marginTop: 4 }}>
+              {formData.title.length}/100
+            </Text>
 
             <Text style={styles.label}>{t.createEvent.description}</Text>
             <TextInput
@@ -1378,12 +1518,16 @@ export default function CreateEventScreen() {
               placeholderTextColor="#999"
               multiline
               numberOfLines={4}
+              maxLength={2000}
             />
+            <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', textAlign: 'right', marginTop: 4 }}>
+              {formData.description.length}/2000
+            </Text>
 
             {/* Чекбокс "Регулярное" */}
             <View style={styles.checkboxRow}>
               <TouchableOpacity
-                style={styles.checkboxOption}
+                style={[styles.checkboxOption, formData.isRecurring && styles.checkboxOptionActive]}
                 onPress={() => {
                   const newIsRecurring = !formData.isRecurring;
                   setFormData(prev => ({
@@ -1399,8 +1543,8 @@ export default function CreateEventScreen() {
                   }
                 }}
               >
-                <Text style={styles.checkboxText}>
-                  {formData.isRecurring ? '☑' : '☐'} {t.createEvent.recurring || 'Recurring'}
+                <Text style={[styles.checkboxText, formData.isRecurring && styles.checkboxTextActive]}>
+                  {formData.isRecurring ? '✓ ' : ''}{t.createEvent.recurring || 'Recurring'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1408,7 +1552,7 @@ export default function CreateEventScreen() {
             {/* Чекбокс "Массовое событие" */}
             <View style={styles.checkboxContainer}>
               <TouchableOpacity
-                style={styles.checkboxOption}
+                style={[styles.checkboxOption, formData.isMassEvent && styles.checkboxOptionActive]}
                 onPress={() => {
                   setFormData(prev => ({
                     ...prev,
@@ -1416,15 +1560,15 @@ export default function CreateEventScreen() {
                   }));
                 }}
               >
-                <Text style={styles.checkboxText}>
-                  {formData.isMassEvent ? '☑' : '☐'} Массовое событие
+                <Text style={[styles.checkboxText, formData.isMassEvent && styles.checkboxTextActive]}>
+                  {formData.isMassEvent ? '✓ ' : ''}Массовое событие
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.tooltipButton}
                 onPress={() => setShowMassEventTooltip(!showMassEventTooltip)}
               >
-                <Text style={styles.tooltipIcon}>❓</Text>
+                <AppIcon name="help" size={16} color="rgba(244,244,245,0.45)" />
               </TouchableOpacity>
             </View>
 
@@ -1448,7 +1592,7 @@ export default function CreateEventScreen() {
                   <Text style={styles.dateTimeButtonText}>
                     {formatDate(formData.date)}
                   </Text>
-                  <Text style={styles.dateTimeButtonIcon}>📅</Text>
+                  <AppIcon name="calendar" size={16} color={Palette.text} />
                 </TouchableOpacity>
               </>
             )}
@@ -1531,17 +1675,16 @@ export default function CreateEventScreen() {
                       if (e.target.value) {
                         const selectedDate = new Date(e.target.value);
                         setFormData(prev => ({ ...prev, date: selectedDate }));
-                        setShowDatePicker(false);
                       }
                     }}
                     style={{
                       width: '100%',
                       padding: '12px',
                       fontSize: '16px',
-                      backgroundColor: '#1a1a1a',
-                      color: '#FFFFFF',
-                      border: '1px solid #333',
-                      borderRadius: '8px',
+                      backgroundColor: 'rgba(255,255,255,0.05)',
+                      color: '#f4f4f5',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: '14px',
                       outline: 'none',
                     }}
                   />
@@ -1562,10 +1705,10 @@ export default function CreateEventScreen() {
                   }}
                   // УБИРАЕМ minimumDate - разрешаем выбирать прошедшие даты для создания событий постфактум
                   textColor="#FFFFFF"
-                  accentColor="#8B5CF6"
+                  accentColor="#FF8D32"
                 />
                 )}
-                {Platform.OS === 'ios' && (
+                {(Platform.OS === 'ios' || Platform.OS === 'web') && (
                   <TouchableOpacity
                     style={styles.confirmButton}
                     onPress={() => setShowDatePicker(false)}
@@ -1584,7 +1727,7 @@ export default function CreateEventScreen() {
               <Text style={styles.dateTimeButtonText}>
                 {formatTime(formData.time)}
               </Text>
-              <Text style={styles.dateTimeButtonIcon}>🕐</Text>
+              <AppIcon name="clock" size={16} color={Palette.text} />
             </TouchableOpacity>
 
             {showTimePicker && (
@@ -1599,17 +1742,16 @@ export default function CreateEventScreen() {
                         const selectedTime = new Date(formData.time);
                         selectedTime.setHours(hours, minutes);
                         setFormData(prev => ({ ...prev, time: selectedTime }));
-                        setShowTimePicker(false);
                       }
                     }}
                     style={{
                       width: '100%',
                       padding: '12px',
                       fontSize: '16px',
-                      backgroundColor: '#1a1a1a',
-                      color: '#FFFFFF',
-                      border: '1px solid #333',
-                      borderRadius: '8px',
+                      backgroundColor: 'rgba(255,255,255,0.05)',
+                      color: '#f4f4f5',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: '14px',
                       outline: 'none',
                     }}
                   />
@@ -1629,10 +1771,10 @@ export default function CreateEventScreen() {
                     }
                   }}
                   textColor="#FFFFFF"
-                  accentColor="#8B5CF6"
+                  accentColor="#FF8D32"
                 />
                 )}
-                {Platform.OS === 'ios' && (
+                {(Platform.OS === 'ios' || Platform.OS === 'web') && (
                   <TouchableOpacity
                     style={styles.confirmButton}
                     onPress={() => setShowTimePicker(false)}
@@ -1660,7 +1802,7 @@ export default function CreateEventScreen() {
                       style={styles.locationButton}
                       onPress={handleLocationSelect}
                     >
-                      <Text style={styles.locationButtonText}>🗺️</Text>
+                      <AppIcon name="map" size={16} color={Palette.text} />
                     </TouchableOpacity>
                     <TouchableOpacity 
                       style={[styles.locationButton, formData.location === 'Онлайн' && styles.locationButtonActive]}
@@ -1672,7 +1814,7 @@ export default function CreateEventScreen() {
                         }));
                       }}
                     >
-                      <Text style={styles.locationButtonText}>💻</Text>
+                      <AppIcon name="monitor" size={16} color={formData.location === 'Онлайн' ? Palette.accent : Palette.text} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1710,7 +1852,7 @@ export default function CreateEventScreen() {
                     }));
                   }}
                 >
-                  <Text style={styles.locationButtonText}>💻</Text>
+                  <AppIcon name="monitor" size={16} color={Palette.accent} />
                 </TouchableOpacity>
               </View>
             )}
@@ -1801,7 +1943,7 @@ export default function CreateEventScreen() {
                 }}
               >
                 <Text style={styles.checkboxText}>
-                  {formData.genderRestriction?.includes('male') ? '☑' : '☐'} {t.settings.profileVisibility.male}
+                  {formData.genderRestriction?.includes('male') ? '✓' : '○'} {t.settings.profileVisibility.male}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1815,7 +1957,7 @@ export default function CreateEventScreen() {
                 }}
               >
                 <Text style={styles.checkboxText}>
-                  {formData.genderRestriction?.includes('female') ? '☑' : '☐'} {t.settings.profileVisibility.female}
+                  {formData.genderRestriction?.includes('female') ? '✓' : '○'} {t.settings.profileVisibility.female}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1829,7 +1971,7 @@ export default function CreateEventScreen() {
                 }}
               >
                 <Text style={styles.checkboxText}>
-                  {formData.genderRestriction?.includes('other') ? '☑' : '☐'} {t.settings.profileVisibility.other}
+                  {formData.genderRestriction?.includes('other') ? '✓' : '○'} {t.settings.profileVisibility.other}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1868,7 +2010,7 @@ export default function CreateEventScreen() {
                           }));
                         }}
                       >
-                        <Text style={styles.removeInvitedText}>✕</Text>
+                        <AppIcon name="close" size={12} color={Palette.text} />
                       </TouchableOpacity>
                     </View>
                   );
@@ -1973,7 +2115,7 @@ export default function CreateEventScreen() {
                   }}
                 >
                   <Text style={styles.checkboxText}>
-                    {formData.targeting?.enabled ? '☑' : '☐'} Включить таргетинг
+                    {formData.targeting?.enabled ? '✓' : '○'} Включить таргетинг
                   </Text>
                 </TouchableOpacity>
                 
@@ -2054,7 +2196,7 @@ export default function CreateEventScreen() {
                           }));
                         }}
                       >
-                        <Text style={styles.removeExcludedText}>✕</Text>
+                        <AppIcon name="close" size={12} color={Palette.text} />
                       </TouchableOpacity>
                     </View>
                   );
@@ -2065,54 +2207,6 @@ export default function CreateEventScreen() {
         );
 
       case 3:
-        // Шаг "Media" - добавление фото/видео
-        return (
-          <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>{t.createEvent.steps.media}</Text>
-            
-            <Text style={styles.label}>{t.createEvent.mediaType || 'Media type:'}</Text>
-            <View style={styles.radioGroup}>
-              <TouchableOpacity
-                style={[styles.radioOption, formData.mediaType === 'image' && styles.radioSelected]}
-                onPress={() => setFormData(prev => ({ ...prev, mediaType: 'image' }))}
-              >
-                <Text style={styles.radioText}>{t.createEvent.photo || '📷 Photo'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.radioOption, formData.mediaType === 'video' && styles.radioSelected]}
-                onPress={() => setFormData(prev => ({ ...prev, mediaType: 'video' }))}
-              >
-                <Text style={styles.radioText}>{t.createEvent.video || '🎥 Video'}</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.label}>{t.createEvent.eventPhoto || 'Event photo'}</Text>
-            
-            {formData.selectedImage ? (
-              <View style={styles.imageContainer}>
-                <Image source={{ uri: formData.selectedImage }} style={styles.selectedImage} />
-                <TouchableOpacity style={styles.removeImageButton} onPress={removeImage}>
-                  <Text style={styles.removeImageText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity style={styles.addPhotoButton} onPress={showMediaOptions}>
-                <Text style={styles.addPhotoButtonText}>{t.createEvent.addPhoto || 'Add photo'}</Text>
-              </TouchableOpacity>
-            )}
-
-            <Text style={styles.label}>{t.createEvent.orAddByLink || 'Or add photo by link:'}</Text>
-            <TextInput
-              style={styles.input}
-              value={formData.mediaUrl}
-              onChangeText={(value) => handleInputChange('mediaUrl', value)}
-              placeholder="https://example.com/image.jpg"
-              placeholderTextColor="#999"
-            />
-          </View>
-        );
-
-      case 4:
         // Страница превью - простая страница с карточкой события как в ленте
         // ВОЗВРАЩАЕМ NULL - контент будет рендериться напрямую в ScrollView
         return null;
@@ -2126,7 +2220,7 @@ export default function CreateEventScreen() {
     <View style={styles.container}>
 
       {/* Прогресс бар - скрываем на странице превью */}
-      {currentStep !== 4 && (
+      {currentStep !== 3 && (
       <View style={styles.progressContainer}>
         {steps.map((step) => (
           <TouchableOpacity
@@ -2157,7 +2251,7 @@ export default function CreateEventScreen() {
       )}
 
       {/* Контент */}
-      {currentStep === 4 ? (
+      {currentStep === 3 ? (
         // На странице превью - простой экран с карточкой события (как в ленте)
         <View style={styles.previewWrapper}>
           <ScrollView 
@@ -2241,7 +2335,7 @@ export default function CreateEventScreen() {
             </TouchableOpacity>
           )}
           
-          {currentStep < 4 ? (
+          {currentStep < 3 ? (
             <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
               <Text style={styles.nextButtonText}>Далее</Text>
             </TouchableOpacity>
@@ -2277,7 +2371,7 @@ export default function CreateEventScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t.createEvent.inviteFriends}</Text>
               <TouchableOpacity onPress={() => setShowInviteModal(false)}>
-                <Text style={styles.modalCloseButton}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.text} />
               </TouchableOpacity>
             </View>
             
@@ -2314,7 +2408,7 @@ export default function CreateEventScreen() {
                       <Text style={styles.modalFriendUsername}>@{friend.username}</Text>
                     </View>
                     <Text style={styles.modalCheckbox}>
-                      {selectedInviteUsers.includes(friend.id) ? '☑' : '☐'}
+                      {selectedInviteUsers.includes(friend.id) ? '✓' : '○'}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -2349,7 +2443,7 @@ export default function CreateEventScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t.createEvent.excludeUsers || 'Exclude users'}</Text>
               <TouchableOpacity onPress={() => setShowExcludeModal(false)}>
-                <Text style={styles.modalCloseButton}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.text} />
               </TouchableOpacity>
             </View>
             
@@ -2386,7 +2480,7 @@ export default function CreateEventScreen() {
                       <Text style={styles.modalFriendUsername}>@{friend.username}</Text>
                     </View>
                     <Text style={styles.modalCheckbox}>
-                      {selectedExcludeUsers.includes(friend.id) ? '☑' : '☐'}
+                      {selectedExcludeUsers.includes(friend.id) ? '✓' : '○'}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -2426,7 +2520,7 @@ export default function CreateEventScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t.createEvent.selectDaysOfWeek || 'Select days of week'}</Text>
               <TouchableOpacity onPress={() => setShowWeekdayPicker(false)}>
-                <Text style={styles.modalCloseButton}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.text} />
               </TouchableOpacity>
             </View>
             
@@ -2452,7 +2546,7 @@ export default function CreateEventScreen() {
                   >
                     <Text style={styles.modalFriendName}>{dayName}</Text>
                     <Text style={styles.modalCheckbox}>
-                      {isSelected ? '☑' : '☐'}
+                      {isSelected ? '✓' : '○'}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -2481,7 +2575,7 @@ export default function CreateEventScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t.createEvent.selectDayOfMonth || 'Select day of month'}</Text>
               <TouchableOpacity onPress={() => setShowMonthDayPicker(false)}>
-                <Text style={styles.modalCloseButton}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.text} />
               </TouchableOpacity>
             </View>
             
@@ -2503,7 +2597,7 @@ export default function CreateEventScreen() {
                   >
                     <Text style={styles.modalFriendName}>{day}</Text>
                     <Text style={styles.modalCheckbox}>
-                      {isSelected ? '☑' : '☐'}
+                      {isSelected ? '✓' : '○'}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -2525,13 +2619,17 @@ export default function CreateEventScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t.createEvent.selectDates || 'Select dates'}</Text>
               <TouchableOpacity onPress={() => setShowCustomDatePicker(false)}>
-                <Text style={styles.modalCloseButton}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.text} />
               </TouchableOpacity>
             </View>
             
             <Text style={styles.modalHint}>{t.createEvent.selectDatesHint || 'Tap on dates to select them'}</Text>
             
-            <ScrollView style={styles.modalScrollView} showsVerticalScrollIndicator={false}>
+            <ScrollView 
+              ref={calendarScrollViewRef}
+              style={styles.modalScrollView} 
+              showsVerticalScrollIndicator={false}
+            >
               {(() => {
                 // Генерируем месяцы (год назад и год вперед)
                 const months: Array<{ month: number; year: number; days: Array<{ day: number; date: Date }> }> = [];

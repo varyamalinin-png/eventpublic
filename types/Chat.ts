@@ -1,10 +1,20 @@
+export interface MessageReaction {
+  id: string;
+  messageId: string;
+  userId: string;
+  emoji: string;
+  createdAt: string;
+}
+
 export interface ChatMessage {
   id: string;
   chatId: string;
   fromUserId: string;
-  text?: string; // Опционально, если есть eventId или postId
-  eventId?: string; // ID события, если сообщение содержит событие
-  postId?: string; // ID меморис поста, если сообщение содержит меморис пост
+  text?: string;
+  eventId?: string;
+  postId?: string;
+  readBy?: string[];
+  reactions?: MessageReaction[];
   createdAt: Date;
 }
 

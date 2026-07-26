@@ -7,22 +7,14 @@ import { createLogger } from '../../utils/logger';
 const logger = createLogger('Chats');
 
 // Утилиты для маппинга данных с сервера
-<<<<<<< HEAD
-export const mapServerMessageToClient = (message: ServerChatMessage): ChatMessage => ({
-  id: message.id,
-  chatId: message.chatId || '',
-  fromUserId: message.senderId ?? message.fromUserId ?? '',
-  text: message.content ?? undefined,
-  eventId: message.eventId ?? undefined,
-  createdAt: message.createdAt ? new Date(message.createdAt) : new Date(),
-});
-=======
 export const mapServerMessageToClient = (message: ServerChatMessage): ChatMessage => {
   const result: ChatMessage = {
     id: message.id,
     chatId: message.chatId || '',
     fromUserId: message.senderId ?? message.fromUserId ?? '',
     text: message.content ?? undefined,
+    readBy: Array.isArray((message as any).readBy) ? (message as any).readBy : [],
+    reactions: Array.isArray(message.reactions) ? message.reactions : [],
     createdAt: message.createdAt ? new Date(message.createdAt) : new Date(),
   };
   if (message.eventId) {
@@ -33,7 +25,6 @@ export const mapServerMessageToClient = (message: ServerChatMessage): ChatMessag
   }
   return result;
 };
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
 
 export const mapServerChatToClient = (chat: ServerChat): Chat => ({
   id: chat.id,
@@ -60,7 +51,8 @@ export interface UseChatsReturn {
   getChat: (chatId: string) => Chat | null;
   getChatsForUser: (userId: string) => Chat[];
   addParticipantToChat: (eventId: string, userId: string) => Promise<void>;
-  fetchMessagesForChat: (chatId: string) => Promise<void>;
+  fetchMessagesForChat: (chatId: string, force?: boolean) => Promise<void>;
+  markChatAsRead: (chatId: string) => Promise<void>;
   setChats: React.Dispatch<React.SetStateAction<Chat[]>>;
   setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
 }
@@ -93,14 +85,10 @@ export function useChats({
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const loadedChatMessages = useRef<Set<string>>(new Set());
-  const currentAccessTokenRef = useRef<string | null>(null);
-  const currentUserIdRef = useRef<string | null>(null);
-
-  // Обновляем ref при изменении токена и userId через useEffect
-  useEffect(() => {
-    currentAccessTokenRef.current = accessToken;
-    currentUserIdRef.current = currentUserId;
-  }, [accessToken, currentUserId]);
+  const currentAccessTokenRef = useRef<string | null>(accessToken);
+  const currentUserIdRef = useRef<string | null>(currentUserId);
+  currentAccessTokenRef.current = accessToken;
+  currentUserIdRef.current = currentUserId;
 
   const syncChatsFromServer = useCallback(async () => {
     // Используем актуальный токен из ref
@@ -108,8 +96,16 @@ export function useChats({
     if (!actualToken) return;
     
     try {
-      const response = await apiRequest('/chats', {}, actualToken);
+      // Добавляем заголовки для отключения кэширования
+      const response = await apiRequest('/chats', {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        },
+      }, actualToken);
       if (Array.isArray(response)) {
+        logger.debug(`[syncChatsFromServer] Received ${response.length} chats from server`);
         response.forEach((chat: ServerChat) => {
           (chat?.participants ?? []).forEach((participant) => {
             if (participant?.user) {
@@ -139,6 +135,7 @@ export function useChats({
           }
           return chat;
         });
+        logger.debug(`[syncChatsFromServer] Setting ${mappedWithFixedNames.length} chats, event chats: ${mappedWithFixedNames.filter(c => c.type === 'event').length}`);
         loadedChatMessages.current.clear();
         setChats(mappedWithFixedNames);
       }
@@ -151,7 +148,7 @@ export function useChats({
       }
       logger.error('Failed to load chats from API', error);
     }
-  }, [applyServerUserDataToState, handleUnauthorizedError]);
+  }, [applyServerUserDataToState, handleUnauthorizedError, currentUserId, getUserData]);
 
   const createEventChat = useCallback((eventId: string) => {
     const event = events.find(e => e.id === eventId);
@@ -471,10 +468,10 @@ export function useChats({
   }, [applyServerUserDataToState, handleUnauthorizedError]);
 
   const fetchMessagesForChat = useCallback(
-    async (chatId: string) => {
+    async (chatId: string, force: boolean = false) => {
       const actualToken = currentAccessTokenRef.current;
       if (!actualToken) return;
-      if (loadedChatMessages.current.has(chatId)) return;
+      if (!force && loadedChatMessages.current.has(chatId)) return;
 
       loadedChatMessages.current.add(chatId);
       try {
@@ -486,14 +483,15 @@ export function useChats({
             }
           });
           setChatMessages(prev => {
-            const existingIds = new Set(prev.map(msg => msg.id));
-            const mappedMessages = response
-              .map(mapServerMessageToClient)
-              .filter(msg => !existingIds.has(msg.id));
-            if (mappedMessages.length === 0) {
-              return prev;
+            const mappedMessages = response.map(mapServerMessageToClient);
+            if (force) {
+              const otherChatMessages = prev.filter(msg => msg.chatId !== chatId);
+              return [...otherChatMessages, ...mappedMessages];
             }
-            return [...prev, ...mappedMessages];
+            const existingIds = new Set(prev.map(msg => msg.id));
+            const newMessages = mappedMessages.filter(msg => !existingIds.has(msg.id));
+            if (newMessages.length === 0) return prev;
+            return [...prev, ...newMessages];
           });
         }
       } catch (error) {
@@ -518,34 +516,42 @@ export function useChats({
   }, [chats]);
 
   const getChatsForUser = useCallback((userId: string): Chat[] => {
-    return chats.filter(chat => chat.participants.includes(userId)).sort((a, b) => 
+    // Для событийных чатов: показываем все, которые приходят с сервера
+    // (сервер уже правильно фильтрует, возвращая чаты событий, где пользователь участвовал,
+    // даже если он покинул чат)
+    // Для личных чатов: показываем только если пользователь в participants
+    const filtered = chats.filter(chat => {
+      if (chat.type === 'event') {
+        // Событийные чаты показываем все - сервер уже отфильтровал правильно
+        return true;
+      } else {
+        // Личные чаты показываем только если пользователь в participants
+        return chat.participants.includes(userId);
+      }
+    });
+    return filtered.sort((a, b) => 
       b.lastActivity.getTime() - a.lastActivity.getTime()
     );
   }, [chats]);
 
   const addParticipantToChat = useCallback(async (eventId: string, userId: string) => {
-    // Ищем чат ТОЛЬКО по eventId и типу 'event'
+    // Optimistic local update — server adds participant automatically on accept
     const eventChat = chats.find(c => c.eventId === eventId && c.type === 'event');
-    
+
     if (!eventChat) {
-      logger.warn('Чат не найден для события:', eventId);
+      // Chat may not exist yet — sync from server to get it
+      await syncChatsFromServer();
       return;
     }
-    
-    // Проверяем, что пользователь еще не в чате
-    if (eventChat.participants.includes(userId)) {
-      // Пользователь уже в чате - тихо возвращаемся без логирования ошибки
-      return;
-    }
-    
-    // Добавляем участника в чат
+
+    if (eventChat.participants.includes(userId)) return;
+
     setChats(prev => prev.map(chat =>
       chat.id === eventChat.id
         ? { ...chat, participants: [...chat.participants, userId] }
         : chat
     ));
-    logger.info('✅ Участник добавлен в чат события:', eventId);
-  }, [chats]);
+  }, [chats, syncChatsFromServer]);
 
   const deleteChat = useCallback(async (chatId: string, leaveEvent: boolean = false) => {
     const actualToken = currentAccessTokenRef.current;
@@ -566,13 +572,11 @@ export function useChats({
         actualToken,
       );
       
-      logger.info('✅ Чат удален:', { chatId, leaveEvent });
+      logger.info('✅ Пользователь покинул чат:', { chatId, leaveEvent });
       
-      // Удаляем чат из локального состояния
-      setChats(prev => prev.filter(chat => chat.id !== chatId));
-      setChatMessages(prev => prev.filter(msg => msg.chatId !== chatId));
-      
-      // Синхронизируем с сервером
+      // НЕ удаляем чат из списка - чат остается для всех участников
+      // Сервер создаст системное сообщение и отправит обновление через WebSocket
+      // Синхронизируем с сервером, чтобы получить обновленный чат с системным сообщением
       await syncChatsFromServer();
     } catch (error) {
       if (await handleUnauthorizedError(error)) {
@@ -582,6 +586,29 @@ export function useChats({
       throw error;
     }
   }, [accessToken, currentUserId, syncChatsFromServer, handleUnauthorizedError]);
+
+  const markChatAsRead = useCallback(async (chatId: string) => {
+    const actualToken = currentAccessTokenRef.current;
+    if (!actualToken) return;
+    try {
+      await apiRequest(`/chats/${chatId}/read`, { method: 'POST' }, actualToken);
+      const userId = currentUserIdRef.current;
+      if (userId) {
+        setChatMessages(prev => prev.map(msg =>
+          msg.chatId === chatId && msg.fromUserId !== userId && !msg.readBy?.includes(userId)
+            ? { ...msg, readBy: [...(msg.readBy || []), userId] }
+            : msg
+        ));
+        setChats(prev => prev.map(chat =>
+          chat.id === chatId && chat.lastMessage && chat.lastMessage.fromUserId !== userId && !chat.lastMessage.readBy?.includes(userId)
+            ? { ...chat, lastMessage: { ...chat.lastMessage, readBy: [...(chat.lastMessage.readBy || []), userId] } }
+            : chat
+        ));
+      }
+    } catch (e) {
+      logger.warn('Failed to mark chat as read', e);
+    }
+  }, []);
 
   return {
     chats,
@@ -597,6 +624,7 @@ export function useChats({
     getChatsForUser,
     addParticipantToChat,
     fetchMessagesForChat,
+    markChatAsRead,
     setChats,
     setChatMessages,
   };

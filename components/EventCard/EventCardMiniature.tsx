@@ -1,9 +1,37 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
 import { useEvents } from '../../context/EventsContext';
 import { eventCardStyles } from './EventCard.styles';
+
+const MINI_EVENT_MEDIA_PLACEHOLDER_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270" viewBox="0 0 480 270">' +
+    '<defs>' +
+      '<linearGradient id="g" x1="0" x2="1" y1="0" y2="1">' +
+        '<stop offset="0" stop-color="#2a2a2a"/>' +
+        '<stop offset="1" stop-color="#141414"/>' +
+      '</linearGradient>' +
+    '</defs>' +
+    '<rect width="480" height="270" rx="18" ry="18" fill="url(#g)"/>' +
+    '<circle cx="240" cy="118" r="34" fill="#3a3a3a"/>' +
+    '<circle cx="240" cy="108" r="14" fill="#8e8e8e"/>' +
+    '<path d="M206 164c9-20 24-30 34-30s25 10 34 30" fill="#8e8e8e"/>' +
+  '</svg>',
+)}`;
+
+function useImageFallbackUri(primaryUri: string | undefined, fallbackUri: string) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [primaryUri]);
+
+  return {
+    uri: !primaryUri || failed ? fallbackUri : primaryUri,
+    onError: () => setFailed(true),
+  };
+}
 
 interface EventCardMiniatureProps {
   id: string;
@@ -40,6 +68,7 @@ export default function EventCardMiniature({
   const { getEventPhotoForUser, getUserData } = useEvents();
 
   const miniPhoto = getEventPhotoForUser(id, currentUserId || '', viewerUserId) || mediaUrl || organizerAvatar;
+  const media = useImageFallbackUri(miniPhoto, MINI_EVENT_MEDIA_PLACEHOLDER_URI);
 
   const handlePress = () => {
     if (onMiniaturePress) {
@@ -69,11 +98,9 @@ export default function EventCardMiniature({
         {miniPhoto ? (
           <View style={eventCardStyles.miniatureBackgroundContainer}>
             <Image
-              source={{ uri: miniPhoto }}
+              source={{ uri: media.uri }}
               style={eventCardStyles.miniatureBackgroundImage}
-              onError={() => {
-                // Silently handle image loading errors
-              }}
+              onError={media.onError}
             />
             {mediaType === 'video' && (
               <View style={eventCardStyles.miniaturePlayButton}>
@@ -91,10 +118,12 @@ export default function EventCardMiniature({
           return (
             <View style={eventCardStyles.miniatureOrganizerAvatarContainer}>
               <TouchableOpacity onPress={handleOrganizerPress}>
-                <Image
-                  source={{ uri: organizerData.avatar }}
-                  style={eventCardStyles.miniatureOrganizerAvatar}
-                />
+                <View style={eventCardStyles.miniatureOrganizerAvatarFrame}>
+                  <Image
+                    source={{ uri: organizerData.avatar }}
+                    style={eventCardStyles.miniatureOrganizerAvatar}
+                  />
+                </View>
               </TouchableOpacity>
             </View>
           );

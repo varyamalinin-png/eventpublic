@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,583 +6,723 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  TextInput,
-  Alert,
-  Modal,
+  Animated,
+  Easing,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { apiRequest } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { AppIcon, AppIconName } from '../../components/ui/AppIcon';
+import { Palette, Radius } from '../../constants/DesignSystem';
 import { createLogger } from '../../utils/logger';
 
-const logger = createLogger('AdminComplaintsScreen');
+const logger = createLogger('AdminDashboard');
 
-type ComplaintStatus = 'PENDING' | 'REVIEWED' | 'RESOLVED' | 'REJECTED';
-type ComplaintType = 'EVENT' | 'USER';
-
-interface Complaint {
-  id: string;
-  type: ComplaintType;
-  reason: string;
-  description?: string;
-  status: ComplaintStatus;
-  createdAt: string;
-  reporter?: {
-    id: string;
-    name: string;
-    username: string;
-    avatarUrl?: string;
+interface OverviewStats {
+  users: {
+    total: number;
+    active: number;
+    blocked: number;
+    recent: number;
   };
-  reportedEvent?: {
-    id: string;
-    title: string;
-    organizerId: string;
+  events: {
+    total: number;
+    upcoming: number;
+    past: number;
+    recent: number;
   };
-  reportedUser?: {
-    id: string;
-    name: string;
-    username: string;
-    avatarUrl?: string;
+  complaints: {
+    total: number;
+    pending: number;
+    resolved: number;
   };
-  adminResponse?: string;
-  reviewedAt?: string;
+  messages: {
+    total: number;
+  };
+  onlineUsers: number;
 }
 
-const STATUS_COLORS: Record<ComplaintStatus, string> = {
-  PENDING: '#FFA500',
-  REVIEWED: '#007AFF',
-  RESOLVED: '#34C759',
-  REJECTED: '#FF3B30',
-};
-
-const STATUS_LABELS: Record<ComplaintStatus, string> = {
-  PENDING: 'Ожидает',
-  REVIEWED: 'Рассмотрено',
-  RESOLVED: 'Решено',
-  REJECTED: 'Отклонено',
-};
-
-const STATUS_OPTIONS: ComplaintStatus[] = ['PENDING', 'REVIEWED', 'RESOLVED', 'REJECTED'];
-
-export default function AdminComplaintsScreen() {
-  const router = useRouter();
-  const { accessToken } = useAuth();
-  const [complaints, setComplaints] = useState<Complaint[]>([]);
-  const [filteredComplaints, setFilteredComplaints] = useState<Complaint[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [selectedStatus, setSelectedStatus] = useState<ComplaintStatus | 'ALL'>('ALL');
-  const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
-  const [showStatusModal, setShowStatusModal] = useState(false);
-  const [adminResponse, setAdminResponse] = useState('');
+/* ─── Пульсирующая зелёная точка (онлайн-индикатор) ─── */
+function PulsingDot() {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    fetchComplaints();
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 0.35,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
   }, []);
 
-  useEffect(() => {
-    if (selectedStatus === 'ALL') {
-      setFilteredComplaints(complaints);
-    } else {
-      setFilteredComplaints(complaints.filter(c => c.status === selectedStatus));
-    }
-  }, [complaints, selectedStatus]);
+  return (
+    <Animated.View
+      style={[styles.pulsingDot, { opacity: pulseAnim }]}
+    />
+  );
+}
 
-  const fetchComplaints = async () => {
-    if (!accessToken) return;
-    
-    setLoading(true);
+/* ─── Большая метрика-карточка ─── */
+function MetricCard({
+  icon,
+  iconColor,
+  value,
+  label,
+  badge,
+  badgeColor,
+  extra,
+}: {
+  icon: AppIconName;
+  iconColor: string;
+  value: number | string;
+  label: string;
+  badge?: React.ReactNode;
+  badgeColor?: string;
+  extra?: React.ReactNode;
+}) {
+  return (
+    <View style={styles.metricCard}>
+      <View style={styles.metricCardHeader}>
+        <View style={[styles.metricIconWrap, { backgroundColor: iconColor + '18' }]}>
+          <AppIcon name={icon} size={20} color={iconColor} />
+        </View>
+        {badge}
+      </View>
+      <Text style={styles.metricValue}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+      {extra}
+    </View>
+  );
+}
+
+/* ─── Мини-метрика в строке ─── */
+function QuickStat({
+  icon,
+  value,
+  label,
+}: {
+  icon: AppIconName;
+  value: number | string;
+  label: string;
+}) {
+  return (
+    <View style={styles.quickStat}>
+      <View style={styles.quickStatIcon}>
+        <AppIcon name={icon} size={14} color={Palette.textDim} />
+      </View>
+      <Text style={styles.quickStatValue}>{value}</Text>
+      <Text style={styles.quickStatLabel}>{label}</Text>
+    </View>
+  );
+}
+
+/* ─── Навигационная карточка ─── */
+function NavCard({
+  icon,
+  iconColor,
+  title,
+  subtitle,
+  badge,
+  onPress,
+}: {
+  icon: AppIconName;
+  iconColor: string;
+  title: string;
+  subtitle: string;
+  badge?: number;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={styles.navCard}
+      activeOpacity={0.7}
+      onPress={onPress}
+    >
+      <View style={styles.navCardLeft}>
+        <View style={[styles.navIconWrap, { backgroundColor: iconColor + '18' }]}>
+          <AppIcon name={icon} size={20} color={iconColor} />
+        </View>
+        <View style={styles.navCardText}>
+          <View style={styles.navTitleRow}>
+            <Text style={styles.navTitle}>{title}</Text>
+            {badge !== undefined && badge > 0 && (
+              <View style={styles.navBadge}>
+                <Text style={styles.navBadgeText}>{badge}</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.navSubtitle}>{subtitle}</Text>
+        </View>
+      </View>
+      <AppIcon name="chevronRight" size={18} color={Palette.textFaint} />
+    </TouchableOpacity>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Главный экран — AdminDashboardScreen
+   ═══════════════════════════════════════════════════════════════ */
+export default function AdminDashboardScreen() {
+  const router = useRouter();
+  const { accessToken: authToken } = useAuth();
+  const [stats, setStats] = useState<OverviewStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const accessToken = authToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('auth.accessToken') : null);
+
+  const fetchStats = useCallback(async () => {
+    if (!accessToken) {
+      setError('Необходима авторизация');
+      setLoading(false);
+      return;
+    }
+
     try {
-      const data = await apiRequest('/complaints/admin/all', {}, accessToken);
-      setComplaints(data);
-      setFilteredComplaints(data);
-    } catch (error: any) {
-      logger.error('Failed to fetch complaints:', error);
-      if (error.status === 403) {
-        Alert.alert('Доступ запрещен', 'У вас нет прав администратора');
-        router.back();
+      setError(null);
+      const data = await apiRequest('/admin/statistics/overview', {}, accessToken);
+      setStats(data);
+    } catch (err: any) {
+      logger.error('Failed to fetch stats:', err);
+      if (err.status === 403) {
+        setError('Нет прав администратора');
       } else {
-        Alert.alert('Ошибка', 'Не удалось загрузить жалобы');
+        setError('Не удалось загрузить статистику');
       }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [accessToken]);
 
-  const updateComplaintStatus = async (complaintId: string, status: ComplaintStatus) => {
-    if (!accessToken) return;
-    
-    try {
-      const body: any = { status };
-      if (adminResponse.trim()) {
-        body.adminResponse = adminResponse.trim();
-      }
-      
-      await apiRequest(
-        `/complaints/admin/${complaintId}/status`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify(body),
-        },
-        accessToken,
-      );
-      
-      setShowStatusModal(false);
-      setAdminResponse('');
-      setSelectedComplaint(null);
-      await fetchComplaints();
-      Alert.alert('Успешно', 'Статус жалобы обновлен');
-    } catch (error: any) {
-      logger.error('Failed to update complaint status:', error);
-      Alert.alert('Ошибка', 'Не удалось обновить статус жалобы');
-    }
-  };
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
-  const handleStatusChange = async (status: ComplaintStatus) => {
-    if (selectedComplaint) {
-      await updateComplaintStatus(selectedComplaint.id, status);
-    }
-  };
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchStats();
+  }, [fetchStats]);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('ru-RU', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
+  /* ─── Загрузка ─── */
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <ActivityIndicator size="large" color={Palette.accent} />
+        <Text style={styles.loadingText}>Загрузка панели...</Text>
+      </View>
+    );
+  }
+
+  /* ─── Ошибка ─── */
+  if (error) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <AppIcon name="alertTriangle" size={40} color={Palette.danger} />
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={fetchStats}>
+          <Text style={styles.retryButtonText}>Повторить</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const s = stats!;
 
   return (
     <View style={styles.container}>
+      {/* ─── Шапка ─── */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backButton}>← Назад</Text>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+          <AppIcon name="chevronLeft" size={22} color={Palette.accent} />
         </TouchableOpacity>
-        <Text style={styles.title}>Админ: Жалобы</Text>
-        <View style={styles.placeholder} />
+        <Text style={styles.headerTitle}>Панель управления</Text>
+        <View style={styles.headerRight}>
+          <TouchableOpacity onPress={onRefresh} hitSlop={12}>
+            <AppIcon name="activity" size={20} color={Palette.textDim} />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* Фильтры по статусу */}
       <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filtersContainer}
-        contentContainerStyle={styles.filtersContent}
-      >
-        <TouchableOpacity
-          style={[styles.filterButton, selectedStatus === 'ALL' && styles.filterButtonActive]}
-          onPress={() => setSelectedStatus('ALL')}
-        >
-          <Text style={[styles.filterText, selectedStatus === 'ALL' && styles.filterTextActive]}>
-            Все ({complaints.length})
-          </Text>
-        </TouchableOpacity>
-        {STATUS_OPTIONS.map((status) => {
-          const count = complaints.filter(c => c.status === status).length;
-          return (
-            <TouchableOpacity
-              key={status}
-              style={[styles.filterButton, selectedStatus === status && styles.filterButtonActive]}
-              onPress={() => setSelectedStatus(status)}
-            >
-              <Text style={[styles.filterText, selectedStatus === status && styles.filterTextActive]}>
-                {STATUS_LABELS[status]} ({count})
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
-      <ScrollView
-        style={styles.list}
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => {
-            setRefreshing(true);
-            fetchComplaints();
-          }} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Palette.accent}
+          />
         }
       >
-        {loading && filteredComplaints.length === 0 ? (
-          <Text style={styles.emptyText}>Загрузка...</Text>
-        ) : filteredComplaints.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>Жалоб не найдено</Text>
+        {/* ─── Приветствие ─── */}
+        <Text style={styles.sectionGreeting}>Обзор</Text>
+
+        {/* ═══ ВЕРХНИЙ БЛОК: 4 основные метрики (2x2) ═══ */}
+        <View style={styles.metricsGrid}>
+          {/* Пользователи */}
+          <MetricCard
+            icon="users"
+            iconColor="#5B8DEF"
+            value={s.users.total}
+            label="Пользователи"
+          />
+          {/* События */}
+          <MetricCard
+            icon="calendar"
+            iconColor={Palette.accent}
+            value={s.events.total}
+            label="События"
+          />
+          {/* Онлайн */}
+          <MetricCard
+            icon="wifi"
+            iconColor={Palette.success}
+            value={s.onlineUsers}
+            label="Онлайн сейчас"
+            badge={<PulsingDot />}
+          />
+          {/* Жалобы */}
+          <MetricCard
+            icon="alertTriangle"
+            iconColor={s.complaints.pending > 0 ? Palette.warning : Palette.textDim}
+            value={s.complaints.pending}
+            label="Ожидают решения"
+            badge={
+              s.complaints.pending > 0 ? (
+                <View style={styles.warningBadge}>
+                  <Text style={styles.warningBadgeText}>{s.complaints.pending}</Text>
+                </View>
+              ) : undefined
+            }
+          />
+        </View>
+
+        {/* ═══ СРЕДНИЙ БЛОК: Быстрая статистика ═══ */}
+        <Text style={styles.sectionLabel}>ПОДРОБНОСТИ</Text>
+        <View style={styles.quickStatsCard}>
+          <View style={styles.quickStatsRow}>
+            <QuickStat
+              icon="calendar"
+              value={s.events.upcoming}
+              label="Предстоящих"
+            />
+            <View style={styles.quickStatsDivider} />
+            <QuickStat
+              icon="clock"
+              value={s.events.past}
+              label="Прошедших"
+            />
+            <View style={styles.quickStatsDivider} />
+            <QuickStat
+              icon="trendingUp"
+              value={s.events.recent}
+              label="Новых (30д)"
+            />
           </View>
-        ) : (
-          filteredComplaints.map((complaint) => (
-            <TouchableOpacity
-              key={complaint.id}
-              style={styles.complaintCard}
-              onPress={() => {
-                setSelectedComplaint(complaint);
-                setShowStatusModal(true);
-              }}
-            >
-              <View style={styles.complaintHeader}>
-                <View style={styles.complaintType}>
-                  <Text style={styles.complaintTypeText}>
-                    {complaint.type === 'EVENT' ? '📅 Событие' : '👤 Пользователь'}
-                  </Text>
-                </View>
-                <View style={[styles.statusBadge, { backgroundColor: STATUS_COLORS[complaint.status] }]}>
-                  <Text style={styles.statusText}>{STATUS_LABELS[complaint.status]}</Text>
-                </View>
-              </View>
-              
-              <Text style={styles.reasonText}>{complaint.reason}</Text>
-              
-              {complaint.description && (
-                <Text style={styles.descriptionText}>{complaint.description}</Text>
-              )}
 
-              {complaint.reporter && (
-                <View style={styles.reportedItem}>
-                  <Text style={styles.reportedLabel}>Жалобу подал:</Text>
-                  <Text style={styles.reportedValue}>
-                    {complaint.reporter.name || complaint.reporter.username}
-                  </Text>
-                </View>
-              )}
+          <View style={styles.quickStatsRowDivider} />
 
-              {complaint.reportedEvent && (
-                <View style={styles.reportedItem}>
-                  <Text style={styles.reportedLabel}>Событие:</Text>
-                  <Text style={styles.reportedValue}>{complaint.reportedEvent.title}</Text>
-                </View>
-              )}
-
-              {complaint.reportedUser && (
-                <View style={styles.reportedItem}>
-                  <Text style={styles.reportedLabel}>Пользователь:</Text>
-                  <Text style={styles.reportedValue}>
-                    {complaint.reportedUser.name || complaint.reportedUser.username}
-                  </Text>
-                </View>
-              )}
-
-              {complaint.adminResponse && (
-                <View style={styles.responseSection}>
-                  <Text style={styles.responseLabel}>Ответ поддержки:</Text>
-                  <Text style={styles.responseText}>{complaint.adminResponse}</Text>
-                </View>
-              )}
-
-              <View style={styles.complaintFooter}>
-                <Text style={styles.dateText}>{formatDate(complaint.createdAt)}</Text>
-                {complaint.reviewedAt && (
-                  <Text style={styles.dateText}>
-                    Рассмотрено: {formatDate(complaint.reviewedAt)}
-                  </Text>
-                )}
-              </View>
-            </TouchableOpacity>
-          ))
-        )}
-      </ScrollView>
-
-      {/* Модальное окно для изменения статуса */}
-      <Modal
-        visible={showStatusModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
-          setShowStatusModal(false);
-          setAdminResponse('');
-          setSelectedComplaint(null);
-        }}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Изменить статус жалобы</Text>
-            
-            {selectedComplaint && (
-              <>
-                <Text style={styles.modalSubtitle}>Текущий статус: {STATUS_LABELS[selectedComplaint.status]}</Text>
-                
-                <Text style={styles.modalLabel}>Новый статус:</Text>
-                <View style={styles.statusButtonsContainer}>
-                  {STATUS_OPTIONS.filter(status => status !== selectedComplaint.status).map((status) => (
-                    <TouchableOpacity
-                      key={status}
-                      style={[
-                        styles.statusButton,
-                        { backgroundColor: STATUS_COLORS[status] },
-                      ]}
-                      onPress={() => handleStatusChange(status)}
-                    >
-                      <Text style={styles.statusButtonText}>{STATUS_LABELS[status]}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Text style={styles.modalLabel}>Ответ администратора (необязательно):</Text>
-                <TextInput
-                  style={styles.responseInput}
-                  multiline
-                  numberOfLines={4}
-                  placeholder="Введите ответ пользователю..."
-                  placeholderTextColor="#666"
-                  value={adminResponse}
-                  onChangeText={setAdminResponse}
-                  textAlignVertical="top"
-                />
-              </>
-            )}
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonCancel]}
-                onPress={() => {
-                  setShowStatusModal(false);
-                  setAdminResponse('');
-                  setSelectedComplaint(null);
-                }}
-              >
-                <Text style={styles.modalButtonText}>Отмена</Text>
-              </TouchableOpacity>
-            </View>
+          <View style={styles.quickStatsRow}>
+            <QuickStat
+              icon="userPlus"
+              value={s.users.recent}
+              label="Новые (30д)"
+            />
+            <View style={styles.quickStatsDivider} />
+            <QuickStat
+              icon="message"
+              value={formatNumber(s.messages.total)}
+              label="Сообщений"
+            />
+            <View style={styles.quickStatsDivider} />
+            <QuickStat
+              icon="userX"
+              value={s.users.blocked}
+              label="Заблок."
+            />
           </View>
         </View>
-      </Modal>
+
+        {/* ═══ ДОПОЛНИТЕЛЬНАЯ СТРОКА: Жалобы всего ═══ */}
+        <View style={styles.complaintsRow}>
+          <View style={styles.complaintsMini}>
+            <View style={[styles.complaintsDot, { backgroundColor: Palette.success }]} />
+            <Text style={styles.complaintsLabel}>Решено</Text>
+            <Text style={styles.complaintsValue}>{s.complaints.resolved}</Text>
+          </View>
+          <View style={styles.complaintsMini}>
+            <View style={[styles.complaintsDot, { backgroundColor: Palette.warning }]} />
+            <Text style={styles.complaintsLabel}>Ожидают</Text>
+            <Text style={styles.complaintsValue}>{s.complaints.pending}</Text>
+          </View>
+          <View style={styles.complaintsMini}>
+            <View style={[styles.complaintsDot, { backgroundColor: Palette.textDim }]} />
+            <Text style={styles.complaintsLabel}>Всего</Text>
+            <Text style={styles.complaintsValue}>{s.complaints.total}</Text>
+          </View>
+        </View>
+
+        {/* ═══ НИЖНИЙ БЛОК: Навигация ═══ */}
+        <Text style={styles.sectionLabel}>УПРАВЛЕНИЕ</Text>
+
+        <NavCard
+          icon="flag"
+          iconColor={Palette.warning}
+          title="Жалобы"
+          subtitle="Модерация и обработка обращений"
+          badge={s.complaints.pending}
+          onPress={() => router.push('/admin/complaints')}
+        />
+
+        <NavCard
+          icon="users"
+          iconColor="#5B8DEF"
+          title="Пользователи"
+          subtitle={`${s.users.total} зарегистрировано, ${s.users.active} активных`}
+          onPress={() => {
+            // Пока навигация к списку пользователей
+            router.push('/admin/complaints');
+          }}
+        />
+
+        <NavCard
+          icon="calendar"
+          iconColor={Palette.accent}
+          title="События"
+          subtitle={`${s.events.upcoming} предстоящих, ${s.events.past} прошедших`}
+          onPress={() => {
+            // Пока навигация к модерации событий
+            router.push('/admin/complaints');
+          }}
+        />
+
+        <NavCard
+          icon="mail"
+          iconColor="#A78BFA"
+          title="Обращения"
+          subtitle="info@, privacy@, support@iwent.ru"
+          onPress={() => router.push('/admin/mail' as any)}
+        />
+
+        {/* Нижний отступ */}
+        <View style={{ height: 40 }} />
+      </ScrollView>
     </View>
   );
 }
 
+/* ─── Утилита: сокращение больших чисел ─── */
+function formatNumber(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
+  return n.toString();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Стили
+   ═══════════════════════════════════════════════════════════════ */
 const styles = StyleSheet.create({
+  /* layout */
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: Palette.background,
   },
+  center: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+
+  /* header */
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 50,
-    paddingBottom: 15,
-    paddingHorizontal: 20,
-    backgroundColor: '#1A1A1A',
+    paddingTop: 54,
+    paddingBottom: 14,
+    paddingHorizontal: 16,
+    backgroundColor: Palette.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: Palette.line,
   },
-  backButton: {
-    color: '#007AFF',
-    fontSize: 16,
-  },
-  title: {
-    color: '#FFF',
+  headerTitle: {
+    color: Palette.text,
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    letterSpacing: -0.3,
   },
-  placeholder: {
-    width: 60,
+  headerRight: {
+    width: 32,
+    alignItems: 'flex-end',
   },
-  filtersContainer: {
-    backgroundColor: '#1A1A1A',
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-  },
-  filtersContent: {
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-  },
-  filterButton: {
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#2A2A2A',
-    marginRight: 10,
-  },
-  filterButtonActive: {
-    backgroundColor: '#007AFF',
-  },
-  filterText: {
-    color: '#999',
+
+  /* loading / error */
+  loadingText: {
+    color: Palette.textDim,
     fontSize: 14,
+    marginTop: 14,
+  },
+  errorText: {
+    color: Palette.text,
+    fontSize: 16,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: Palette.accent,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: Radius.sm,
+  },
+  retryButtonText: {
+    color: Palette.text,
+    fontSize: 15,
     fontWeight: '600',
   },
-  filterTextActive: {
-    color: '#FFF',
+
+  /* sections */
+  sectionGreeting: {
+    color: Palette.text,
+    fontSize: 24,
+    fontWeight: '700',
+    letterSpacing: -0.5,
+    marginTop: 12,
+    marginBottom: 16,
   },
-  list: {
-    flex: 1,
+  sectionLabel: {
+    color: Palette.textFaint,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginTop: 28,
+    marginBottom: 12,
+    marginLeft: 4,
   },
-  complaintCard: {
-    backgroundColor: '#1A1A1A',
-    padding: 15,
-    marginHorizontal: 15,
-    marginTop: 15,
-    borderRadius: 12,
+
+  /* ═══ Metric cards (2x2) ═══ */
+  metricsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  metricCard: {
+    width: '48%' as any,
+    flexGrow: 1,
+    flexBasis: '46%',
+    backgroundColor: Palette.surface,
+    borderRadius: Radius.md,
+    padding: 16,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: Palette.line,
   },
-  complaintHeader: {
+  metricCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 14,
   },
-  complaintType: {
-    backgroundColor: '#2A2A2A',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  complaintTypeText: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  statusText: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  reasonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  descriptionText: {
-    color: '#999',
-    fontSize: 14,
-    marginBottom: 10,
-  },
-  reportedItem: {
-    marginBottom: 8,
-  },
-  reportedLabel: {
-    color: '#999',
-    fontSize: 12,
-    marginBottom: 2,
-  },
-  reportedValue: {
-    color: '#FFF',
-    fontSize: 14,
-  },
-  responseSection: {
-    backgroundColor: '#2A2A2A',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  responseLabel: {
-    color: '#007AFF',
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 5,
-  },
-  responseText: {
-    color: '#FFF',
-    fontSize: 14,
-  },
-  complaintFooter: {
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#333',
-  },
-  dateText: {
-    color: '#666',
-    fontSize: 12,
-    marginBottom: 2,
-  },
-  emptyContainer: {
-    padding: 40,
+  metricIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  emptyText: {
-    color: '#999',
-    fontSize: 16,
-    textAlign: 'center',
-    marginTop: 40,
+  metricValue: {
+    color: Palette.text,
+    fontSize: 28,
+    fontWeight: '700',
+    letterSpacing: -0.5,
+    lineHeight: 34,
   },
-  modalOverlay: {
+  metricLabel: {
+    color: Palette.textDim,
+    fontSize: 13,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+
+  /* pulsing dot */
+  pulsingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#34C759',
+  },
+
+  /* warning badge */
+  warningBadge: {
+    backgroundColor: Palette.warning,
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  warningBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  /* ═══ Quick stats ═══ */
+  quickStatsCard: {
+    backgroundColor: Palette.surface,
+    borderRadius: Radius.md,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Palette.line,
+  },
+  quickStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  quickStatsRowDivider: {
+    height: 1,
+    backgroundColor: Palette.line,
+    marginVertical: 14,
+  },
+  quickStatsDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: Palette.line,
+  },
+  quickStat: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'flex-end',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  modalContent: {
-    backgroundColor: '#1A1A1A',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: '80%',
+  quickStatIcon: {
+    marginBottom: 6,
   },
-  modalTitle: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 10,
+  quickStatValue: {
+    color: Palette.text,
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: -0.3,
   },
-  modalSubtitle: {
-    color: '#999',
-    fontSize: 14,
-    marginBottom: 20,
-  },
-  modalLabel: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 10,
-    marginTop: 15,
-  },
-  statusButtonsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 10,
-  },
-  statusButton: {
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderRadius: 8,
-    minWidth: 100,
-  },
-  statusButtonDisabled: {
-    opacity: 0.5,
-  },
-  statusButtonText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '600',
+  quickStatLabel: {
+    color: Palette.textFaint,
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 2,
     textAlign: 'center',
   },
-  responseInput: {
-    backgroundColor: '#2A2A2A',
-    color: '#FFF',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 14,
-    minHeight: 100,
-    marginBottom: 20,
-  },
-  modalButtons: {
+
+  /* ═══ Complaints summary row ═══ */
+  complaintsRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-around',
+    backgroundColor: Palette.surface,
+    borderRadius: Radius.md,
+    padding: 14,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: Palette.line,
   },
-  modalButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
+  complaintsMini: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  modalButtonCancel: {
-    backgroundColor: '#2A2A2A',
+  complaintsDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  modalButtonText: {
-    color: '#FFF',
+  complaintsLabel: {
+    color: Palette.textDim,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  complaintsValue: {
+    color: Palette.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  /* ═══ Nav cards ═══ */
+  navCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Palette.surface,
+    borderRadius: Radius.md,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: Palette.line,
+  },
+  navCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  navIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  navCardText: {
+    flex: 1,
+  },
+  navTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  navTitle: {
+    color: Palette.text,
     fontSize: 16,
     fontWeight: '600',
+    letterSpacing: -0.2,
+  },
+  navBadge: {
+    backgroundColor: Palette.warning,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  navBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  navSubtitle: {
+    color: Palette.textDim,
+    fontSize: 13,
+    fontWeight: '400',
+    marginTop: 2,
   },
 });
-

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, ScrollView, Dimensions, Image, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Linking, ScrollView, Dimensions, Image, Platform, Animated } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
@@ -7,6 +7,9 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import * as Location from 'expo-location';
 import { createLogger } from '../utils/logger';
+import { AppIcon } from '../components/ui/AppIcon';
+import { Palette } from '../constants/DesignSystem';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const logger = createLogger('Map');
 
@@ -103,6 +106,7 @@ const darkMapStyle = [
 
 export default function MapScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const { events, isUserEventMember, isEventUpcoming, isEventNotFull, isEventPast, getEventPhotoForUser, getGlobalEvents, getFriendsForEvents, isUserOrganizer, isEventFull, isFriendOfOrganizer, getUserData } = useEvents();
   const { eventId, selectLocation, userId, exploreTab } = useLocalSearchParams();
@@ -118,6 +122,8 @@ export default function MapScreen() {
   const rawUserId = Array.isArray(userId) ? userId[0] : typeof userId === 'string' ? userId : undefined;
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<any>(null);
+  const bottomSheetAnim = useRef(new Animated.Value(0)).current;
 
   // Получаем события для отображения в зависимости от типа карты
   const eventsToShow = useMemo(() => {
@@ -195,19 +201,6 @@ export default function MapScreen() {
     getCurrentLocation();
   }, []);
 
-  // Логируем состояние для диагностики
-  useEffect(() => {
-    logger.debug('Map screen state:', {
-      eventsToShowCount: eventsToShow.length,
-      mapError,
-      mapReady,
-      mapRegion,
-      platform: Platform.OS,
-      hasLocation: !!location,
-      hasEventsWithCoordinates: eventsToShow.filter(e => e.coordinates).length
-    });
-  }, [eventsToShow.length, mapError, mapReady, mapRegion, location]);
-
   // Вычисляем центр карты и регион
   const mapRegion = useMemo(() => {
     if (eventsToShow.length === 0) {
@@ -270,25 +263,46 @@ export default function MapScreen() {
     }
   };
 
-  const handleMarkerPress = useCallback((eventId: string) => {
+  const handleMarkerPress = useCallback((markerEventId: string) => {
+    const event = eventsToShow.find(e => e.id === markerEventId);
+    if (!event) return;
+
+    setSelectedEvent(event);
+    Animated.spring(bottomSheetAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 65,
+      friction: 11,
+    }).start();
+  }, [eventsToShow, bottomSheetAnim]);
+
+  const handleBottomSheetNavigate = useCallback(() => {
+    if (!selectedEvent) return;
     const now = Date.now();
-    
-    if (eventId && 
-        (!navigationRef.current.isNavigating || 
-         navigationRef.current.lastEventId !== eventId ||
-         now - navigationRef.current.lastNavigateTime > 500)) {
-      
+
+    if (!navigationRef.current.isNavigating ||
+        navigationRef.current.lastEventId !== selectedEvent.id ||
+        now - navigationRef.current.lastNavigateTime > 500) {
+
       navigationRef.current.isNavigating = true;
-      navigationRef.current.lastEventId = eventId;
+      navigationRef.current.lastEventId = selectedEvent.id;
       navigationRef.current.lastNavigateTime = now;
-      
-      router.push(`/event-profile/${eventId}`);
-      
+
+      router.push(`/event-profile/${selectedEvent.id}`);
+
       setTimeout(() => {
         navigationRef.current.isNavigating = false;
       }, 1000);
     }
-  }, [router]);
+  }, [selectedEvent, router]);
+
+  const dismissBottomSheet = useCallback(() => {
+    Animated.timing(bottomSheetAnim, {
+      toValue: 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => setSelectedEvent(null));
+  }, [bottomSheetAnim]);
 
   // Определяем заголовок карты в зависимости от контекста
   const getMapTitle = () => {
@@ -318,17 +332,17 @@ export default function MapScreen() {
   return (
     <View style={styles.container}>
       {/* Кнопка назад с отдельной оверлейной рамкой */}
-      <View style={styles.backButtonOverlay}>
-        <TouchableOpacity 
+      <View style={[styles.backButtonOverlay, { top: insets.top + 10 }]}>
+        <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
         >
           <Text style={styles.backButtonText}>← {t.common.back}</Text>
         </TouchableOpacity>
       </View>
-      
+
       {/* Наименование карты с отдельной оверлейной рамкой */}
-      <View style={styles.titleOverlay}>
+      <View style={[styles.titleOverlay, { top: insets.top + 10 }]}>
         <Text style={styles.headerTitle}>
           {getMapTitle()}
         </Text>
@@ -353,7 +367,7 @@ export default function MapScreen() {
           </View>
         ) : eventsToShow.length === 0 ? (
           <View style={styles.noEventsContainer}>
-            <Text style={styles.noEventsText}>🗺️</Text>
+            <AppIcon name="map" size={28} color={Palette.textFaint} />
             <Text style={styles.noEventsTitle}>{t.map.noEventsFound || 'Events not found'}</Text>
             <Text style={styles.noEventsSubtitle}>{t.map.noEventsWithCoordinates || 'No events with coordinates to display on the map'}</Text>
           </View>
@@ -373,10 +387,13 @@ export default function MapScreen() {
               setMapReady(true);
               setMapError(null);
             }}
-            onError={(error) => {
+            {...({ onError: (error: any) => {
               const errorMessage = error?.message || String(error) || 'Unknown map error';
               logger.error('Map error:', errorMessage, error);
               setMapError(`Ошибка карты: ${errorMessage}. ${Platform.OS === 'android' ? 'Возможно, нужен Google Maps API ключ.' : ''}`);
+            }} as any)}
+            onPress={() => {
+              if (selectedEvent) dismissBottomSheet();
             }}
             onLayout={() => {
               logger.debug('Map layout calculated');
@@ -406,7 +423,7 @@ export default function MapScreen() {
                         />
                       ) : (
                         <View style={styles.markerPlaceholder}>
-                          <Text style={styles.markerPlaceholderText}>📅</Text>
+                          <AppIcon name="calendar" size={16} color={Palette.text} />
                         </View>
                       )}
                     </View>
@@ -417,6 +434,71 @@ export default function MapScreen() {
           </MapView>
         )}
       </View>
+
+      {/* Bottom sheet event preview */}
+      {selectedEvent && (
+        <Animated.View
+          style={[
+            styles.bottomSheet,
+            {
+              transform: [{
+                translateY: bottomSheetAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [300, 0],
+                }),
+              }],
+              opacity: bottomSheetAnim,
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.bottomSheetContent}
+            onPress={handleBottomSheetNavigate}
+            activeOpacity={0.85}
+          >
+            <View style={styles.bottomSheetHandle} />
+            <View style={styles.bottomSheetRow}>
+              {eventPhotosMap[selectedEvent.id] ? (
+                <Image
+                  source={{ uri: eventPhotosMap[selectedEvent.id] }}
+                  style={styles.bottomSheetImage}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[styles.bottomSheetImage, styles.bottomSheetImagePlaceholder]}>
+                  <AppIcon name="calendar" size={24} color={Palette.text} />
+                </View>
+              )}
+              <View style={styles.bottomSheetInfo}>
+                <Text style={styles.bottomSheetTitle} numberOfLines={2}>
+                  {selectedEvent.title}
+                </Text>
+                {selectedEvent.location && (
+                  <Text style={styles.bottomSheetLocation} numberOfLines={1}>
+                    {selectedEvent.location}
+                  </Text>
+                )}
+                <View style={styles.bottomSheetMeta}>
+                  <Text style={styles.bottomSheetDate}>
+                    {selectedEvent.displayDate || new Date(selectedEvent.startTime).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
+                  </Text>
+                  {selectedEvent.participants !== undefined && (
+                    <Text style={styles.bottomSheetParticipants}>
+                      {selectedEvent.participants}/{selectedEvent.maxParticipants}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            </View>
+            <TouchableOpacity style={styles.bottomSheetButton} onPress={handleBottomSheetNavigate}>
+              <Text style={styles.bottomSheetButtonText}>{(t.common as any).open || 'Open'}</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.bottomSheetDismiss} onPress={dismissBottomSheet}>
+            <Text style={styles.bottomSheetDismissText}>{t.common.close}</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -424,7 +506,7 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#0a0a0c',
   },
   backButtonOverlay: {
     position: 'absolute',
@@ -442,7 +524,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   backButtonText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -459,7 +541,7 @@ const styles = StyleSheet.create({
     elevation: 10, // Для Android
   },
   headerTitle: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: 'bold',
   },
@@ -468,7 +550,7 @@ const styles = StyleSheet.create({
     margin: 0,
     borderRadius: 0,
     overflow: 'hidden',
-    backgroundColor: '#1a1a1a', // Фон на случай если карта не загрузится
+    backgroundColor: '#141417', // Фон на случай если карта не загрузится
   },
   map: {
     flex: 1,
@@ -480,7 +562,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#141417',
     padding: 20,
   },
   noEventsText: {
@@ -488,26 +570,26 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   noEventsTitle: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 20,
     fontWeight: 'bold',
     marginBottom: 8,
   },
   noEventsSubtitle: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 20,
   },
   retryButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 8,
     marginTop: 10,
   },
   retryButtonText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -520,7 +602,7 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     overflow: 'hidden',
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
   },
   markerCirclePast: {
     opacity: 0.65, // Затемнение для прошедших событий
@@ -534,10 +616,99 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
   },
   markerPlaceholderText: {
     fontSize: 32,
+  },
+  bottomSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    paddingBottom: 40,
+    zIndex: 2000,
+  },
+  bottomSheetContent: {
+    backgroundColor: '#1c1c20',
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  bottomSheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
+  bottomSheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  bottomSheetImage: {
+    width: 64,
+    height: 64,
+    borderRadius: 14,
+    marginRight: 14,
+    backgroundColor: '#FF8D32',
+  },
+  bottomSheetImagePlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bottomSheetInfo: {
+    flex: 1,
+  },
+  bottomSheetTitle: {
+    color: '#f4f4f5',
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 4,
+    letterSpacing: -0.3,
+  },
+  bottomSheetLocation: {
+    color: 'rgba(244,244,245,0.55)',
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  bottomSheetMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  bottomSheetDate: {
+    color: '#FF8D32',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  bottomSheetParticipants: {
+    color: 'rgba(244,244,245,0.55)',
+    fontSize: 13,
+  },
+  bottomSheetButton: {
+    backgroundColor: '#FF8D32',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  bottomSheetButtonText: {
+    color: '#1a0d00',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  bottomSheetDismiss: {
+    alignItems: 'center',
+    paddingVertical: 10,
+    marginTop: 6,
+  },
+  bottomSheetDismissText: {
+    color: 'rgba(244,244,245,0.5)',
+    fontSize: 14,
   },
   eventsList: {
     flex: 1,
@@ -545,11 +716,11 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   eventItem: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#141417',
     borderRadius: 12,
     marginBottom: 15,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: 'rgba(255,255,255,0.07)',
   },
   eventItemContent: {
     padding: 15,
@@ -561,13 +732,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   eventItemTitle: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: 'bold',
     flex: 1,
   },
   eventItemPrice: {
-    color: '#8B5CF6',
+    color: '#FF8D32',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -581,17 +752,17 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   eventItemLocation: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 12,
     marginBottom: 4,
   },
   eventItemTime: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 12,
     marginBottom: 4,
   },
   eventItemCoordinates: {
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     fontSize: 10,
   },
   eventItemFooter: {
@@ -600,17 +771,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   eventItemParticipants: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 12,
   },
   routeButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 6,
   },
   routeButtonText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: '600',
   },

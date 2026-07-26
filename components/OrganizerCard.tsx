@@ -1,7 +1,19 @@
-import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import React from 'react';
+import { View, Text, Image, StyleSheet, TouchableOpacity, Animated } from 'react-native';
+import { useEffect, useState, useRef } from 'react';
+import { useRouter } from 'expo-router';
 import { useLanguage } from '../context/LanguageContext';
+import { useEvents } from '../context/EventsContext';
 import { formatUsername } from '../utils/username';
+
+type OrganizerStats = {
+  totalEvents: number;
+  organizedEvents: number;
+  participatedEvents: number;
+  complaints: number;
+  friends: number;
+  sharedEvents?: number;
+};
 
 type OrganizerCardProps = {
   organizerId: string;
@@ -11,20 +23,18 @@ type OrganizerCardProps = {
   avatar: string;
   bio?: string;
   geoPosition?: string;
-  stats: {
-    totalEvents: number;
-    organizedEvents: number;
-    participatedEvents: number;
-    complaints: number;
-    friends: number;
-    sharedEvents?: number;
-  };
+  /** Начальные значения — обычно плейсхолдеры; реальные данные грузим сами */
+  stats: OrganizerStats;
   correspondingEventId?: string;
   eventHeight?: number;
   currentUserId?: string | null;
+  /** Когда это наша карточка — показываем 6-й блок Verified как в шапке профиля */
+  verified?: boolean;
+  /** Показывать зелёный пульсирующий индикатор «онлайн» рядом с аватаркой */
+  isOnline?: boolean;
 };
 
-export default function OrganizerCard({
+function OrganizerCard({
   organizerId,
   name,
   age,
@@ -32,13 +42,47 @@ export default function OrganizerCard({
   avatar,
   bio,
   geoPosition,
-  stats,
+  stats: initialStats,
   correspondingEventId,
   eventHeight,
-  currentUserId
+  currentUserId,
+  verified = false,
+  isOnline = false,
 }: OrganizerCardProps) {
   const router = useRouter();
   const { t } = useLanguage();
+
+  // Pulse animation for online indicator dot (Task 2b)
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!isOnline) return;
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.4, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [isOnline, pulseAnim]);
+  // Грузим реальную статистику лениво — один раз при монтировании карточки.
+  // Это изолирует N+1 API-вызовы внутри карточки и не вызывает ре-рендеры explore.
+  const { getOrganizerStats } = useEvents();
+  const [stats, setStats] = useState<OrganizerStats>(initialStats);
+
+  useEffect(() => {
+    if (!getOrganizerStats) return;
+    // Небольшая задержка — не блокируем первый рендер и избегаем одновременного запуска N запросов
+    const timer = setTimeout(() => {
+      const loaded = getOrganizerStats(organizerId);
+      setStats(prev => ({
+        ...loaded,
+        sharedEvents: initialStats.sharedEvents ?? prev.sharedEvents,
+      }));
+    }, 500);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organizerId]);
   
   // Проверяем, является ли это профиль текущего пользователя
   const isOwnProfile = currentUserId === organizerId;
@@ -84,11 +128,14 @@ export default function OrganizerCard({
           {/* Аватарка - круг того же размера */}
           <View style={styles.avatarContainer}>
             <TouchableOpacity onPress={handleProfilePress}>
-              <Image 
-                source={{ uri: avatar }} 
+              <Image
+                source={{ uri: avatar }}
                 style={styles.profileAvatar}
               />
             </TouchableOpacity>
+            {isOnline && (
+              <Animated.View style={[styles.onlineDot, { transform: [{ scale: pulseAnim }] }]} />
+            )}
           </View>
           
           {/* Юзернейм */}
@@ -140,6 +187,14 @@ export default function OrganizerCard({
                   <Text style={styles.statLabel}>{t.profile.statsShared}</Text>
                 </TouchableOpacity>
               )}
+              
+              {/* 6-й параметр Verified — только для нашей карточки, как в шапке профиля */}
+              {isOwnProfile && (
+                <TouchableOpacity style={styles.statItem} onPress={() => router.push('/passport-verification')}>
+                  <Text style={styles.statNumber}>{verified ? '✓' : '—'}</Text>
+                  <Text style={styles.statLabel}>{t.profile.statsVerified}</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
@@ -148,6 +203,8 @@ export default function OrganizerCard({
   );
 }
 
+export default React.memo(OrganizerCard);
+
 // Дизайн в точности как шапка профиля
 const styles = StyleSheet.create({
   swipeContainer: {
@@ -155,10 +212,10 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   card: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 16,
+    backgroundColor: '#141417',
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#333333',
+    borderColor: 'rgba(255,255,255,0.07)',
     padding: 0,
     overflow: 'hidden',
   },
@@ -184,15 +241,26 @@ const styles = StyleSheet.create({
     height: 100,
     borderRadius: 50,
   },
+  onlineDot: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#34C759',
+    borderWidth: 2.5,
+    borderColor: '#141417',
+  },
   username: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginBottom: 5,
   },
   nameAndAge: {
     fontSize: 16,
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     marginBottom: 8,
   },
   bio: {
@@ -222,11 +290,11 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: '#f4f4f5',
   },
   statLabel: {
     fontSize: 10,
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     marginTop: 2,
     textAlign: 'center',
   },

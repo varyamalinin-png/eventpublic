@@ -73,7 +73,7 @@ export const getSwipeButtons = (
     primary: {
       type: 'go',
       label: 'GO',
-      color: '#8B5CF6',
+      color: '#FF8D32',
       icon: '→'
     },
     secondary: null

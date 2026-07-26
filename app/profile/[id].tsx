@@ -1,25 +1,40 @@
-import { View, Text, ScrollView, StyleSheet, Image, TouchableOpacity, TextInput, Modal, Dimensions } from 'react-native';
-import { Link, useRouter, useLocalSearchParams } from 'expo-router';
+import { View, Text, ScrollView, StyleSheet, Image, TouchableOpacity, TextInput, Modal, Dimensions, Platform } from 'react-native';
+import { Link, useLocalSearchParams } from 'expo-router';
+import { useSafeRouter } from '../../utils/safeRouter';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useFocusEffect } from 'expo-router';
 import EventCard from '../../components/EventCard';
 import MemoryMiniCard from '../../components/MemoryMiniCard';
 import TopBar from '../../components/TopBar';
+import MiniTabBar from '../../components/MiniTabBar';
 import ComplaintForm from '../../components/ComplaintForm';
 import { useEvents, Event } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { createLogger } from '../../utils/logger';
+import FolderCard from '../../components/FolderCard';
+import type { EventFolder } from '../../types/EventFolder';
+import { apiRequest } from '../../services/api';
+import { AppIcon } from '../../components/ui/AppIcon';
+import { Palette } from '../../constants/DesignSystem';
 
 const logger = createLogger('OtherProfile');
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// Для веб-версии используем ограниченную ширину контейнера (500px), для мобильных - полную ширину экрана
+const getContainerWidth = () => {
+  const screenWidth = Dimensions.get('window').width;
+  if (Platform.OS === 'web') {
+    return Math.min(screenWidth, 500);
+  }
+  return screenWidth;
+};
+const SCREEN_WIDTH = getContainerWidth();
 
 export default function OtherProfileScreen() {
   const { id, eventId } = useLocalSearchParams();
-  const router = useRouter();
+  const router = useSafeRouter();
   const { events, eventProfiles, getUserData: contextGetUserData, getOrganizerStats, getFriendsList, getEventProfile, createEventProfile, fetchEventProfile, sendFriendRequest, removeFriend, isFriend, userFolders, addUserToFolder, removeUserFromFolder, createPersonalChat, getChatsForUser, isUserParticipant, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember, friendRequests, respondToFriendRequest, getUserRequestStatus, getUserFriendsList } = useEvents();
-  const { user: authUser } = useAuth();
+  const { user: authUser, accessToken } = useAuth();
   const { t } = useLanguage();
   const [showEventFeed, setShowEventFeed] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
@@ -31,6 +46,8 @@ export default function OtherProfileScreen() {
   const [showComplaintForm, setShowComplaintForm] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const [organizerStats, setOrganizerStats] = useState<{ complaints: number; friends: number } | null>(null);
+  const [userEventFolders, setUserEventFolders] = useState<EventFolder[]>([]);
+  const [loadingFolders, setLoadingFolders] = useState(false);
   
   const rawUserId = Array.isArray(id) ? id[0] : id;
   const currentUserId = authUser?.id ?? null;
@@ -54,8 +71,15 @@ export default function OtherProfileScreen() {
   
   // Проверяем, есть ли входящий запрос в друзья от этого пользователя
   const incomingFriendRequest = friendRequests.find(
-    req => req.fromUserId === userId && 
-           req.toUserId === currentUserId && 
+    req => req.fromUserId === userId &&
+           req.toUserId === currentUserId &&
+           req.status === 'pending'
+  );
+
+  // Проверяем, есть ли исходящий запрос (мы уже отправили)
+  const outgoingFriendRequest = friendRequests.find(
+    req => req.fromUserId === currentUserId &&
+           req.toUserId === userId &&
            req.status === 'pending'
   );
   
@@ -149,41 +173,32 @@ export default function OtherProfileScreen() {
   });
 
   // Для подсчета параметров: все события (текущие и прошлые)
-  const allOrganizedEvents = events.filter(event => 
+  // Единый принцип: для прошедших — организатор или profile.participants
+  const allOrganizedEvents = events.filter(event =>
     isUserOrganizer(event, userId)
   );
-  
-  const allParticipatedEvents = events.filter(event => 
-    isUserAttendee(event, userId)
-  );
-  
-  const allUserEvents = events.filter(event => 
-    isUserEventMember(event, userId)
+
+  const allParticipatedEvents = events.filter(event => {
+    if (isEventPast(event)) {
+      if (isUserOrganizer(event, userId)) return false;
+      const profile = eventProfiles.find(p => p.eventId === event.id);
+      if (!profile) return false;
+      return profile.participants.includes(userId);
+    }
+    return isUserAttendee(event, userId);
+  });
+
+  const allUserEvents = [...allOrganizedEvents, ...allParticipatedEvents].filter(
+    (event, index, self) => self.findIndex(e => e.id === event.id) === index
   );
 
-  // МЕМОРИ: прошедшее && я_член_события (организатор или принятый участник)
-  // Используем те же признаки, что и для предстоящих событий
+  // МЕМОРИ: прошедшее && (организатор ИЛИ участник по profile.participants)
   const pastEvents = events.filter(event => {
     if (!isEventPast(event)) return false;
-    
-    // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий проверяем участие через eventProfiles
-    // ВСЕ события имеют профиль - проверяем участие через профиль
+    if (isUserOrganizer(event, userId)) return true;
     const profile = eventProfiles.find(p => p.eventId === event.id);
-    if (!profile) {
-      // Профиль должен существовать для всех событий
-      logger.debug('pastEvents: профиль не найден для события', { eventId: event.id, title: event.title });
-      return false;
-    }
-    
-    // Проверяем, что пользователь в списке участников профиля
-    const isParticipantInProfile = profile.participants.includes(userId);
-    if (!isParticipantInProfile) {
-      // Пользователь не в списке участников профиля - не показываем событие
-      return false;
-    }
-    
-    // Пользователь в списке участников профиля - показываем событие
-    return true;
+    if (!profile) return false;
+    return profile.participants.includes(userId);
   }).sort((a, b) => {
     // Сортируем по дате+времени события: самое последнее прошедшее первым
     const dateA = new Date(a.date + 'T' + a.time + ':00').getTime();
@@ -201,39 +216,77 @@ export default function OtherProfileScreen() {
   // Используем ref для отслеживания уже загруженных профилей
   const loadedProfilesRef = useRef<Set<string>>(new Set());
   
-  useFocusEffect(
-    useCallback(() => {
-      if (!fetchEventProfile) return;
+  const loadProfilesForPastEvents = useCallback(async () => {
+    if (!fetchEventProfile || events.length === 0) return;
+    const pastEvents = events.filter(event => isEventPast(event));
+    for (const event of pastEvents) {
+      if (loadedProfilesRef.current.has(event.id)) continue;
+      try {
+        await fetchEventProfile(event.id);
+        loadedProfilesRef.current.add(event.id);
+      } catch {}
+    }
+  }, [events, isEventPast, fetchEventProfile]);
+
+  useEffect(() => { loadProfilesForPastEvents(); }, [loadProfilesForPastEvents]);
+  useFocusEffect(useCallback(() => { loadProfilesForPastEvents(); }, [loadProfilesForPastEvents]));
+
+  // Загружаем папки просматриваемого пользователя
+  useEffect(() => {
+    const loadUserFolders = async () => {
+      logger.debug('loadUserFolders called', { 
+        userId, 
+        currentUserId, 
+        hasAccessToken: !!accessToken,
+        userIdsMatch: userId === currentUserId
+      });
       
-      const loadProfilesForPastEvents = async () => {
-        const pastEvents = events.filter(event => isEventPast(event));
-        const eventsToLoad = pastEvents.filter(event => !loadedProfilesRef.current.has(event.id));
-        
-        if (eventsToLoad.length === 0) {
-          return; // Все профили уже загружены
-        }
-        
-        logger.debug('Загружаем профили для прошедших событий в профиле другого пользователя', { 
-          count: eventsToLoad.length, 
-          total: pastEvents.length,
-          userId 
+      if (!userId) {
+        logger.warn('loadUserFolders: нет userId');
+        return;
+      }
+      
+      if (!accessToken) {
+        logger.warn('loadUserFolders: нет accessToken');
+        return;
+      }
+
+      // Не загружаем папки для текущего пользователя (они уже загружены через EventsContext)
+      if (userId === currentUserId) {
+        logger.debug('loadUserFolders: пропускаем загрузку для текущего пользователя');
+        return;
+      }
+
+      setLoadingFolders(true);
+      try {
+        logger.debug('Загружаем папки пользователя', { userId, endpoint: `/event-folders/user/${userId}` });
+        const response = await apiRequest(`/event-folders/user/${userId}`, {
+          method: 'GET',
+        }, accessToken);
+
+        logger.debug('Ответ API для папок пользователя', { 
+          userId, 
+          responseType: typeof response,
+          isArray: Array.isArray(response),
+          foldersCount: Array.isArray(response) ? response.length : 0,
+          responsePreview: Array.isArray(response) ? response.map((f: any) => ({ id: f.id, name: f.name })) : response
         });
         
-        for (const event of eventsToLoad) {
-          // Профили событий загружаются автоматически при открытии event-profile/[id]
-          // Для фильтрации событий они больше не нужны - используем те же признаки, что и для предстоящих событий
-            try {
-              await fetchEventProfile(event.id);
-            loadedProfilesRef.current.add(event.id);
-            } catch (error) {
-            logger.debug(`Не удалось загрузить профиль для события ${event.id}:`, error);
-          }
-        }
-      };
-      
-      loadProfilesForPastEvents();
-    }, [events, isEventPast, fetchEventProfile, userId])
-  );
+        setUserEventFolders(Array.isArray(response) ? response : []);
+      } catch (error: any) {
+        logger.error('Ошибка загрузки папок пользователя:', { 
+          error: error?.message || error,
+          status: error?.status,
+          userId 
+        });
+        setUserEventFolders([]);
+      } finally {
+        setLoadingFolders(false);
+      }
+    };
+
+    loadUserFolders();
+  }, [userId, currentUserId, accessToken]);
   
   // useEffect для автоматического открытия ленты при наличии eventId в URL (как в my-events.tsx)
   useEffect(() => {
@@ -303,8 +356,15 @@ export default function OtherProfileScreen() {
   const handleMiniaturePress = (event: Event) => {
     logger.debug('handleMiniaturePress вызван для события', { eventId: event.id, eventTitle: event.title, showEventFeedBefore: showEventFeed });
     
-    // Устанавливаем eventId в URL чтобы useEffect не закрывал ленту
-    router.setParams({ eventId: event.id as any });
+    // КРИТИЧЕСКИ ВАЖНО: На вебе не используем router.setParams, только локальное состояние
+    // Устанавливаем eventId в URL чтобы useEffect не закрывал ленту (только для мобильного)
+    if (Platform.OS !== 'web' && router && typeof router.setParams === 'function') {
+      try {
+        router.setParams({ eventId: event.id as any });
+      } catch (error) {
+        logger.warn('Failed to set params:', error);
+      }
+    }
     
     setSelectedEvent(event);
     setShowEventFeed(true);
@@ -390,9 +450,14 @@ export default function OtherProfileScreen() {
           onPress={() => {
             setShowEventFeed(false);
             setSelectedEvent(null);
-            // Очищаем URL параметры если они есть
-            if (eventId) {
-              router.setParams({ eventId: undefined as any });
+            // КРИТИЧЕСКИ ВАЖНО: На вебе не используем router.setParams, только локальное состояние
+            // Очищаем URL параметры если они есть (только для мобильного)
+            if (eventId && Platform.OS !== 'web' && router && typeof router.setParams === 'function') {
+              try {
+                router.setParams({ eventId: undefined as any });
+              } catch (error) {
+                logger.warn('Failed to clear params:', error);
+              }
             }
             // Если это свой профиль, переходим на таб профиля, иначе остаемся на странице профиля
             if (currentUserId && userId === currentUserId) {
@@ -451,8 +516,11 @@ export default function OtherProfileScreen() {
     );
   }
 
+  const isWeb = Platform.OS === 'web';
+  const containerStyle = isWeb ? [styles.container, styles.containerWeb] : styles.container;
+
   return (
-    <View style={styles.container}>
+    <View style={containerStyle}>
       <TopBar
         searchPlaceholder={t.profile.searchPlaceholderUser}
         onSearchChange={handleProfileSearch}
@@ -462,8 +530,9 @@ export default function OtherProfileScreen() {
         userId={userId}
       />
 
+      <View style={isWeb ? styles.scrollWrapperWeb : { flex: 1 }}>
       <ScrollView 
-        style={styles.scrollContainer}
+        style={isWeb ? styles.scrollContainerWeb : styles.scrollContainer}
         showsVerticalScrollIndicator={true}
         bounces={true}
         alwaysBounceVertical={true}
@@ -473,30 +542,71 @@ export default function OtherProfileScreen() {
       >
         {/* Информация о пользователе */}
         <View style={styles.userProfileContainer}>
-        {/* Аватарка и кнопка настроек (только для собственного профиля) */}
-        <View style={styles.avatarContainer}>
-          <TouchableOpacity onPress={() => setShowAvatarModal(true)}>
-            <Image 
-              source={{ uri: userData.avatar }} 
-              style={styles.profileAvatar}
-            />
-          </TouchableOpacity>
-          {currentUserId && userId === currentUserId ? (
-            <TouchableOpacity 
-              style={styles.settingsButton}
-              onPress={() => router.push('/settings')}
-            >
-              <Text style={styles.settingsIcon}>⚙️</Text>
+        {/* Аватарка и кнопка настроек */}
+        {currentUserId && userId === currentUserId && isWeb ? (
+          // Веб-версия собственного профиля: аватарка и минималистичный карандаш справа
+          <View style={styles.avatarRowWeb}>
+            <TouchableOpacity onPress={() => setShowAvatarModal(true)}>
+              <Image 
+                source={{ uri: userData.avatar }} 
+                style={styles.profileAvatar}
+              />
             </TouchableOpacity>
-          ) : (
             <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={() => setShowProfileActionsModal(true)}
+              style={styles.settingsButtonWeb}
+              onPress={() => {
+                logger.debug('Navigating to settings');
+                if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                  window.location.href = '/settings';
+                } else {
+                  try {
+                    router.push('/settings');
+                  } catch (error) {
+                    logger.error('Error navigating to settings:', error);
+                  }
+                }
+              }}
             >
-              <Text style={styles.actionButtonText}>⋯</Text>
+              <AppIcon name="edit" size={16} color={Palette.text} />
             </TouchableOpacity>
-          )}
-        </View>
+          </View>
+        ) : (
+          // Мобильная версия собственного профиля и просмотр чужого профиля
+          <View style={styles.avatarContainer}>
+            <TouchableOpacity onPress={() => setShowAvatarModal(true)}>
+              <Image 
+                source={{ uri: userData.avatar }} 
+                style={styles.profileAvatar}
+              />
+            </TouchableOpacity>
+            {currentUserId && userId === currentUserId ? (
+              <TouchableOpacity 
+                style={styles.settingsButton}
+                onPress={() => {
+                  logger.debug('Navigating to settings');
+                  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                    window.location.href = '/settings';
+                  } else {
+                    try {
+                      router.push('/settings');
+                    } catch (error) {
+                      logger.error('Error navigating to settings:', error);
+                    }
+                  }
+                }}
+              >
+                <AppIcon name="settings" size={18} color={Palette.text} />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity 
+                style={styles.actionButton}
+                onPress={() => setShowProfileActionsModal(true)}
+              >
+                <AppIcon name="more" size={18} color={Palette.text} />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
         
         {/* Юзернейм */}
         <Text style={styles.username}>{userData.username}</Text>
@@ -558,31 +668,35 @@ export default function OtherProfileScreen() {
             style={styles.actionButton}
             onPress={handleMessagePress}
           >
-            <Text style={styles.actionButtonText}>💬</Text>
+            <AppIcon name="message" size={16} color={Palette.text} />
           </TouchableOpacity>
         )}
         {currentUserId && userId !== currentUserId && (
           <>
             {isFriend(userId) ? (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.actionButton, styles.removeFriendButton]}
                 onPress={() => removeFriend(userId)}
               >
-                <Text style={styles.actionButtonText}>✕</Text>
+                <AppIcon name="close" size={15} color={Palette.text} />
               </TouchableOpacity>
             ) : incomingFriendRequest ? (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.actionButton, styles.acceptFriendButton]}
                 onPress={handleAcceptFriendRequest}
               >
                 <Text style={styles.acceptFriendButtonText}>{t.profile.acceptFriendRequest}</Text>
               </TouchableOpacity>
+            ) : outgoingFriendRequest ? (
+              <View style={[styles.actionButton, { opacity: 0.5 }]}>
+                <AppIcon name="clock" size={15} color={Palette.textDim} />
+              </View>
             ) : (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.actionButton, styles.addFriendButton]}
                 onPress={() => sendFriendRequest(userId)}
               >
-                <Text style={styles.actionButtonText}>➕</Text>
+                <AppIcon name="plus" size={16} color={Palette.text} />
               </TouchableOpacity>
             )}
             {isFriend(userId) && (
@@ -605,8 +719,8 @@ export default function OtherProfileScreen() {
             {filteredEvents.length > 0 ? (
               filteredEvents.map((event, index) => {
                 // Рассчитываем ширину карточки для трех колонок
-                const containerPadding = 40; // 20px с каждой стороны
-                const gap = 15; // Отступ между карточками
+                const containerPadding = 40; // 20px с каждой стороны (paddingHorizontal: 20)
+                const gap = 8; // Отступ между карточками (уменьшен для лучшего размещения)
                 const availableWidth = SCREEN_WIDTH - containerPadding;
                 const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
                 const isLastInRow = (index + 1) % 3 === 0;
@@ -615,8 +729,16 @@ export default function OtherProfileScreen() {
                   <View
                     key={event.id}
                     style={[
-                      { width: cardWidth },
-                      !isLastInRow && { marginRight: gap }
+                      { 
+                        width: cardWidth,
+                        maxWidth: cardWidth,
+                        minWidth: cardWidth,
+                        flexBasis: cardWidth,
+                        flexShrink: 0,
+                        flexGrow: 0,
+                      },
+                      !isLastInRow && { marginRight: gap },
+                      { marginBottom: gap }
                     ]}
                   >
                     <EventCard
@@ -656,19 +778,22 @@ export default function OtherProfileScreen() {
           <View style={styles.eventsContainer}>
             {organizedEvents.length > 0 ? (
               organizedEvents.map((event, index) => {
-                // Рассчитываем ширину карточки для трех колонок
-                const containerPadding = 40; // 20px с каждой стороны
-                const gap = 15; // Отступ между карточками
-                const availableWidth = SCREEN_WIDTH - containerPadding;
-                const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
+                const gap = 8; // Отступ между карточками
                 const isLastInRow = (index + 1) % 3 === 0;
                 
                 return (
                   <View
                     key={event.id}
                     style={[
-                      { width: cardWidth },
-                      !isLastInRow && { marginRight: gap }
+                      { 
+                        width: Platform.OS === 'web' ? '31%' : (SCREEN_WIDTH - 40 - 16) / 3,
+                        flexBasis: Platform.OS === 'web' ? '31%' : (SCREEN_WIDTH - 40 - 16) / 3,
+                        flexShrink: 0,
+                        flexGrow: 0,
+                        maxWidth: Platform.OS === 'web' ? '31%' : (SCREEN_WIDTH - 40 - 16) / 3,
+                      },
+                      !isLastInRow && { marginRight: gap },
+                      { marginBottom: gap }
                     ]}
                   >
                     <EventCard
@@ -706,19 +831,22 @@ export default function OtherProfileScreen() {
           <View style={styles.eventsContainer}>
             {participatedEvents.length > 0 ? (
               participatedEvents.map((event, index) => {
-                // Рассчитываем ширину карточки для трех колонок
-                const containerPadding = 40; // 20px с каждой стороны
-                const gap = 15; // Отступ между карточками
-                const availableWidth = SCREEN_WIDTH - containerPadding;
-                const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
+                const gap = 8; // Отступ между карточками
                 const isLastInRow = (index + 1) % 3 === 0;
                 
                 return (
                   <View
                     key={event.id}
                     style={[
-                      { width: cardWidth },
-                      !isLastInRow && { marginRight: gap }
+                      { 
+                        width: Platform.OS === 'web' ? '31%' : (SCREEN_WIDTH - 40 - 16) / 3,
+                        flexBasis: Platform.OS === 'web' ? '31%' : (SCREEN_WIDTH - 40 - 16) / 3,
+                        flexShrink: 0,
+                        flexGrow: 0,
+                        maxWidth: Platform.OS === 'web' ? '31%' : (SCREEN_WIDTH - 40 - 16) / 3,
+                      },
+                      !isLastInRow && { marginRight: gap },
+                      { marginBottom: gap }
                     ]}
                   >
                     <EventCard
@@ -754,58 +882,146 @@ export default function OtherProfileScreen() {
 
           <Text style={styles.memoriesTitle}>{t.profile.memories}</Text>
           <View style={styles.memoriesContainer}>
-            {pastEvents.length > 0 ? (
-              pastEvents.map((event, index) => {
-                // Рассчитываем ширину карточки для трех колонок
-                const containerPadding = 40; // 20px с каждой стороны
-                const gap = 15; // Отступ между карточками
-                const availableWidth = SCREEN_WIDTH - containerPadding;
-                const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
-                const isLastInRow = (index + 1) % 3 === 0;
-                
-                return (
-                  <View
-                    key={event.id}
-                    style={[
-                      { width: cardWidth },
-                      !isLastInRow && { marginRight: gap }
-                    ]}
-                  >
-                    <EventCard
-                      id={event.id}
-                      title={event.title}
-                      description={event.description}
-                      date={event.date}
-                      time={event.time}
-                      displayDate={event.displayDate}
-                      location={event.location}
-                      price={event.price}
-                      participants={event.participants}
-                      maxParticipants={event.maxParticipants}
-                      organizerAvatar={event.organizerAvatar}
-                      organizerId={event.organizerId}
-                      variant="miniature_1"
-                      showSwipeAction={false}
-                      showOrganizerAvatar={false}
-                      mediaUrl={event.mediaUrl}
-                      mediaType={event.mediaType}
-                      mediaAspectRatio={event.mediaAspectRatio}
-                      participantsList={event.participantsList}
-                      participantsData={event.participantsData}
-                      context="memories"
-                      onMiniaturePress={() => handleMemoryPress(event.id)}
-                      viewerUserId={userId}
-                    />
-                  </View>
-                );
-              })
-            ) : (
-              <Text style={styles.emptyText}>{t.profile.memoriesEmpty}</Text>
-            )}
+            {(() => {
+              // Объединяем папки и события в один массив для правильного позиционирования
+              const gap = 8; // Отступ между карточками (уменьшен для лучшего размещения)
+              const containerPadding = 20; // Отступ контейнера с каждой стороны
+              
+              // Для веба используем процентную ширину, для мобильных - пиксели
+              // Ширина одной карточки (1 колонка из 3)
+              const singleCardWidth = Platform.OS === 'web' 
+                ? 'calc((100% - 16px) / 3)' // 100% минус 2 gap (8px каждый), делим на 3
+                : (SCREEN_WIDTH - containerPadding * 2 - gap * 2) / 3;
+              
+              // Ширина папки (2 колонки из 3) = 2 карточки + 1 отступ между ними
+              const folderWidth = Platform.OS === 'web'
+                ? 'calc((100% - 16px) / 3 * 2 + 8px)' // 2 колонки + 1 gap
+                : ((SCREEN_WIDTH - containerPadding * 2 - gap * 2) / 3) * 2 + gap;
+              
+              const items: Array<{ type: 'folder' | 'event'; data: EventFolder | Event; index: number }> = [];
+              
+              // Добавляем папки
+              if (userEventFolders && userEventFolders.length > 0) {
+                userEventFolders.forEach((folder: EventFolder) => {
+                  items.push({ type: 'folder', data: folder, index: items.length });
+                });
+              }
+              
+              // Добавляем события
+              if (pastEvents.length > 0) {
+                pastEvents.forEach((event: Event) => {
+                  items.push({ type: 'event', data: event, index: items.length });
+                });
+              }
+              
+              if (items.length === 0) {
+                return <Text style={styles.emptyText}>{t.profile.memoriesEmpty}</Text>;
+              }
+              
+              // Рендерим элементы с правильным позиционированием
+              let currentPosition = 0; // Текущая позиция в сетке (0, 1, 2 - три колонки)
+              const renderedItems: React.ReactNode[] = [];
+              
+              items.forEach((item, itemIndex) => {
+                if (item.type === 'folder') {
+                  const folder = item.data as EventFolder;
+                  // Папка занимает 2 места (позиции 0 и 1)
+                  // Если текущая позиция не 0, пропускаем до следующей строки
+                  if (currentPosition !== 0) {
+                    // Пропускаем оставшиеся позиции в текущей строке
+                    while (currentPosition < 3) {
+                      currentPosition++;
+                    }
+                    currentPosition = 0; // Переходим на новую строку
+                  }
+                  
+                  // Теперь currentPosition === 0, можем отобразить папку
+                  renderedItems.push(
+                    <View
+                      key={`folder-${folder.id}`}
+                      style={[
+                        { 
+                          width: folderWidth,
+                          flexBasis: folderWidth,
+                          flexShrink: 0,
+                          flexGrow: 0,
+                          maxWidth: folderWidth,
+                        },
+                        { marginRight: gap },
+                        { marginBottom: gap }
+                      ]}
+                      pointerEvents="box-none"
+                    >
+                      <FolderCard
+                        folder={folder}
+                        onPress={() => {
+                          router.push(`/event-folder/${folder.id}`);
+                        }}
+                        variant="profile"
+                      />
+                    </View>
+                  );
+                  // После папки следующая позиция - 2 (3-й квадрант)
+                  currentPosition = 2;
+                } else {
+                  const event = item.data as Event;
+                  const isLastInRow = currentPosition === 2;
+                  
+                  renderedItems.push(
+                    <View
+                      key={event.id}
+                      style={[
+                        { 
+                          width: singleCardWidth,
+                          flexBasis: singleCardWidth,
+                          flexShrink: 0,
+                          flexGrow: 0,
+                          maxWidth: singleCardWidth,
+                        },
+                        !isLastInRow && { marginRight: gap },
+                        { marginBottom: gap }
+                      ]}
+                      pointerEvents="box-none"
+                    >
+                      <EventCard
+                        id={event.id}
+                        title={event.title}
+                        description={event.description}
+                        date={event.date}
+                        time={event.time}
+                        displayDate={event.displayDate}
+                        location={event.location}
+                        price={event.price}
+                        participants={event.participants}
+                        maxParticipants={event.maxParticipants}
+                        organizerAvatar={event.organizerAvatar}
+                        organizerId={event.organizerId}
+                        variant="miniature_1"
+                        showSwipeAction={false}
+                        showOrganizerAvatar={false}
+                        mediaUrl={event.mediaUrl}
+                        mediaType={event.mediaType}
+                        mediaAspectRatio={event.mediaAspectRatio}
+                        participantsList={event.participantsList}
+                        participantsData={event.participantsData}
+                        context="memories"
+                        onMiniaturePress={() => handleMemoryPress(event.id)}
+                        viewerUserId={userId}
+                      />
+                    </View>
+                  );
+                  // Переходим к следующей позиции
+                  currentPosition = (currentPosition + 1) % 3;
+                }
+              });
+              
+              return renderedItems;
+            })()}
           </View>
         </>
       )}
       </ScrollView>
+      </View>
 
       {/* Модальное окно выбора папки */}
       <Modal
@@ -816,6 +1032,7 @@ export default function OtherProfileScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
+            <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>{t.profile.manageFolders}</Text>
             <Text style={styles.modalSubtitle}>{t.profile.selectFoldersForUser || 'Select folders for user'} {userData.name}</Text>
             
@@ -826,10 +1043,8 @@ export default function OtherProfileScreen() {
                   style={styles.folderOption}
                   onPress={() => handleFolderToggle(folder.id)}
                 >
-                  <View style={styles.folderCheckbox}>
-                    <Text style={styles.checkboxIcon}>
-                      {selectedFolders.includes(folder.id) ? '✓' : ''}
-                    </Text>
+                  <View style={[styles.folderCheckbox, selectedFolders.includes(folder.id) && { backgroundColor: Palette.accent, borderColor: Palette.accent }]}>
+                    {selectedFolders.includes(folder.id) && <AppIcon name="check" size={12} color="#1a0d00" />}
                   </View>
                   <Text style={styles.folderName}>{folder.name}</Text>
                 </TouchableOpacity>
@@ -897,7 +1112,7 @@ export default function OtherProfileScreen() {
             <View style={styles.actionsModalHeader}>
               <Text style={styles.actionsModalTitle}>{t.profile.actions}</Text>
               <TouchableOpacity onPress={() => setShowProfileActionsModal(false)}>
-                <Text style={styles.actionsModalClose}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.text} />
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.actionsModalScroll} bounces={false}>
@@ -948,6 +1163,7 @@ export default function OtherProfileScreen() {
         type="USER"
         reportedUserId={userId}
       />
+      <MiniTabBar />
     </View>
   );
 }
@@ -955,10 +1171,20 @@ export default function OtherProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
+  },
+  containerWeb: {
+    flex: undefined,
+    minHeight: '100vh' as any,
   },
   scrollContainer: {
     flex: 1,
+  },
+  scrollContainerWeb: {
+    flex: undefined,
+  },
+  scrollWrapperWeb: {
+    flex: undefined,
   },
   scrollContentContainer: {
     flexGrow: 1,
@@ -971,13 +1197,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 60,
     paddingBottom: 15,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   searchInputContainer: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 20,
     paddingHorizontal: 15,
     paddingVertical: 10,
@@ -985,19 +1211,19 @@ const styles = StyleSheet.create({
   },
   searchIcon: {
     fontSize: 16,
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     marginRight: 8,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: '#FFF',
+    color: '#f4f4f5',
   },
   mapButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 10,
@@ -1009,7 +1235,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1022,6 +1248,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 20,
   },
+  avatarRowWeb: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 10,
+  },
   avatarContainer: {
     position: 'relative',
     alignItems: 'center',
@@ -1032,6 +1265,20 @@ const styles = StyleSheet.create({
     height: 100,
     borderRadius: 50,
   },
+  settingsButtonWeb: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  settingsIconWeb: {
+    fontSize: 16,
+    color: '#f4f4f5',
+  },
   settingsButton: {
     position: 'absolute',
     top: 0,
@@ -1039,11 +1286,11 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#121212',
+    borderColor: '#0a0a0c',
   },
   settingsIcon: {
     fontSize: 18,
@@ -1051,17 +1298,17 @@ const styles = StyleSheet.create({
   username: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginBottom: 5,
   },
   nameAndAge: {
     fontSize: 16,
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     marginBottom: 8,
   },
   bio: {
     fontSize: 14,
-    color: '#CCC',
+    color: 'rgba(244,244,245,0.7)',
     textAlign: 'center',
     marginBottom: 20,
     paddingHorizontal: 20,
@@ -1086,11 +1333,11 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: '#f4f4f5',
   },
   statLabel: {
     fontSize: 10,
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     marginTop: 2,
     textAlign: 'center',
   },
@@ -1105,13 +1352,13 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
     marginHorizontal: 10,
   },
   addFriendButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FF8D32',
   },
   acceptFriendButton: {
     backgroundColor: '#34C759',
@@ -1126,15 +1373,15 @@ const styles = StyleSheet.create({
   },
   acceptFriendButtonText: {
     fontSize: 14,
-    color: '#FFF',
+    color: '#f4f4f5',
     fontWeight: '600',
   },
   removeFriendButton: {
-    backgroundColor: '#666',
+    backgroundColor: 'rgba(255,255,255,0.15)',
   },
   actionButtonText: {
     fontSize: 20,
-    color: '#FFF',
+    color: '#f4f4f5',
   },
   // Результаты поиска
   searchResults: {
@@ -1143,7 +1390,7 @@ const styles = StyleSheet.create({
   searchResultsTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginHorizontal: 20,
     marginTop: 10,
     marginBottom: 15,
@@ -1152,17 +1399,17 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginHorizontal: 20,
     marginTop: 20,
     marginBottom: 10,
   },
-  // Устаревшие стили, больше не используются
   eventsContainer: {
     paddingHorizontal: 20,
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'flex-start',
+    width: '100%',
   },
   eventCard: {
     width: 110, // Фиксированная ширина для трех колонок
@@ -1174,7 +1421,7 @@ const styles = StyleSheet.create({
   memoriesTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginHorizontal: 20,
     marginTop: 20,
     marginBottom: 10,
@@ -1183,14 +1430,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'flex-start',
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
     width: '100%',
     margin: 0,
     paddingHorizontal: 20,
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     textAlign: 'center',
     marginTop: 20,
     marginHorizontal: 20,
@@ -1200,7 +1447,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   goToEventButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FF8D32',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
@@ -1208,7 +1455,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   goToEventText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: '600',
   },
@@ -1219,7 +1466,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   backText: {
-    color: '#007AFF',
+    color: '#FF8D32',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -1239,100 +1486,118 @@ const styles = StyleSheet.create({
     marginBottom: 200, // Значительно увеличиваем отступ после последнего элемента для лучшей видимости
   },
   // Модальные окна
+  modalHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 16,
-    padding: 20,
-    width: '80%',
-    maxHeight: '60%',
+    backgroundColor: '#18181e',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(255,255,255,0.08)',
+    padding: 22,
+    paddingBottom: 36,
+    maxHeight: '80%',
   },
   modalTitle: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 8,
+    color: '#f4f4f5',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+    marginBottom: 6,
     textAlign: 'center',
   },
   modalSubtitle: {
-    color: '#999',
-    fontSize: 14,
-    marginBottom: 20,
+    color: 'rgba(244,244,245,0.5)',
+    fontSize: 13,
+    marginBottom: 16,
     textAlign: 'center',
+    lineHeight: 18,
   },
   folderList: {
-    maxHeight: 300,
+    maxHeight: 320,
   },
   folderOption: {
-    paddingVertical: 15,
-    paddingHorizontal: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.05)',
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
   },
   folderCheckbox: {
     width: 24,
     height: 24,
-    borderWidth: 2,
-    borderColor: '#999',
-    borderRadius: 4,
-    marginRight: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 8,
+    marginRight: 0,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
   },
   checkboxIcon: {
-    color: '#FFF',
-    fontSize: 16,
+    color: '#f4f4f5',
+    fontSize: 14,
     fontWeight: 'bold',
   },
   folderName: {
-    color: '#FFF',
-    fontSize: 16,
+    color: '#f4f4f5',
+    fontSize: 15,
+    fontWeight: '500',
     flex: 1,
   },
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 20,
+    marginTop: 18,
+    paddingTop: 14,
     borderTopWidth: 1,
-    borderTopColor: '#333',
-    paddingTop: 15,
+    borderTopColor: 'rgba(255,255,255,0.07)',
+    gap: 10,
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 14,
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 15,
   },
   cancelButtonModal: {
-    marginRight: 10,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
   },
   saveButton: {
-    backgroundColor: '#007AFF',
-    marginLeft: 10,
+    backgroundColor: '#FF8D32',
   },
   saveButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
+    color: '#f4f4f5',
+    fontSize: 15,
+    fontWeight: '700',
   },
   cancelButton: {
-    marginTop: 20,
-    paddingVertical: 12,
+    marginTop: 16,
+    paddingVertical: 14,
     alignItems: 'center',
     borderTopWidth: 1,
-    borderTopColor: '#333',
+    borderTopColor: 'rgba(255,255,255,0.07)',
   },
   cancelButtonText: {
-    color: '#999',
-    fontSize: 16,
+    color: 'rgba(244,244,245,0.6)',
+    fontSize: 15,
+    fontWeight: '500',
   },
   // Модальное окно аватарки
   avatarModalOverlay: {
@@ -1353,7 +1618,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   actionsModalContainer: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#141417',
     borderRadius: 16,
     width: '85%',
     maxHeight: '70%',
@@ -1365,15 +1630,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   actionsModalTitle: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 20,
     fontWeight: 'bold',
   },
   actionsModalClose: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 24,
     fontWeight: 'bold',
   },
@@ -1383,13 +1648,13 @@ const styles = StyleSheet.create({
   actionItem: {
     padding: 18,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   actionItemLast: {
     borderBottomWidth: 0,
   },
   actionItemText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
   },
 });

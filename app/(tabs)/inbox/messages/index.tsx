@@ -1,13 +1,16 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Image, Modal, ActivityIndicator, Animated, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Image, Modal, ActivityIndicator, Animated, Alert, Platform, RefreshControl } from 'react-native';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
-import { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import MessageFolders from '../../../../components/MessageFolders';
 import { useEvents } from '../../../../context/EventsContext';
+import { useRefresh } from '../../../../hooks/useRefresh';
 import { useRouter } from 'expo-router';
 import type { Chat, MessageFolder } from '../../../../types/Chat';
 import { useAuth } from '../../../../context/AuthContext';
 import { useLanguage } from '../../../../context/LanguageContext';
 import { createLogger } from '../../../../utils/logger';
+import { AppIcon } from '../../../../components/ui/AppIcon';
+import { Palette } from '../../../../constants/DesignSystem';
 
 const logger = createLogger('MessagesTab');
 
@@ -15,6 +18,7 @@ export default function MessagesTab() {
   const router = useRouter();
   const { user } = useAuth();
   const { t } = useLanguage();
+  const { refreshing, onRefresh } = useRefresh();
   const {
     getUserData,
     getChatsForUser,
@@ -31,6 +35,7 @@ export default function MessagesTab() {
     events,
   } = useEvents();
   const currentUserId = useMemo(() => user?.id ?? null, [user]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [showCreateFolderModal, setShowCreateFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -45,8 +50,13 @@ export default function MessagesTab() {
   const [chatToDelete, setChatToDelete] = useState<Chat | null>(null);
   const [showFolderSelectModal, setShowFolderSelectModal] = useState(false);
   const [chatForFolder, setChatForFolder] = useState<Chat | null>(null);
+  const [showTransferOrganizerModal, setShowTransferOrganizerModal] = useState(false);
+  const [eventIdForTransfer, setEventIdForTransfer] = useState<string | null>(null);
+  const [selectedNewOrganizerId, setSelectedNewOrganizerId] = useState<string | null>(null);
   const swipeX = useRef<Record<string, Animated.Value>>({});
   const swipeAnimations = useRef<Record<string, { translateX: Animated.Value; opacity: Animated.Value }>>({});
+  const gestureStartX = useRef<Record<string, number>>({});
+  const isSwipeGesture = useRef<Record<string, boolean>>({});
 
   const defaultFolders = useMemo<MessageFolder[]>(
     () => [
@@ -96,12 +106,22 @@ export default function MessagesTab() {
       }
     }
 
+    // Фильтрация по поисковому запросу
+    if (searchQuery.trim()) {
+      const query = searchQuery.trim().toLowerCase();
+      chats = chats.filter(chat => {
+        const nameMatch = chat.name?.toLowerCase().includes(query);
+        const lastMessageMatch = chat.lastMessage?.text?.toLowerCase().includes(query);
+        return nameMatch || lastMessageMatch;
+      });
+    }
+
     return chats.sort((a, b) => {
       const timeA = Math.max(toTimestamp(a.lastMessage?.createdAt), toTimestamp(a.lastActivity));
       const timeB = Math.max(toTimestamp(b.lastMessage?.createdAt), toTimestamp(b.lastActivity));
       return timeB - timeA;
     });
-  }, [userChats, selectedFolderData]);
+  }, [userChats, selectedFolderData, searchQuery]);
 
   const availableChatsForSelectedFolder = useMemo(() => {
     if (!selectedFolderData || selectedFolderData.type !== 'custom') return [];
@@ -238,7 +258,22 @@ export default function MessagesTab() {
         </TouchableOpacity>
       )}
 
-      <ScrollView style={styles.chatsList}>
+      <TextInput
+        style={{ backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: '#f4f4f5', marginHorizontal: 16, marginBottom: 12 }}
+        placeholder="Поиск чатов..."
+        placeholderTextColor="rgba(255,255,255,0.3)"
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+      />
+
+      <ScrollView style={styles.chatsList} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF8D32" />}>
+        {filteredChats.length === 0 && (
+          <View style={styles.emptyContainer}>
+            <AppIcon name="inbox" size={60} color="rgba(244,244,245,0.25)" />
+            <Text style={styles.emptyTitle}>Пока нет сообщений</Text>
+            <Text style={styles.emptyText}>Начните общение через события</Text>
+          </View>
+        )}
         {filteredChats.map((chat: Chat) => {
           // Для личных чатов получаем данные другого участника
           let avatar = chat.avatar;
@@ -250,7 +285,7 @@ export default function MessagesTab() {
             }
           }
           if (!avatar) {
-            avatar = 'https://randomuser.me/api/portraits/women/68.jpg';
+            avatar = '';
           }
 
           const lastInteractionDate =
@@ -273,29 +308,78 @@ export default function MessagesTab() {
           const isSwiped = swipedChatId === chat.id;
           
           const handleSwipeGesture = (event: any) => {
-            const { translationX, state } = event.nativeEvent;
+            const { translationX, translationY, state, absoluteX } = event.nativeEvent;
             
-            if (state === State.ACTIVE) {
-              // Ограничиваем свайп вправо (положительные значения)
-              if (translationX > 0 && translationX <= 160) {
+            if (state === State.BEGAN) {
+              // Запоминаем начальную позицию жеста
+              gestureStartX.current[chat.id] = absoluteX;
+              isSwipeGesture.current[chat.id] = false;
+            } else if (state === State.ACTIVE) {
+              // Проверяем, что движение преимущественно горизонтальное
+              const isHorizontalSwipe = Math.abs(translationX) > Math.abs(translationY) * 1.5;
+              
+              // Если движение горизонтальное и достаточно большое - это свайп
+              if (isHorizontalSwipe && Math.abs(translationX) > 20) {
+                isSwipeGesture.current[chat.id] = true;
+              }
+              
+              // Если чат уже свайпнут, разрешаем обратный свайп вправо
+              if (isSwiped) {
+                // Обратный свайп вправо - возвращаем чат на место
+                // translationX будет положительным при свайпе вправо
+                if (translationX > 0) {
+                  // Начальное значение -160, добавляем положительное translationX
+                  // Ограничиваем от -160 до 0
+                  const newValue = Math.min(0, -160 + translationX);
+                  translateX.setValue(newValue);
+                } else if (translationX < 0) {
+                  // Если свайпаем еще больше влево, ограничиваем -160
+                  translateX.setValue(-160);
+                }
+              } else {
+                // Обычный свайп влево - показываем кнопки
+                if (isSwipeGesture.current[chat.id] && translationX < 0 && translationX >= -160) {
                 translateX.setValue(translationX);
+                }
               }
             } else if (state === State.END) {
-              if (translationX > 80) {
-                // Показываем кнопки
+              if (isSwiped) {
+                // Если чат был свайпнут, проверяем обратный свайп вправо
+                const currentValue = (translateX as any)._value || -160;
+                // Если свайпнули вправо достаточно далеко (translationX > 0) или текущее значение близко к 0 - скрываем кнопки
+                if (translationX > 30 || currentValue > -80) {
+                  setSwipedChatId(null);
+                  Animated.spring(translateX, {
+                    toValue: 0,
+                    useNativeDriver: (Platform.OS as string) !== 'web',
+                  }).start();
+                } else {
+                  // Возвращаем обратно в свайпнутое состояние
+                  Animated.spring(translateX, {
+                    toValue: -160,
+                    useNativeDriver: (Platform.OS as string) !== 'web',
+                  }).start();
+                }
+              } else {
+                // Показываем кнопки только если это был свайп влево и движение достаточно большое
+                if (isSwipeGesture.current[chat.id] && translationX < -50) {
                 setSwipedChatId(chat.id);
                 Animated.spring(translateX, {
-                  toValue: 160,
-                  useNativeDriver: true,
+                    toValue: -160,
+                  useNativeDriver: Platform.OS !== 'web',
                 }).start();
               } else {
                 // Скрываем кнопки
                 setSwipedChatId(null);
                 Animated.spring(translateX, {
                   toValue: 0,
-                  useNativeDriver: true,
+                  useNativeDriver: Platform.OS !== 'web',
                 }).start();
               }
+              }
+              // Очищаем состояние жеста
+              delete gestureStartX.current[chat.id];
+              delete isSwipeGesture.current[chat.id];
             }
           };
           
@@ -306,7 +390,7 @@ export default function MessagesTab() {
             setSwipedChatId(null);
             Animated.spring(translateX, {
               toValue: 0,
-              useNativeDriver: true,
+              useNativeDriver: Platform.OS !== 'web',
             }).start();
           };
           
@@ -317,7 +401,7 @@ export default function MessagesTab() {
             setSwipedChatId(null);
             Animated.spring(translateX, {
               toValue: 0,
-              useNativeDriver: true,
+              useNativeDriver: Platform.OS !== 'web',
             }).start();
           };
           
@@ -329,23 +413,24 @@ export default function MessagesTab() {
                   style={[styles.swipeButton, styles.swipeButtonFolder]}
                   onPress={handleFolderPress}
                 >
-                  <Text style={styles.swipeButtonText}>📁</Text>
+                  <AppIcon name="folder" size={18} color={Palette.text} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.swipeButton, styles.swipeButtonDelete]}
                   onPress={handleDeletePress}
                 >
-                  <Text style={styles.swipeButtonText}>🗑️</Text>
+                  <AppIcon name="trash" size={18} color={Palette.text} />
                 </TouchableOpacity>
               </View>
               
               <PanGestureHandler
                 onGestureEvent={handleSwipeGesture}
                 onHandlerStateChange={handleSwipeGesture}
-                activeOffsetX={10}
-                failOffsetY={[-5, 5]}
+                activeOffsetX={isSwiped ? 30 : -30} // Порог для свайпа: вправо если свайпнут, влево если нет
+                failOffsetY={[-15, 15]}
                 minPointers={1}
-                shouldCancelWhenOutside={false}
+                shouldCancelWhenOutside={true}
+                enableTrackpadTwoFingerGesture={false}
               >
                 <Animated.View
                   style={[
@@ -358,13 +443,14 @@ export default function MessagesTab() {
                   <TouchableOpacity 
                     style={styles.chatItem}
                     activeOpacity={isSwiped ? 1 : 0.7}
+                    delayPressIn={100}
                     onPress={() => {
                       // Закрываем свайп при клике, если он открыт
                       if (isSwiped) {
                         setSwipedChatId(null);
                         Animated.spring(translateX, {
                           toValue: 0,
-                          useNativeDriver: true,
+                          useNativeDriver: (Platform.OS as string) !== 'web',
                         }).start();
                       } else {
                         handleChatPress(chat.id);
@@ -373,22 +459,32 @@ export default function MessagesTab() {
                     disabled={isSwiped}
                   >
                     <Image source={{ uri: avatar }} style={styles.chatAvatar} />
-                    <View style={styles.chatInfo}>
-                      <Text style={styles.chatName}>{chat.name}</Text>
-                      {chat.lastMessage && (
-                        <Text style={styles.lastMessage} numberOfLines={1}>
-                          {chat.lastMessage.text ?? 'Отправлено событие'}
-                        </Text>
-                      )}
-                    </View>
-                    {lastInteractionDate && (
-                      <Text style={styles.chatTime}>
-                        {lastInteractionDate.toLocaleTimeString('ru-RU', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </Text>
-                    )}
+                    {(() => {
+                      const last = chat.lastMessage;
+                      const isUnread = last && last.fromUserId !== currentUserId && !last.readBy?.includes(currentUserId || '');
+                      return (
+                        <>
+                          <View style={styles.chatInfo}>
+                            <Text style={[styles.chatName, isUnread && { fontWeight: '700' }]}>{chat.name}</Text>
+                            {last && (
+                              <Text style={[styles.lastMessage, isUnread && { color: '#f4f4f5' }]} numberOfLines={1}>
+                                {last.text ?? 'Отправлено событие'}
+                              </Text>
+                            )}
+                          </View>
+                          <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                            {lastInteractionDate && (
+                              <Text style={[styles.chatTime, isUnread && { color: '#FF8D32' }]}>
+                                {lastInteractionDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                              </Text>
+                            )}
+                            {isUnread && (
+                              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#FF8D32' }} />
+                            )}
+                          </View>
+                        </>
+                      );
+                    })()}
                   </TouchableOpacity>
                 </Animated.View>
               </PanGestureHandler>
@@ -400,7 +496,7 @@ export default function MessagesTab() {
                   disabled={isRemoving}
                 >
                   {isRemoving ? (
-                    <ActivityIndicator color="#FFF" size="small" />
+                    <ActivityIndicator color="#f4f4f5" size="small" />
                   ) : (
                     <Text style={styles.removeChatButtonText}>{t.chat.remove}</Text>
                   )}
@@ -445,7 +541,7 @@ export default function MessagesTab() {
                 disabled={isCreatingFolder || !newFolderName.trim()}
               >
                 {isCreatingFolder ? (
-                  <ActivityIndicator color="#FFF" />
+                  <ActivityIndicator color="#f4f4f5" />
                 ) : (
                   <Text style={styles.modalButtonText}>{t.chat.create}</Text>
                 )}
@@ -471,7 +567,7 @@ export default function MessagesTab() {
               <TouchableOpacity
                 onPress={closeAddChatsModal}
               >
-                <Text style={styles.modalCloseButton}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.text} />
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.modalScrollView}>
@@ -492,7 +588,7 @@ export default function MessagesTab() {
                   >
                     <View style={styles.modalCheckbox}>
                       {selectedChatsForFolder.includes(chat.id) && (
-                        <Text style={styles.modalCheckmark}>✓</Text>
+                        <AppIcon name="check" size={14} color={Palette.accent} />
                       )}
                     </View>
                     <Text style={styles.modalChatName}>{chat.name}</Text>
@@ -510,7 +606,7 @@ export default function MessagesTab() {
               disabled={selectedChatsForFolder.length === 0 || isAddingChats}
             >
               {isAddingChats ? (
-                <ActivityIndicator color="#FFF" />
+                <ActivityIndicator color="#f4f4f5" />
               ) : (
                 <Text style={styles.modalButtonText}>Добавить</Text>
               )}
@@ -539,7 +635,7 @@ export default function MessagesTab() {
                   setChatToDelete(null);
                 }}
               >
-                <Text style={styles.modalCloseButton}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.text} />
               </TouchableOpacity>
             </View>
             
@@ -574,22 +670,10 @@ export default function MessagesTab() {
                               await deleteChat(chatToDelete.id, true);
                             } else if (isOrganizer && participantsCount > 1) {
                               // Организатор не единственный - показываем попап передачи роли
-                              Alert.alert(
-                                'Передача роли организатора',
-                                'Вы являетесь организатором события. Для выхода из события необходимо передать роль организатора другому участнику.',
-                                [
-                                  { text: 'Отмена', style: 'cancel' },
-                                  {
-                                    text: 'Передать роль',
-                                    onPress: () => {
-                                      // Здесь можно открыть попап передачи роли
-                                      // Пока просто выходим из события
+                              setEventIdForTransfer(eventId);
                                       setShowDeleteChatModal(false);
                                       setChatToDelete(null);
-                                    },
-                                  },
-                                ]
-                              );
+                              setShowTransferOrganizerModal(true);
                               return;
                             } else {
                               // Обычный участник - просто выходим из события
@@ -618,8 +702,9 @@ export default function MessagesTab() {
                       onPress={async () => {
                         try {
                           // Только покинуть чат, событие остается
-                          // TODO: Добавить API для удаления чата без выхода из события
-                          
+                          if (chatToDelete) {
+                            await deleteChat(chatToDelete.id, false);
+                          }
                           setShowDeleteChatModal(false);
                           setChatToDelete(null);
                         } catch (error) {
@@ -684,7 +769,7 @@ export default function MessagesTab() {
                   setChatForFolder(null);
                 }}
               >
-                <Text style={styles.modalCloseButton}>✕</Text>
+                <AppIcon name="close" size={18} color={Palette.text} />
               </TouchableOpacity>
             </View>
             
@@ -717,7 +802,7 @@ export default function MessagesTab() {
                     >
                       <View style={styles.modalCheckbox}>
                         {isInFolder && (
-                          <Text style={styles.modalCheckmark}>✓</Text>
+                          <AppIcon name="check" size={14} color={Palette.accent} />
                         )}
                       </View>
                       <Text style={styles.modalChatName}>{folder.name}</Text>
@@ -742,6 +827,144 @@ export default function MessagesTab() {
           </View>
         </View>
       </Modal>
+
+      {/* Модальное окно для передачи роли организатора */}
+      <Modal
+        visible={showTransferOrganizerModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setShowTransferOrganizerModal(false);
+          setEventIdForTransfer(null);
+          setSelectedNewOrganizerId(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Передать роль организатора</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowTransferOrganizerModal(false);
+                  setEventIdForTransfer(null);
+                  setSelectedNewOrganizerId(null);
+                }}
+              >
+                <AppIcon name="close" size={18} color={Palette.text} />
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.transferOrganizerDescription}>
+              Выберите участника, которому хотите передать роль организатора. После передачи вы выйдете из события, а новый организатор будет управлять им.
+            </Text>
+            
+            <ScrollView style={styles.modalScrollView}>
+              {(() => {
+                if (!eventIdForTransfer) return null;
+                
+                // Получаем событие
+                const event = events.find(e => e.id === eventIdForTransfer);
+                if (!event) return null;
+                
+                // Получаем список участников (исключая текущего организатора)
+                const participants = getEventParticipants ? getEventParticipants(eventIdForTransfer) : [];
+                const otherParticipants = participants.filter(pId => pId !== event.organizerId && pId !== currentUserId);
+                
+                if (otherParticipants.length === 0) {
+                  return (
+                    <View style={styles.emptyParticipantsContainer}>
+                      <Text style={styles.emptyParticipantsText}>
+                        Нет других участников для передачи роли
+                      </Text>
+                    </View>
+                  );
+                }
+                
+                return otherParticipants.map((participantId) => {
+                  const participantData = getUserData(participantId);
+                  const isSelected = selectedNewOrganizerId === participantId;
+                  
+                  return (
+                    <TouchableOpacity
+                      key={participantId}
+                      style={[
+                        styles.modalChatItem,
+                        isSelected && styles.modalChatItemSelected
+                      ]}
+                      onPress={() => setSelectedNewOrganizerId(participantId)}
+                    >
+                      <Image
+                        source={{ uri: participantData?.avatar || '' }}
+                        style={styles.chatAvatar}
+                      />
+                      <View style={styles.chatInfo}>
+                        <Text style={styles.chatName}>
+                          {participantData?.name || participantData?.username || 'Пользователь'}
+                        </Text>
+                        {participantData?.username && participantData.username !== participantData?.name && (
+                          <Text style={styles.lastMessage}>
+                            @{participantData.username}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.modalCheckbox}>
+                        <Text style={styles.modalCheckmark}>{isSelected ? '✓' : '○'}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                });
+              })()}
+            </ScrollView>
+            
+            <TouchableOpacity
+              style={[
+                styles.modalButton,
+                styles.modalButtonConfirm,
+                !selectedNewOrganizerId && styles.modalButtonDisabled
+              ]}
+              onPress={async () => {
+                if (!selectedNewOrganizerId || !eventIdForTransfer) return;
+                
+                try {
+                  if (transferOrganizerRole) {
+                    await transferOrganizerRole(eventIdForTransfer, selectedNewOrganizerId);
+                    // После передачи роли выходим из события и удаляем чат
+                    if (chatToDelete) {
+                      await cancelEventParticipation(eventIdForTransfer, currentUserId || '');
+                      await deleteChat(chatToDelete.id, true);
+                    }
+                    setShowTransferOrganizerModal(false);
+                    setEventIdForTransfer(null);
+                    setSelectedNewOrganizerId(null);
+                    setChatToDelete(null);
+                    setShowDeleteChatModal(false);
+                  } else {
+                    Alert.alert('Ошибка', 'Функция передачи роли не доступна');
+                  }
+                } catch (error: any) {
+                  logger.error('Failed to transfer organizer role', error);
+                  const errorMessage = error?.message || error?.body?.message || 'Не удалось передать роль организатора';
+                  Alert.alert('Ошибка', errorMessage);
+                }
+              }}
+              disabled={!selectedNewOrganizerId}
+            >
+              <Text style={styles.modalButtonText}>Передать роль</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalButtonCancel, { marginTop: 10 }]}
+              onPress={() => {
+                setShowTransferOrganizerModal(false);
+                setEventIdForTransfer(null);
+                setSelectedNewOrganizerId(null);
+              }}
+            >
+              <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -749,50 +972,81 @@ export default function MessagesTab() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   chatsList: {
     flex: 1,
   },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+    paddingHorizontal: 40,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#f4f4f5',
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+    letterSpacing: -0.3,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: 'rgba(244,244,245,0.45)',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
   chatItem: {
     flexDirection: 'row',
-    padding: 15,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
     alignItems: 'center',
     flex: 1,
   },
   chatAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginRight: 15,
+    width: 54,
+    height: 54,
+    borderRadius: 19,
+    marginRight: 14,
+    backgroundColor: '#3a3a3f',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   chatInfo: {
     flex: 1,
   },
   chatName: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 5,
+    color: '#f4f4f5',
+    fontSize: 15.5,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+    marginBottom: 4,
   },
   lastMessage: {
-    color: '#999',
-    fontSize: 14,
+    color: 'rgba(244,244,245,0.5)',
+    fontSize: 13.5,
   },
   chatTime: {
-    color: '#666',
+    color: 'rgba(244,244,245,0.34)',
     fontSize: 12,
   },
   chatRowContainer: {
     position: 'relative',
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E1E1E',
+    marginHorizontal: 12,
+    marginBottom: 8,
+    borderRadius: 20,
     overflow: 'hidden',
   },
   chatRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#121212',
+    backgroundColor: '#16161a',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 20,
     position: 'relative',
     zIndex: 2,
   },
@@ -816,7 +1070,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF3B30',
   },
   swipeButtonFolder: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
   },
   swipeButtonText: {
     fontSize: 24,
@@ -826,12 +1080,14 @@ const styles = StyleSheet.create({
   },
   deleteOption: {
     padding: 16,
-    backgroundColor: '#2A2A2A',
-    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 14,
     marginBottom: 12,
   },
   deleteOptionText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '500',
   },
@@ -845,26 +1101,30 @@ const styles = StyleSheet.create({
     padding: 10,
     marginHorizontal: 20,
     marginVertical: 10,
-    backgroundColor: '#1E1E1E',
-    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 14,
     alignItems: 'center',
   },
   addChatsButtonText: {
-    color: '#8B5CF6',
+    color: '#FF8D32',
     fontSize: 14,
     fontWeight: '500',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: '#1E1E1E',
-    borderRadius: 10,
+    backgroundColor: '#141417',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
     padding: 20,
-    width: '80%',
+    width: '85%',
     maxHeight: '80%',
   },
   modalHeader: {
@@ -872,20 +1132,25 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   modalTitle: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: 'bold',
   },
   modalCloseButton: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 24,
   },
   modalInput: {
-    backgroundColor: '#2A2A2A',
-    color: '#FFF',
-    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    color: '#f4f4f5',
+    borderRadius: 14,
     padding: 12,
     marginBottom: 20,
   },
@@ -894,7 +1159,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalEmptyText: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     textAlign: 'center',
     paddingVertical: 12,
   },
@@ -903,24 +1168,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#2A2A2A',
+    borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   modalCheckbox: {
     width: 24,
     height: 24,
     borderWidth: 2,
-    borderColor: '#8B5CF6',
+    borderColor: '#FF8D32',
     borderRadius: 4,
     marginRight: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
   modalCheckmark: {
-    color: '#8B5CF6',
+    color: '#FF8D32',
     fontSize: 16,
   },
   modalChatName: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
   },
   modalButtons: {
@@ -935,10 +1200,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalButtonCancel: {
-    backgroundColor: '#2A2A2A',
+    backgroundColor: 'rgba(255,255,255,0.07)',
   },
   modalButtonConfirm: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
   },
   modalButtonDisabled: {
     opacity: 0.5,
@@ -948,8 +1213,10 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     paddingVertical: 6,
     paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: '#2A2A2A',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,59,48,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,59,48,0.25)',
     alignSelf: 'center',
   },
   removeChatButtonText: {
@@ -958,9 +1225,29 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   modalButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
+  },
+  transferOrganizerDescription: {
+    color: '#DDD',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  emptyParticipantsContainer: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  emptyParticipantsText: {
+    color: 'rgba(244,244,245,0.55)',
+    fontSize: 14,
+  },
+  modalChatItemSelected: {
+    backgroundColor: 'rgba(255,141,50,0.10)',
+    borderColor: '#FF8D32',
+    borderWidth: 1,
   },
 });
 

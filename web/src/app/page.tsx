@@ -13,7 +13,7 @@ function LoadingScreen() {
       alignItems: 'center',
       height: '100vh',
       backgroundColor: '#0f0f0f',
-      color: '#8B5CF6'
+      color: '#FF8D32'
     }}>
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: '24px', marginBottom: '10px' }}>⏳</div>

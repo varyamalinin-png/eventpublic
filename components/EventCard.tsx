@@ -1,7 +1,7 @@
 import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, Modal, ScrollView, Alert, InteractionManager, TextInput, Platform, useWindowDimensions, StyleProp, ViewStyle } from 'react-native';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, memo, createElement } from 'react';
 import { Link, useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -1600,12 +1600,26 @@ function EventCard({
                   >
                     {/* Image area wrapper — fixed height so absolute children position relative to image */}
                     <View style={{ aspectRatio: 3/4, position: 'relative', overflow: 'hidden', width: '100%' }}>
-                      {/* Full-bleed image */}
-                      <LazyImage
-                        source={{ uri: eventMedia.uri }}
-                        style={[exploreStyles.exploreImage, StyleSheet.absoluteFillObject]}
-                        onError={eventMedia.onError}
-                      />
+                      {/* Full-bleed image — web: raw div bypasses RNW CSS class ordering bug */}
+                      {Platform.OS === 'web'
+                        ? createElement('div', {
+                            style: {
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              backgroundImage: `url("${eventMedia.uri}")`,
+                              backgroundSize: 'cover',
+                              backgroundPosition: 'center',
+                            },
+                          })
+                        : <LazyImage
+                            source={{ uri: eventMedia.uri }}
+                            style={exploreStyles.exploreImage}
+                            onError={eventMedia.onError}
+                          />
+                      }
 
                       {/* Organizer avatar + name — top-left */}
                       <TouchableOpacity
@@ -2463,6 +2477,11 @@ const exploreStyles = StyleSheet.create({
   },
   exploreImage: {
     resizeMode: 'cover',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   exploreGradient: {
     position: 'absolute',

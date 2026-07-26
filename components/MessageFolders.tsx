@@ -77,20 +77,20 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginRight: 10,
     borderRadius: 20,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
     borderColor: '#555',
   },
   selectedFolder: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
+    borderColor: '#FF8D32',
   },
   folderText: {
     color: '#CCC',
     fontSize: 14,
   },
   selectedFolderText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontWeight: '600',
   },
   addFolderButton: {
@@ -104,7 +104,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   addFolderIcon: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 16,
     fontWeight: 'normal',
   },

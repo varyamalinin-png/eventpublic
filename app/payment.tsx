@@ -14,6 +14,8 @@ import { useEvents } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { createLogger } from '../utils/logger';
+import { AppIcon } from '../components/ui/AppIcon';
+import { Palette } from '../constants/DesignSystem';
 
 const logger = createLogger('Payment');
 
@@ -258,7 +260,7 @@ export default function PaymentScreen() {
         disabled={loading}
       >
         {loading ? (
-          <ActivityIndicator color="#FFF" />
+          <ActivityIndicator color="#f4f4f5" />
         ) : (
           <Text style={styles.payButtonText}>
             Оплатить {paymentType === 'event_placement' ? `${totalPrice} ₽` : event?.price || '0 ₽'}
@@ -266,9 +268,12 @@ export default function PaymentScreen() {
         )}
       </TouchableOpacity>
 
-      <Text style={styles.securityNote}>
-        🔒 Ваши платежные данные защищены и обрабатываются через безопасный платежный шлюз
-      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+        <AppIcon name="lock" size={14} color={Palette.textFaint} />
+        <Text style={[styles.securityNote, { flex: 1 }]}>
+          Ваши платежные данные защищены и обрабатываются через безопасный платежный шлюз
+        </Text>
+      </View>
     </ScrollView>
   );
 }
@@ -276,7 +281,7 @@ export default function PaymentScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   content: {
     padding: 20,
@@ -292,17 +297,17 @@ const styles = StyleSheet.create({
     marginRight: 16,
   },
   backButtonText: {
-    color: '#8B5CF6',
+    color: '#FF8D32',
     fontSize: 16,
     fontWeight: '600',
   },
   title: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#FFF',
+    color: '#f4f4f5',
   },
   eventInfo: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#141417',
     borderRadius: 12,
     padding: 16,
     marginBottom: 24,
@@ -310,12 +315,12 @@ const styles = StyleSheet.create({
   eventTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginBottom: 8,
   },
   eventPrice: {
     fontSize: 16,
-    color: '#8B5CF6',
+    color: '#FF8D32',
     fontWeight: '600',
   },
   paymentForm: {
@@ -324,18 +329,18 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginBottom: 16,
   },
   label: {
     fontSize: 14,
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
     marginBottom: 8,
     marginTop: 12,
   },
   input: {
-    backgroundColor: '#1A1A1A',
-    color: '#FFF',
+    backgroundColor: '#141417',
+    color: '#f4f4f5',
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 12,
@@ -351,7 +356,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   payButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -361,13 +366,13 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   payButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: '600',
   },
   securityNote: {
     fontSize: 12,
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     textAlign: 'center',
     fontStyle: 'italic',
   },
@@ -376,19 +381,19 @@ const styles = StyleSheet.create({
   },
   priceRow: {
     fontSize: 14,
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
     marginBottom: 8,
   },
   priceLabel: {
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
   },
   priceValue: {
-    color: '#8B5CF6',
+    color: '#FF8D32',
     fontWeight: '600',
   },
   priceSubtext: {
     fontSize: 12,
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     fontStyle: 'italic',
   },
   totalPriceContainer: {
@@ -400,12 +405,12 @@ const styles = StyleSheet.create({
   },
   totalPriceLabel: {
     fontSize: 18,
-    color: '#FFF',
+    color: '#f4f4f5',
     fontWeight: '600',
   },
   totalPriceValue: {
     fontSize: 18,
-    color: '#8B5CF6',
+    color: '#FF8D32',
     fontWeight: '700',
   },
 });

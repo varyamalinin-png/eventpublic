@@ -367,6 +367,7 @@ export const ru = {
     extendRecurring: 'Продлить',
     hideTags: 'Скрыть метки',
     showTags: 'Показать метки',
+    goToChat: 'Перейти в чат',
     deleteEvent: 'Удалить',
     deleteEventConfirm: 'Вы уверены, что хотите удалить это событие?',
     eventDeleted: 'Событие удалено',
@@ -404,8 +405,8 @@ export const ru = {
     addPhoto: 'Добавить фото',
     orAddByLink: 'Или добавьте фото по ссылке:',
     mediaType: 'Тип медиа:',
-    photo: '📷 Фото',
-    video: '🎥 Видео',
+    photo: 'Фото',
+    video: 'Видео',
     inviteFriends: 'Пригласить друзей',
     selectFriends: 'Выберите друзей для приглашения',
     recurring: 'Регулярное',
@@ -499,8 +500,6 @@ export const ru = {
         all: 'Все',
       },
 
-<<<<<<< HEAD
-=======
   // Request Item
   requestItem: {
     sentFriendRequest: 'отправили заявку в друзья к',
@@ -517,7 +516,6 @@ export const ru = {
     pending: 'ожидает',
   },
 
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   // Participants Modal
   participantsModal: {
     title: 'Участники события',
@@ -554,6 +552,8 @@ export const ru = {
     searchEventsAndPeople: 'Поиск событий и людей...',
     maximum: 'Максимум',
     tags: 'Метки:',
+    recommendations: 'Рекомендации',
+    friends: 'друзей',
   },
 
       // Event Profile

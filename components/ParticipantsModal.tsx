@@ -3,6 +3,8 @@ import { useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
 import { useLanguage } from '../context/LanguageContext';
 import { formatUsername } from '../utils/username';
+import { AppIcon } from './ui/AppIcon';
+import { Palette, Radius } from '../constants/DesignSystem';
 
 type ParticipantsModalProps = {
   visible: boolean;
@@ -14,24 +16,24 @@ export default function ParticipantsModal({ visible, onClose, eventId }: Partici
   const router = useRouter();
   const { t } = useLanguage();
   const { getEventParticipants, getUserData, events, isUserOrganizer } = useEvents();
-  
-  // Получаем список участников из контекста (универсальный способ)
+
   const participantIds = getEventParticipants(eventId);
-  
-  // Получаем событие для проверки ролей
   const event = events.find(e => e.id === eventId);
 
   const handleParticipantPress = (userId: string) => {
     onClose();
     router.push(`/profile/${userId}`);
   };
-  
-  // Определяем роль пользователя в событии
+
   const getUserRole = (userId: string): string => {
     if (event && isUserOrganizer(event, userId)) {
       return t.profile.organizer;
     }
     return t.profile.participant;
+  };
+
+  const isOrganizer = (userId: string): boolean => {
+    return !!(event && isUserOrganizer(event, userId));
   };
 
   return (
@@ -40,44 +42,73 @@ export default function ParticipantsModal({ visible, onClose, eventId }: Partici
       transparent={true}
       animationType="slide"
       onRequestClose={onClose}
+      statusBarTranslucent
     >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>{t.participantsModal.title}</Text>
-            <TouchableOpacity 
+      <View style={styles.overlay}>
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={onClose}
+        />
+        <View style={styles.sheet}>
+          {/* Handle */}
+          <View style={styles.handle} />
+
+          {/* Header */}
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>{t.participantsModal.title}</Text>
+            <View style={styles.countBadge}>
+              <Text style={styles.countBadgeText}>{participantIds.length}</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.closeBtn}
               onPress={onClose}
-              style={styles.closeButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Text style={styles.closeButtonText}>✕</Text>
+              <AppIcon name="close" size={16} color={Palette.textDim} />
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.participantsList}>
+          <ScrollView
+            style={styles.list}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
             {participantIds.length > 0 ? (
               participantIds.map((participantId, index) => {
                 const userData = getUserData(participantId);
                 const role = getUserRole(participantId);
+                const organizer = isOrganizer(participantId);
+                const isLast = index === participantIds.length - 1;
+
                 return (
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     key={participantId}
-                    style={styles.participantItem}
+                    style={[styles.row, !isLast && styles.rowBorder]}
                     onPress={() => handleParticipantPress(participantId)}
+                    activeOpacity={0.7}
                   >
-                    <Image 
-                      source={{ uri: userData.avatar }} 
-                      style={styles.participantModalAvatar}
-                    />
-                    <View style={styles.participantInfo}>
-                      <Text style={styles.participantModalName}>{userData.name}</Text>
-                      <Text style={styles.participantUsername}>{formatUsername(userData.username)}</Text>
+                    <View style={styles.avatarWrapper}>
+                      <Image
+                        source={{ uri: userData.avatar }}
+                        style={styles.avatar}
+                      />
+                      {organizer && <View style={styles.organizerDot} />}
                     </View>
-                    <Text style={styles.participantRole}>{role}</Text>
+                    <View style={styles.info}>
+                      <Text style={styles.name} numberOfLines={1}>{userData.name}</Text>
+                      <Text style={styles.username} numberOfLines={1}>{formatUsername(userData.username)}</Text>
+                    </View>
+                    <View style={[styles.roleBadge, organizer && styles.roleBadgeOrganizer]}>
+                      <Text style={[styles.roleText, organizer && styles.roleTextOrganizer]}>{role}</Text>
+                    </View>
                   </TouchableOpacity>
                 );
               })
             ) : (
-              <Text style={styles.emptyText}>{t.participantsModal.noParticipants}</Text>
+              <View style={styles.empty}>
+                <Text style={styles.emptyText}>{t.participantsModal.noParticipants}</Text>
+              </View>
             )}
           </ScrollView>
         </View>
@@ -87,88 +118,139 @@ export default function ParticipantsModal({ visible, onClose, eventId }: Partici
 }
 
 const styles = StyleSheet.create({
-  modalOverlay: {
+  overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
   },
-  modalContent: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    width: '90%',
-    maxHeight: '70%',
-    padding: 20,
+  sheet: {
+    backgroundColor: '#18181e',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(255,255,255,0.08)',
+    maxHeight: '75%',
+    paddingBottom: 32,
   },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-    paddingBottom: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333333',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  closeButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#2a2a2a',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  closeButtonText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-  participantsList: {
-    maxHeight: 400,
-  },
-  participantItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    marginBottom: 8,
-    backgroundColor: '#2a2a2a',
-  },
-  participantModalAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginRight: 12,
-  },
-  participantInfo: {
-    flex: 1,
-  },
-  participantModalName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
+  handle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignSelf: 'center',
+    marginTop: 12,
     marginBottom: 4,
   },
-  participantUsername: {
-    fontSize: 14,
-    color: '#999999',
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.07)',
+    gap: 10,
   },
-  participantRole: {
-    fontSize: 14,
-    color: '#8B5CF6',
-    fontWeight: '500',
-    marginLeft: 8,
+  headerTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
+    color: Palette.text,
+    letterSpacing: -0.2,
+  },
+  countBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,141,50,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,141,50,0.25)',
+  },
+  countBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Palette.accent,
+  },
+  closeBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  list: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 13,
+    gap: 13,
+  },
+  rowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  avatarWrapper: {
+    position: 'relative',
+  },
+  avatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: Palette.surfaceElevated,
+  },
+  organizerDot: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
+    backgroundColor: Palette.accent,
+    borderWidth: 2,
+    borderColor: '#18181e',
+  },
+  info: {
+    flex: 1,
+    gap: 3,
+  },
+  name: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Palette.text,
+    letterSpacing: -0.1,
+  },
+  username: {
+    fontSize: 13,
+    color: Palette.textDim,
+  },
+  roleBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  roleBadgeOrganizer: {
+    backgroundColor: 'rgba(255,141,50,0.12)',
+  },
+  roleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Palette.textDim,
+  },
+  roleTextOrganizer: {
+    color: Palette.accent,
+  },
+  empty: {
+    paddingVertical: 40,
+    alignItems: 'center',
   },
   emptyText: {
-    color: '#999999',
-    textAlign: 'center',
-    paddingVertical: 20,
     fontSize: 14,
+    color: Palette.textFaint,
+    textAlign: 'center',
   },
 });
-

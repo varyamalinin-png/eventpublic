@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useSafeRouter } from '../utils/safeRouter';
 import { EventProfilePost } from '../context/EventsContext';
 import { useEvents } from '../context/EventsContext';
 
@@ -10,7 +10,7 @@ interface MemoryMiniCardProps {
 }
 
 export default function MemoryMiniCard({ post, onPress }: MemoryMiniCardProps) {
-  const router = useRouter();
+  const router = useSafeRouter();
   const { getUserData } = useEvents();
   
   const author = getUserData(post.authorId);
@@ -135,7 +135,7 @@ const styles = StyleSheet.create({
   },
   playIcon: {
     fontSize: 12,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
   },
   musicContainer: {
     width: '100%',
@@ -156,7 +156,7 @@ const styles = StyleSheet.create({
   },
   musicSymbol: {
     fontSize: 16,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
   },
   textContainer: {
     width: '100%',
@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
   },
   textContent: {
     fontSize: 12,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     textAlign: 'center',
     lineHeight: 16,
   },
@@ -183,6 +183,6 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: 'rgba(255,255,255,0.15)',
   },
 });

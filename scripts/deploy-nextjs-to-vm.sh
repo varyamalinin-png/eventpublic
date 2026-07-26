@@ -7,12 +7,12 @@ echo "🚀 Деплой Next.js приложения на VM..."
 
 # Переменные
 VM_USER="ubuntu"
-VM_HOST="89.169.173.152"
+VM_HOST="158.160.67.4"
 VM_PATH="/home/ubuntu/iventapp-nextjs"
-SSH_KEY="~/.ssh/yandex-cloud"
+SSH_KEY="$HOME/.ssh/yandex-cloud"
 SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10"
 
-cd web
+cd client/web
 
 # Собираем приложение
 echo "📦 Собираем Next.js приложение..."
@@ -30,14 +30,27 @@ rsync -avz --delete -e "ssh $SSH_OPTS" \
   --exclude '.git' \
   . ${VM_USER}@${VM_HOST}:${VM_PATH}/
 
+# Копируем статические файлы в standalone директорию ДО установки зависимостей
+echo "📁 Копируем статические файлы..."
+rsync -avz --delete -e "ssh $SSH_OPTS" \
+  .next/static ${VM_USER}@${VM_HOST}:${VM_PATH}/.next/standalone/web/.next/ 2>/dev/null || true
+
+rsync -avz --delete -e "ssh $SSH_OPTS" \
+  public ${VM_USER}@${VM_HOST}:${VM_PATH}/.next/standalone/web/ 2>/dev/null || true
+
 # Устанавливаем зависимости и запускаем на сервере
 echo "🔧 Устанавливаем зависимости и запускаем приложение..."
 ssh $SSH_OPTS ${VM_USER}@${VM_HOST} << 'ENDSSH'
 cd /home/ubuntu/iventapp-nextjs
 npm install --production
+# Убеждаемся, что статические файлы скопированы
+cp -r .next/static .next/standalone/web/.next/ 2>/dev/null || true
+cp -r public .next/standalone/web/ 2>/dev/null || true
+# Проверяем наличие favicon
+ls -la .next/standalone/web/public/favicon.svg || echo "WARNING: favicon.svg not found"
 pm2 stop event-app-web || true
 pm2 delete event-app-web || true
-PORT=3000 pm2 start npm --name "event-app-web" -- start
+PORT=3000 pm2 start node --name "event-app-web" -- .next/standalone/web/server.js
 pm2 save
 ENDSSH
 

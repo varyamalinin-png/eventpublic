@@ -1,10 +1,48 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { Platform } from 'react-native';
 import { apiRequest, ApiError, API_BASE_URL } from '../../services/api';
 import { createLogger } from '../../utils/logger';
 import type { Event, EventProfile, EventProfilePost } from '../../types';
 import type { ServerEventProfile, ServerEventProfilePost, ServerEventRequest } from '../../types/api';
 
 const logger = createLogger('useEventProfiles');
+
+/**
+ * Простой ограничитель параллельности для запросов профилей событий.
+ *
+ * Зачем: на экране ленты одновременно монтируются десятки EventCard, и каждая
+ * карточка сама запрашивает свой профиль (`/events/:id/profile`), если его ещё
+ * нет в контексте. Без ограничения это превращается в одновременный залп из
+ * 40-60 параллельных HTTP-запросов при каждом открытии ленты — браузер и сервер
+ * захлёбываются, и из-за этого вся лента "тормозит" и долго прогружается.
+ *
+ * Решение: пропускаем не более N запросов профилей одновременно, остальные
+ * становятся в очередь и выполняются по мере освобождения слотов. Поведение
+ * и данные не меняются — меняется только то, как быстро/плавно всё это летит.
+ */
+const PROFILE_FETCH_CONCURRENCY = 4;
+const _fetchState = { active: 0, queue: [] as Array<() => void> };
+
+function runWithProfileFetchLimit<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const run = () => {
+      _fetchState.active++;
+      task()
+        .then(resolve, reject)
+        .finally(() => {
+          _fetchState.active--;
+          const next = _fetchState.queue.shift();
+          if (next) next();
+        });
+    };
+
+    if (_fetchState.active < PROFILE_FETCH_CONCURRENCY) {
+      run();
+    } else {
+      _fetchState.queue.push(run);
+    }
+  });
+}
 
 export interface UseEventProfilesParams {
   accessToken: string | null;
@@ -61,11 +99,11 @@ export const useEventProfiles = ({
 
     try {
       logger.info(`Загружаем профиль для события ${eventId}`);
-      const response = await apiRequest(
+      const response = await runWithProfileFetchLimit(() => apiRequest(
         `/events/${eventId}/profile`,
         { method: 'GET' },
         actualToken,
-      ) as ServerEventProfile | null;
+      )) as ServerEventProfile | null;
 
       logger.debug(`Ответ сервера для события ${eventId}:`, response ? 'найден' : 'не найден (null)');
       
@@ -81,19 +119,11 @@ export const useEventProfiles = ({
         const mappedProfile: EventProfile = {
           id: response.id || `profile-${eventId}`,
           eventId,
-<<<<<<< HEAD
-          name: response.name || event?.title || (typeof response.event?.name === 'string' ? response.event.name : '') || '',
-          description: response.description || event?.description || response.event?.description || '',
-          date: response.date || event?.date || response.event?.date || '',
-          time: response.time || event?.time || response.event?.time || '',
-          location: response.location || event?.location || response.event?.location || '',
-=======
           name: (response.name || event?.title || (response.event as any)?.name || '') as string,
           description: (response.description || event?.description || (response.event as any)?.description || '') as string,
           date: (response.date || event?.date || (response.event as any)?.date || '') as string,
           time: (response.time || event?.time || (response.event as any)?.time || '') as string,
           location: (response.location || event?.location || (response.event as any)?.location || '') as string,
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
           participants: (response.participants || []).map((p) => {
             if (typeof p === 'string') return p;
             return p.userId || (p as { user?: { id: string } }).user?.id;
@@ -101,36 +131,31 @@ export const useEventProfiles = ({
           organizerId: (event?.organizerId || response.organizerId || (response.event as any)?.organizerId || '') as string,
           isCompleted: response.isCompleted || false,
           hiddenParameters: (response.hiddenParameters || {}) as Record<string, boolean>,
-          posts: (response.posts || []).map((post: ServerEventProfilePost) => ({
-            id: post.id,
-            eventId,
-<<<<<<< HEAD
-            authorId: post.authorId || post.author?.id || '',
-            content: post.content,
-            photoUrl: normalizeMediaUrl(post.photoUrl),
-            photoUrls: Array.isArray(post.photoUrls) ? post.photoUrls.map((url: any) => normalizeMediaUrl(url)) : undefined,
-            captions: Array.isArray(post.captions) ? post.captions : undefined,
-            caption: post.caption || (Array.isArray(post.captions) && post.captions.length > 0 ? post.captions[0] : undefined),
-            comments: Array.isArray((post as any).comments) ? (post as any).comments.map((comment: any) => ({
-              id: comment.id,
-              postId: comment.postId || post.id,
-              authorId: comment.authorId || comment.author?.id || '',
-              content: comment.content || '',
-              createdAt: comment.createdAt ? new Date(comment.createdAt) : new Date(),
-            })) : undefined,
-=======
-            authorId: (post.authorId || post.author?.id || '') as string,
-            content: post.content,
-            photoUrl: normalizeMediaUrl(post.photoUrl),
-            photoUrls: post.photoUrls && Array.isArray(post.photoUrls) 
-              ? post.photoUrls.map(url => normalizeMediaUrl(url))
-              : undefined,
-            captions: post.captions && Array.isArray(post.captions) 
-              ? post.captions 
-              : undefined,
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
-            createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
-          })),
+          posts: (() => {
+            // Дедупликация постов по ID перед маппингом
+            const postsMap = new Map<string, ServerEventProfilePost>();
+            (response.posts || []).forEach((post: ServerEventProfilePost) => {
+              if (post.id && !postsMap.has(post.id)) {
+                postsMap.set(post.id, post);
+              } else if (post.id) {
+                logger.warn(`Обнаружен дубликат поста с ID ${post.id} в ответе сервера`);
+              }
+            });
+            return Array.from(postsMap.values()).map((post: ServerEventProfilePost) => ({
+              id: post.id,
+              eventId,
+              authorId: (post.authorId || post.author?.id || '') as string,
+              content: post.content,
+              photoUrl: normalizeMediaUrl(post.photoUrl),
+              photoUrls: post.photoUrls && Array.isArray(post.photoUrls) 
+                ? post.photoUrls.map(url => normalizeMediaUrl(url))
+                : undefined,
+              captions: post.captions && Array.isArray(post.captions) 
+                ? post.captions 
+                : undefined,
+              createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
+            }));
+          })(),
           createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
           avatar: normalizeMediaUrl(response.avatar) || normalizeMediaUrl(event?.mediaUrl) || normalizeMediaUrl((response.event as any)?.mediaUrl),
         };
@@ -140,8 +165,29 @@ export const useEventProfiles = ({
         setEventProfiles(prev => {
           const exists = prev.find(p => p.eventId === eventId);
           if (exists) {
-            logger.debug(`Обновляем существующий профиль для события ${eventId}`);
-            return prev.map(p => p.eventId === eventId ? mappedProfile : p);
+            // КРИТИЧЕСКИ ВАЖНО: При обновлении профиля ПОЛНОСТЬЮ ЗАМЕНЯЕМ список постов
+            // Сервер всегда возвращает полный актуальный список постов, поэтому мы должны его использовать
+            // НЕ добавляем посты из локального состояния - это приводит к дублированию
+            
+            // Дополнительная проверка: дедупликация постов по ID перед заменой
+            const postsMap = new Map<string, typeof mappedProfile.posts[0]>();
+            mappedProfile.posts.forEach(post => {
+              if (post.id && !postsMap.has(post.id)) {
+                postsMap.set(post.id, post);
+              } else if (post.id) {
+                logger.warn(`Обнаружен дубликат поста с ID ${post.id} в mappedProfile для события ${eventId}`);
+              }
+            });
+            const deduplicatedPosts = Array.from(postsMap.values());
+            
+            if (deduplicatedPosts.length !== mappedProfile.posts.length) {
+              logger.warn(`Дедупликация постов: было ${mappedProfile.posts.length}, стало ${deduplicatedPosts.length} для события ${eventId}`);
+            }
+            
+            const finalProfile = { ...mappedProfile, posts: deduplicatedPosts };
+            logger.debug(`Обновляем существующий профиль для события ${eventId}, постов было: ${exists.posts.length}, постов стало: ${finalProfile.posts.length}`);
+            // Заменяем весь профиль полностью - используем только данные с сервера
+            return prev.map(p => p.eventId === eventId ? finalProfile : p);
           }
           logger.debug(`Добавляем новый профиль для события ${eventId}, всего профилей: ${prev.length + 1}`);
           return [...prev, mappedProfile];
@@ -240,11 +286,7 @@ export const useEventProfiles = ({
           posts: (response.posts || []).map((post: ServerEventProfilePost) => ({
             id: post.id,
             eventId,
-<<<<<<< HEAD
-            authorId: post.authorId || post.author?.id || '',
-=======
             authorId: (post.authorId || post.author?.id || '') as string,
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
             content: post.content,
             photoUrl: post.photoUrl,
             createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
@@ -287,6 +329,9 @@ export const useEventProfiles = ({
     }
   }, [events, eventProfiles, fetchEventProfile]);
 
+  // Защита от множественных одновременных вызовов для одного поста
+  const addingPosts = useRef<Set<string>>(new Set());
+  
   const addEventProfilePost = useCallback(async (eventId: string, post: Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>) => {
     const actualToken = currentAccessTokenRef.current;
     const actualUserId = currentUserIdRef.current;
@@ -294,6 +339,17 @@ export const useEventProfiles = ({
       logger.warn('Cannot add post: no access');
       return;
     }
+
+    // Создаем уникальный ключ для этого запроса (по eventId + content/photoUrl)
+    const postKey = `${eventId}-${post.content || ''}-${post.photoUrl || ''}-${JSON.stringify(post.photoUrls || [])}`;
+    
+    // Проверяем, не добавляется ли уже такой пост
+    if (addingPosts.current.has(postKey)) {
+      logger.warn(`Пост уже добавляется для ключа ${postKey}, пропускаем дублирующий запрос`);
+      return null;
+    }
+    
+    addingPosts.current.add(postKey);
 
     try {
       // Убеждаемся, что профиль существует перед добавлением поста
@@ -303,20 +359,30 @@ export const useEventProfiles = ({
         await createEventProfile(eventId);
       }
 
-      // Если photoUrl - локальный URI (file://), загружаем через FormData
+      // Если photoUrl - локальный URI (file://) или File объект (веб), загружаем через FormData
       let response: ServerEventProfilePost | null = null;
-      if (post.photoUrl && (post.photoUrl.startsWith('file://') || post.photoUrl.startsWith('content://'))) {
+      const isFileObject = Platform.OS === 'web' && post.photoUrl && typeof post.photoUrl === 'object' && 'name' in (post.photoUrl as any);
+      const isLocalUri = post.photoUrl && typeof post.photoUrl === 'string' && (post.photoUrl.startsWith('file://') || post.photoUrl.startsWith('content://'));
+      
+      if (isFileObject || isLocalUri) {
         // Загружаем фото через FormData
         const formData = new FormData();
-        const filename = post.photoUrl.split('/').pop() || 'photo.jpg';
-        const match = /\.(\w+)$/.exec(filename);
-        const type = match ? `image/${match[1]}` : 'image/jpeg';
         
-        formData.append('file', {
-          uri: post.photoUrl,
-          name: filename,
-          type: type,
-        } as any);
+        if (isFileObject) {
+          // На вебе используем File объект напрямую
+          formData.append('file', post.photoUrl as any);
+        } else if (isLocalUri) {
+          // Для мобильных платформ используем URI
+          const filename = (post.photoUrl as string).split('/').pop() || 'photo.jpg';
+          const match = /\.(\w+)$/.exec(filename);
+          const type = match ? `image/${match[1]}` : 'image/jpeg';
+          
+          formData.append('file', {
+            uri: post.photoUrl,
+            name: filename,
+            type: type,
+          } as any);
+        }
         
         if (post.content) {
           formData.append('content', post.content);
@@ -350,16 +416,6 @@ export const useEventProfiles = ({
         response = await uploadResponse.json() as ServerEventProfilePost;
       } else {
         // Если photoUrl - уже загруженный URL или нет фото, отправляем через JSON
-<<<<<<< HEAD
-        logger.debug('Отправляем запрос на создание поста с каруселью:', {
-          content: post.content,
-          photoUrl: post.photoUrl,
-          photoUrls: post.photoUrls,
-          photoUrlsCount: Array.isArray(post.photoUrls) ? post.photoUrls.length : 0,
-          captions: post.captions,
-          captionsCount: Array.isArray(post.captions) ? post.captions.length : 0,
-        });
-=======
         // ВАЖНО: если есть photoUrls, это карусель - отправляем их вместо photoUrl
         const requestBody: any = {
           content: post.content,
@@ -375,22 +431,12 @@ export const useEventProfiles = ({
           // Одно фото: отправляем photoUrl
           requestBody.photoUrl = post.photoUrl;
         }
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
         
         response = await apiRequest(
           `/events/${eventId}/profile/posts`,
           {
             method: 'POST',
-<<<<<<< HEAD
-            body: JSON.stringify({
-              content: post.content,
-              photoUrl: post.photoUrl,
-              photoUrls: post.photoUrls,
-              captions: post.captions,
-            }),
-=======
             body: JSON.stringify(requestBody),
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
           },
           actualToken,
         ) as ServerEventProfilePost | null;
@@ -424,21 +470,6 @@ export const useEventProfiles = ({
         const newPost: EventProfilePost = {
           id: response.id,
           eventId,
-<<<<<<< HEAD
-          authorId: response.authorId || response.author?.id || currentUserId || '',
-          content: response.content,
-          photoUrl: normalizeMediaUrl(response.photoUrl),
-          photoUrls: Array.isArray(response.photoUrls) ? response.photoUrls.map((url: any) => normalizeMediaUrl(url)) : undefined,
-          captions: Array.isArray(response.captions) ? response.captions : undefined,
-          caption: response.caption || (Array.isArray(response.captions) && response.captions.length > 0 ? response.captions[0] : undefined),
-          comments: Array.isArray((response as any).comments) ? (response as any).comments.map((comment: any) => ({
-            id: comment.id,
-            postId: comment.postId || response.id,
-            authorId: comment.authorId || comment.author?.id || '',
-            content: comment.content || '',
-            createdAt: comment.createdAt ? new Date(comment.createdAt) : new Date(),
-          })) : undefined,
-=======
           authorId: (response.authorId || response.author?.id || currentUserId || '') as string,
           content: response.content,
           photoUrl: normalizeMediaUrl(response.photoUrl),
@@ -449,7 +480,6 @@ export const useEventProfiles = ({
           captions: response.captions && Array.isArray(response.captions) 
             ? response.captions 
             : undefined,
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
           createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
         };
         
@@ -460,15 +490,42 @@ export const useEventProfiles = ({
           photoUrlsLength: Array.isArray(newPost.photoUrls) ? newPost.photoUrls.length : 0,
         });
 
-        setEventProfiles(prev => prev.map(profile => 
-          profile.eventId === eventId 
-            ? { ...profile, posts: [newPost, ...profile.posts] }
-            : profile
-        ));
+        setEventProfiles(prev => {
+          // КРИТИЧЕСКИ ВАЖНО: Дедупликация перед добавлением поста
+          // Сначала дедуплицируем все существующие посты
+          const existingProfile = prev.find(p => p.eventId === eventId);
+          if (existingProfile) {
+            const existingPostsMap = new Map<string, typeof existingProfile.posts[0]>();
+            existingProfile.posts.forEach(post => {
+              if (post.id && !existingPostsMap.has(post.id)) {
+                existingPostsMap.set(post.id, post);
+              }
+            });
+            const deduplicatedExistingPosts = Array.from(existingPostsMap.values());
+            
+            // Проверяем, нет ли уже такого поста (по ID)
+            const postExists = deduplicatedExistingPosts.some(p => p.id === newPost.id);
+            if (postExists) {
+              logger.warn(`Пост ${newPost.id} уже существует в профиле ${eventId}, пропускаем добавление. Всего постов: ${deduplicatedExistingPosts.length}`);
+              // Если были дубликаты, обновляем профиль с дедуплицированными постами
+              if (deduplicatedExistingPosts.length !== existingProfile.posts.length) {
+                logger.warn(`Обнаружены дубликаты в профиле ${eventId}: было ${existingProfile.posts.length}, стало ${deduplicatedExistingPosts.length}`);
+                return prev.map(p => p.eventId === eventId ? { ...p, posts: deduplicatedExistingPosts } : p);
+              }
+              return prev;
+            }
+            
+            logger.debug(`Добавляем новый пост ${newPost.id} в профиль ${eventId}, постов было: ${deduplicatedExistingPosts.length}`);
+            return prev.map(p => p.eventId === eventId ? { ...p, posts: [newPost, ...deduplicatedExistingPosts] } : p);
+          }
+          return prev;
+        });
         
+        addingPosts.current.delete(postKey);
         return newPost;
       }
       
+      addingPosts.current.delete(postKey);
       return null;
     } catch (error) {
       if (error instanceof ApiError) {
@@ -538,16 +595,7 @@ export const useEventProfiles = ({
                 `/events/${eventId}/profile/posts`,
                 {
                   method: 'POST',
-<<<<<<< HEAD
-                  body: JSON.stringify({
-                    content: post.content,
-                    photoUrl: post.photoUrl,
-                    photoUrls: post.photoUrls,
-                    captions: post.captions,
-                  }),
-=======
                   body: JSON.stringify(requestBody),
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
                 },
                 actualToken,
               );
@@ -558,21 +606,6 @@ export const useEventProfiles = ({
               const newPost: EventProfilePost = {
                 id: response.id,
                 eventId,
-<<<<<<< HEAD
-                authorId: response.authorId || response.author?.id || currentUserId || '',
-                content: response.content,
-                photoUrl: normalizeMediaUrl(response.photoUrl),
-                photoUrls: Array.isArray(response.photoUrls) ? response.photoUrls.map((url: any) => normalizeMediaUrl(url)) : undefined,
-                captions: Array.isArray(response.captions) ? response.captions : undefined,
-                caption: response.caption || (Array.isArray(response.captions) && response.captions.length > 0 ? response.captions[0] : undefined),
-                comments: Array.isArray((response as any).comments) ? (response as any).comments.map((comment: any) => ({
-                  id: comment.id,
-                  postId: comment.postId || response.id,
-                  authorId: comment.authorId || comment.author?.id || '',
-                  content: comment.content || '',
-                  createdAt: comment.createdAt ? new Date(comment.createdAt) : new Date(),
-                })) : undefined,
-=======
                 authorId: (response.authorId || response.author?.id || currentUserId || '') as string,
                 content: response.content,
                 photoUrl: normalizeMediaUrl(response.photoUrl),
@@ -583,23 +616,36 @@ export const useEventProfiles = ({
                 captions: response.captions && Array.isArray(response.captions) 
                   ? response.captions 
                   : undefined,
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
                 createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
               };
-              setEventProfiles(prev => prev.map(profile => 
-                profile.eventId === eventId 
-                  ? { ...profile, posts: [newPost, ...profile.posts] }
-                  : profile
-              ));
-<<<<<<< HEAD
-              return newPost;
-            }
-            return null;
-          } catch (retryError) {
-            logger.error('Failed to add event profile post after profile creation', retryError);
-            return null;
-=======
-              
+              setEventProfiles(prev => {
+                // КРИТИЧЕСКИ ВАЖНО: Дедупликация перед добавлением поста (retry)
+                const existingProfile = prev.find(p => p.eventId === eventId);
+                if (existingProfile) {
+                  const existingPostsMap = new Map<string, typeof existingProfile.posts[0]>();
+                  existingProfile.posts.forEach(post => {
+                    if (post.id && !existingPostsMap.has(post.id)) {
+                      existingPostsMap.set(post.id, post);
+                    }
+                  });
+                  const deduplicatedExistingPosts = Array.from(existingPostsMap.values());
+                  
+                  const postExists = deduplicatedExistingPosts.some(p => p.id === newPost.id);
+                  if (postExists) {
+                    logger.warn(`Пост ${newPost.id} уже существует в профиле ${eventId} (retry), пропускаем добавление. Всего постов: ${deduplicatedExistingPosts.length}`);
+                    if (deduplicatedExistingPosts.length !== existingProfile.posts.length) {
+                      logger.warn(`Обнаружены дубликаты в профиле ${eventId} (retry): было ${existingProfile.posts.length}, стало ${deduplicatedExistingPosts.length}`);
+                      return prev.map(p => p.eventId === eventId ? { ...p, posts: deduplicatedExistingPosts } : p);
+                    }
+                    return prev;
+                  }
+                  
+                  logger.debug(`Добавляем новый пост ${newPost.id} в профиль ${eventId} (retry), постов было: ${deduplicatedExistingPosts.length}`);
+                  return prev.map(p => p.eventId === eventId ? { ...p, posts: [newPost, ...deduplicatedExistingPosts] } : p);
+                }
+                return prev;
+              });
+              addingPosts.current.delete(postKey);
               return newPost;
             }
             
@@ -608,28 +654,24 @@ export const useEventProfiles = ({
             logger.error('Failed to add event profile post after profile creation', retryError);
             // Пробрасываем ошибку дальше
             throw retryError;
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
           }
         } else {
           // Другие ошибки ApiError (не 404)
           logger.error('Failed to add event profile post', error.status, error.message);
-<<<<<<< HEAD
-          return null;
-=======
+          addingPosts.current.delete(postKey);
           // Пробрасываем ошибку дальше для обработки в вызывающем коде
           throw error;
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
         }
       } else {
         // Ошибки, которые не являются ApiError
         logger.error('Failed to add event profile post', error);
-<<<<<<< HEAD
-        return null;
-=======
+        addingPosts.current.delete(postKey);
         // Пробрасываем ошибку дальше
         throw error;
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
       }
+    } finally {
+      // Удаляем ключ в любом случае, даже если произошла ошибка
+      addingPosts.current.delete(postKey);
     }
   }, [eventProfiles, createEventProfile, normalizeMediaUrl, currentUserId]);
 
@@ -669,15 +711,6 @@ export const useEventProfiles = ({
           id: response.id || `profile-${eventId}`,
           eventId,
           name: response.name || updates.name || '',
-<<<<<<< HEAD
-          description: (response.description ?? updates.description) || '',
-          date: response.date || updates.date || '',
-          time: response.time || updates.time || '',
-          location: (response.location ?? updates.location) || '',
-          participants: (response.participants || []).map((p: any) => p.userId || p.user?.id).filter(Boolean),
-          organizerId: updates.organizerId || '',
-          isCompleted: response.isCompleted ?? updates.isCompleted ?? false,
-=======
           description: ((response.description ?? updates.description) || '') as string,
           date: response.date || updates.date || '',
           time: response.time || updates.time || '',
@@ -685,16 +718,11 @@ export const useEventProfiles = ({
           participants: (response.participants || []).map((p: any) => p.userId || p.user?.id).filter(Boolean),
           organizerId: updates.organizerId || '',
           isCompleted: (response.isCompleted ?? updates.isCompleted) ?? false,
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
           hiddenParameters: (response.hiddenParameters || updates.hiddenParameters || {}) as Record<string, boolean>,
           posts: (response.posts || []).map((post: any) => ({
             id: post.id,
             eventId,
-<<<<<<< HEAD
-            authorId: post.authorId || post.author?.id || '',
-=======
             authorId: (post.authorId || post.author?.id || '') as string,
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
             content: post.content,
             photoUrl: normalizeMediaUrl(post.photoUrl),
             createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
@@ -727,28 +755,17 @@ export const useEventProfiles = ({
                 id: response.id || `profile-${eventId}`,
                 eventId,
                 name: response.name || updates.name || '',
-<<<<<<< HEAD
-                description: (response.description ?? updates.description) || '',
-                date: response.date || updates.date || '',
-                time: response.time || updates.time || '',
-                location: (response.location ?? updates.location) || '',
-=======
                 description: ((response.description ?? updates.description) || '') as string,
                 date: response.date || updates.date || '',
                 time: response.time || updates.time || '',
                 location: ((response.location ?? updates.location) || '') as string,
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
                 participants: (response.participants || []).map((p: any) => p.userId || p.user?.id).filter(Boolean),
                 organizerId: updates.organizerId || '',
                 isCompleted: (response.isCompleted ?? updates.isCompleted) ?? false,
                 posts: (response.posts || []).map((post: any) => ({
                   id: post.id,
                   eventId,
-<<<<<<< HEAD
-                  authorId: post.authorId || post.author?.id || '',
-=======
                   authorId: (post.authorId || post.author?.id || '') as string,
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
                   content: post.content,
                   photoUrl: normalizeMediaUrl(post.photoUrl),
                   createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
@@ -875,29 +892,28 @@ export const useEventProfiles = ({
       );
 
       // Удаляем пост из локального состояния
-      setEventProfiles(prev => prev.map(profile => 
-        profile.eventId === eventId 
-          ? { 
-              ...profile, 
-              posts: profile.posts.filter(post => post.id !== postId)
-            }
-          : profile
-      ));
+      setEventProfiles(prev => prev.map(profile => {
+        if (profile.eventId === eventId) {
+          const filteredPosts = profile.posts.filter(post => post.id !== postId);
+          logger.debug(`Удален пост ${postId} из профиля ${eventId}, постов было: ${profile.posts.length}, стало: ${filteredPosts.length}`);
+          return { 
+            ...profile, 
+            posts: filteredPosts
+          };
+        }
+        return profile;
+      }));
 
       // Также удаляем из сохраненных, если был сохранен
       if (removeSavedMemoryPost) {
         removeSavedMemoryPost(eventId, postId);
       }
 
-      // КРИТИЧЕСКИ ВАЖНО: Обновляем профиль события с сервера, чтобы все пользователи увидели удаление
-      // Это гарантирует, что удаление будет видно для всех участников события
-      try {
-        await fetchEventProfile(eventId);
-        logger.debug('Event profile refreshed after post deletion');
-      } catch (refreshError) {
-        logger.warn('Failed to refresh event profile after post deletion:', refreshError);
-        // Не пробрасываем ошибку, так как пост уже удален локально
-      }
+      // КРИТИЧЕСКИ ВАЖНО: НЕ вызываем fetchEventProfile после удаления поста
+      // Это может привести к дублированию постов из-за race condition
+      // Удаление уже обработано локально через setEventProfiles
+      // Для синхронизации с другими пользователями используется WebSocket
+      logger.debug('Post deleted locally, WebSocket will sync with other users');
     } catch (error) {
       logger.error('Failed to delete event profile post', error);
       throw error;

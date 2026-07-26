@@ -1,13 +1,20 @@
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import EventCard from '../components/EventCard';
 import { useEvents, Event } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
 
+function isMemberOfEvent(event: Event, userId: string, eventProfiles: { eventId: string; participants: string[] }[], isUserOrganizer: (e: Event, u: string) => boolean, isUserEventMember: (e: Event, u: string) => boolean, isEventPast: (e: Event) => boolean): boolean {
+  if (!isEventPast(event)) return isUserEventMember(event, userId);
+  if (isUserOrganizer(event, userId)) return true;
+  const profile = eventProfiles.find(p => p.eventId === event.id);
+  return profile ? profile.participants.includes(userId) : false;
+}
+
 export default function MyEventsScreen() {
   const { eventId } = useLocalSearchParams();
-  const { events, isUserOrganizer, isUserEventMember } = useEvents();
+  const { events, eventProfiles, isUserOrganizer, isUserEventMember, isEventPast } = useEvents();
   const { user: authUser } = useAuth();
   const [showEventFeed, setShowEventFeed] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
@@ -25,21 +32,22 @@ export default function MyEventsScreen() {
     );
   }
   
+  const isMember = useMemo(() => (event: Event) => isMemberOfEvent(event, currentUserId, eventProfiles, isUserOrganizer, isUserEventMember, isEventPast), [currentUserId, eventProfiles, isUserOrganizer, isUserEventMember, isEventPast]);
+
   // Получаем события, организованные пользователем
   const organizedEvents = events.filter(event => isUserOrganizer(event, currentUserId));
   
-  // Получаем события, в которых участвует пользователь
+  // Получаем события, в которых участвует пользователь (для прошедших — по profile.participants)
   const participatedEvents = events.filter(
-    event => isUserEventMember(event, currentUserId) && !isUserOrganizer(event, currentUserId),
+    event => isMember(event) && !isUserOrganizer(event, currentUserId),
   );
   
-  // Получаем архивные события
+  // Получаем архивные события (прошедшие/архивные; членство по тому же принципу)
   const archivedEvents = events.filter(event => {
     const isArchived = event.title.toLowerCase().includes('архив') || 
                       event.date.includes('прошло') ||
                       event.date.includes('завершено');
-    const isUserEvent = isUserOrganizer(event, currentUserId) || isUserEventMember(event, currentUserId);
-    return isArchived && isUserEvent;
+    return isArchived && isMember(event);
   }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   // Все события пользователя для ленты
@@ -147,7 +155,7 @@ export default function MyEventsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   centered: {
     justifyContent: 'center',
@@ -157,7 +165,7 @@ const styles = StyleSheet.create({
   loginPromptTitle: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     marginBottom: 12,
     textAlign: 'center',
   },
@@ -171,7 +179,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   backText: {
     color: '#0066CC',
@@ -193,7 +201,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: '#f4f4f5',
     textAlign: 'center',
     marginTop: 100,
   },

@@ -1,11 +1,12 @@
 import { useCallback, useRef, useEffect } from 'react';
+import { Platform } from 'react-native';
 import { apiRequest, ApiError, API_BASE_URL } from '../../services/api';
 import type { Event, EventProfile, EventRequest, Chat } from '../../types';
 import type { CreateEventInput } from '../../context/EventsContext';
 import type { ServerUser, ServerEvent } from '../../types/api';
 import { createLogger } from '../../utils/logger';
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const logger = createLogger('EventActions');
 
@@ -28,6 +29,7 @@ export interface UseEventActionsParams {
   refreshPendingJoinRequests: (eventsSnapshot?: Event[]) => Promise<void>;
   syncEventsFromServer: () => Promise<void>;
   getEventParticipants: (eventId: string) => string[];
+  markEventAsDeleted?: (eventId: string) => void; // Функция для пометки события как удаленного
   events: Event[];
   eventProfiles: EventProfile[];
   language: string;
@@ -60,6 +62,7 @@ export function useEventActions({
   refreshPendingJoinRequests,
   syncEventsFromServer,
   getEventParticipants,
+  markEventAsDeleted,
   events,
   eventProfiles,
   language,
@@ -89,10 +92,16 @@ export function useEventActions({
       }
 
       try {
-        const start = new Date(`${input.date}T${input.time}:00`);
+        // КРИТИЧЕСКИ ВАЖНО: Создаем дату в локальном часовом поясе, а не UTC
+        // input.date - это строка в формате YYYY-MM-DD
+        // input.time - это строка в формате HH:MM (локальное время)
+        // Создаем Date объект, который интерпретирует время как локальное, а не UTC
+        const [year, month, day] = input.date.split('-').map(Number);
+        const [hours, minutes] = input.time.split(':').map(Number);
+        const start = new Date(year, month - 1, day, hours, minutes || 0, 0, 0);
         const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
 
-        // Upload media file if it's a local URI
+        // Upload media file if it's a local URI or File object (for web)
         let finalMediaUrl = input.mediaUrl;
         let finalOriginalMediaUrl = input.originalMediaUrl;
         
@@ -103,14 +112,19 @@ export function useEventActions({
         logger.debug('isHttpUrl(mediaUrl):', isHttpUrl(input.mediaUrl));
         logger.debug('isHttpUrl(originalMediaUrl):', isHttpUrl(input.originalMediaUrl));
         
-        // Загружаем обрезанное фото (mediaUrl)
-        if (input.mediaUrl && !isHttpUrl(input.mediaUrl)) {
+        // КРИТИЧЕСКИ ВАЖНО: На вебе файл уже должен быть загружен в create.tsx
+        // Если это HTTP URL на вебе - используем его
+        // Если это data URL на вебе - пропускаем загрузку (она уже была в create.tsx)
+        
+        // Загружаем обрезанное фото (mediaUrl) для мобильного приложения
+        if (input.mediaUrl && !isHttpUrl(input.mediaUrl) && Platform.OS !== 'web') {
           logger.info('📤 Начинаем загрузку локального медиа (mediaUrl)...');
           try {
             let imageUri = input.mediaUrl;
             
             // Сжимаем изображение перед загрузкой, если это изображение
-            if (input.mediaType === 'image') {
+            // КРИТИЧЕСКИ ВАЖНО: Проверяем доступность ImageManipulator и FileSystem перед использованием
+            if (input.mediaType === 'image' && ImageManipulator && FileSystem && typeof ImageManipulator.manipulateAsync === 'function') {
               try {
                 // Проверяем размер файла
                 const fileInfo = await FileSystem.getInfoAsync(input.mediaUrl);
@@ -195,21 +209,43 @@ export function useEventActions({
               }
             }
             
+            // КРИТИЧЕСКИ ВАЖНО: Проверяем, что файл существует перед загрузкой
+            try {
+              const finalFileInfo = await FileSystem.getInfoAsync(imageUri);
+              if (!finalFileInfo.exists) {
+                logger.error('❌ Файл не существует по пути:', imageUri);
+                throw new Error('File not found');
+              }
+              logger.debug('✅ Файл существует, размер:', finalFileInfo.size, 'байт');
+            } catch (fileCheckError: any) {
+              logger.error('❌ Ошибка проверки файла:', fileCheckError?.message || fileCheckError);
+              throw new Error(`File check failed: ${fileCheckError?.message || 'Unknown error'}`);
+            }
+
             const formData = new FormData();
             const fileName = imageUri.split('/').pop() || 'image.jpg';
             const fileType = input.mediaType === 'video' ? 'video/mp4' : 'image/jpeg';
             
+            // КРИТИЧЕСКИ ВАЖНО: В React Native FormData принимает объект с uri, name, type
+            // uri должен быть абсолютным путем к файлу (file://...)
             formData.append('file', {
               uri: imageUri,
               name: fileName,
               type: fileType,
             } as any);
 
-            logger.debug('📤 Загрузка медиа события:', { fileName, fileType, uri: input.mediaUrl });
+            logger.debug('📤 Загрузка медиа события:', { 
+              fileName, 
+              fileType, 
+              uri: imageUri,
+              originalUri: input.mediaUrl 
+            });
+            
             const uploadResponse = await fetch(`${API_BASE_URL}/events/media`, {
               method: 'POST',
               headers: {
                 Authorization: `Bearer ${actualToken}`,
+                // НЕ устанавливаем Content-Type - React Native сделает это автоматически для FormData
               },
               body: formData,
             });
@@ -258,19 +294,59 @@ export function useEventActions({
             }
           } catch (uploadError: any) {
             logger.error('❌ Исключение при загрузке медиа:', uploadError?.message || uploadError);
-            finalMediaUrl = undefined;
+            
+            // КРИТИЧЕСКИ ВАЖНО: Добавляем retry при "Network request failed"
+            if (uploadError?.message === 'Network request failed' || uploadError?.message?.includes('Network')) {
+              logger.warn('⚠️ Network request failed, attempting retry in 2 seconds...');
+              try {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Повторная попытка загрузки
+                const retryFormData = new FormData();
+                retryFormData.append('file', {
+                  uri: imageUri,
+                  name: fileName,
+                  type: fileType,
+                } as any);
+                
+                const retryUploadResponse = await fetch(`${API_BASE_URL}/events/media`, {
+                  method: 'POST',
+                  headers: {
+                    Authorization: `Bearer ${actualToken}`,
+                  },
+                  body: retryFormData,
+                });
+                
+                if (retryUploadResponse.ok) {
+                  const retryData = await retryUploadResponse.json();
+                  finalMediaUrl = retryData.url || retryData.mediaUrl || retryData.publicUrl;
+                  logger.info('✅ Медиа загружено успешно после retry:', finalMediaUrl);
+                } else {
+                  const retryText = await retryUploadResponse.text();
+                  logger.error('❌ Ошибка повторной загрузки медиа после retry:', retryUploadResponse.status, retryText);
+                  finalMediaUrl = undefined;
+                }
+              } catch (retryError: any) {
+                logger.error('❌ Ошибка при retry загрузки медиа:', retryError?.message || retryError);
+                finalMediaUrl = undefined;
+              }
+            } else {
+              finalMediaUrl = undefined;
+            }
           }
         }
 
         // Загружаем оригинальное фото (originalMediaUrl)
-        if (input.originalMediaUrl && !isHttpUrl(input.originalMediaUrl)) {
+        // КРИТИЧЕСКИ ВАЖНО: На вебе файл уже должен быть загружен в create.tsx
+        // Если это data URL на вебе - пропускаем загрузку здесь (она уже была в create.tsx)
+        if (input.originalMediaUrl && !isHttpUrl(input.originalMediaUrl) && Platform.OS !== 'web') {
           logger.info('📤 Начинаем загрузку локального медиа (originalMediaUrl)...');
           try {
             let imageUri = input.originalMediaUrl;
             
             // Сжимаем изображение перед загрузкой, если это изображение
-            // КРИТИЧЕСКИ ВАЖНО: Агрессивное сжатие для избежания ошибки 413 Request Entity Too Large
-            if (input.mediaType === 'image') {
+            // КРИТИЧЕСКИ ВАЖНО: Проверяем доступность ImageManipulator и FileSystem перед использованием
+            if (input.mediaType === 'image' && ImageManipulator && FileSystem && typeof ImageManipulator.manipulateAsync === 'function') {
               try {
                 // Проверяем размер файла
                 const fileInfo = await FileSystem.getInfoAsync(input.originalMediaUrl);
@@ -374,21 +450,43 @@ export function useEventActions({
               }
             }
             
+            // КРИТИЧЕСКИ ВАЖНО: Проверяем, что файл существует перед загрузкой
+            try {
+              const finalFileInfo = await FileSystem.getInfoAsync(imageUri);
+              if (!finalFileInfo.exists) {
+                logger.error('❌ Файл не существует по пути:', imageUri);
+                throw new Error('File not found');
+              }
+              logger.debug('✅ Файл существует, размер:', finalFileInfo.size, 'байт');
+            } catch (fileCheckError: any) {
+              logger.error('❌ Ошибка проверки файла:', fileCheckError?.message || fileCheckError);
+              throw new Error(`File check failed: ${fileCheckError?.message || 'Unknown error'}`);
+            }
+
             const formData = new FormData();
             const fileName = imageUri.split('/').pop() || 'image.jpg';
             const fileType = input.mediaType === 'video' ? 'video/mp4' : 'image/jpeg';
             
+            // КРИТИЧЕСКИ ВАЖНО: В React Native FormData принимает объект с uri, name, type
+            // uri должен быть абсолютным путем к файлу (file://...)
             formData.append('file', {
               uri: imageUri,
               name: fileName,
               type: fileType,
             } as any);
 
-            logger.debug('📤 Загрузка оригинального медиа события:', { fileName, fileType, uri: input.originalMediaUrl });
+            logger.debug('📤 Загрузка оригинального медиа события:', { 
+              fileName, 
+              fileType, 
+              uri: imageUri, 
+              originalUri: input.originalMediaUrl 
+            });
+            
             const uploadResponse = await fetch(`${API_BASE_URL}/events/media`, {
               method: 'POST',
               headers: {
                 Authorization: `Bearer ${actualToken}`,
+                // НЕ устанавливаем Content-Type - React Native сделает это автоматически для FormData
               },
               body: formData,
             });
@@ -436,7 +534,15 @@ export function useEventActions({
               }
             }
           } catch (uploadError: any) {
-            logger.error('❌ Исключение при загрузке оригинального медиа:', uploadError?.message || uploadError);
+            const errorMessage = uploadError?.message || String(uploadError);
+            logger.error('❌ Исключение при загрузке оригинального медиа:', errorMessage);
+            
+            // Если это "Network request failed", это может быть проблема с доступом к серверу
+            if (errorMessage.includes('Network request failed') || errorMessage.includes('network')) {
+              logger.error('❌ Сетевая ошибка при загрузке медиа - проверьте доступность сервера:', API_BASE_URL);
+              logger.error('❌ Возможные причины: сервер недоступен, проблемы с сетью, неправильный URL файла');
+            }
+            
             finalOriginalMediaUrl = undefined;
           }
         }
@@ -526,11 +632,18 @@ export function useEventActions({
         }
 
         // Поле для массового события - КРИТИЧЕСКИ ВАЖНО
-        if (input.isMassEvent !== undefined) {
-          payload.isMassEvent = input.isMassEvent;
+        // Отправляем только если значение явно установлено (true или false), но не undefined или null
+        if (input.isMassEvent !== undefined && input.isMassEvent !== null) {
+          payload.isMassEvent = Boolean(input.isMassEvent);
         }
 
         logger.debug('Creating event with payload:', JSON.stringify(payload, null, 2));
+        logger.info('📤 Отправка запроса POST /events на сервер...', {
+          hasTitle: !!payload.title,
+          hasMediaUrl: !!payload.mediaUrl,
+          hasOriginalMediaUrl: !!payload.originalMediaUrl,
+          tokenPresent: !!actualToken
+        });
 
         // Выполняем запрос с обработкой ошибки 401 (автоматическое обновление токена)
         let response;
@@ -543,6 +656,7 @@ export function useEventActions({
             },
             actualToken,
           );
+          logger.info('✅ Получен ответ от сервера при создании события:', { hasResponse: !!response, eventId: response?.id });
         } catch (error) {
           if (error instanceof ApiError && error.status === 401 && refreshToken && refreshToken.trim() !== '') {
             logger.debug('Token expired, refreshing and retrying...');
@@ -572,6 +686,11 @@ export function useEventActions({
               throw error;
             }
           } else {
+            logger.error('❌ Ошибка при создании события:', {
+              error: error instanceof Error ? error.message : String(error),
+              status: error instanceof ApiError ? error.status : 'unknown',
+              response: error instanceof ApiError ? error.response : undefined
+            });
             throw error;
           }
         }
@@ -637,7 +756,22 @@ export function useEventActions({
         mapped.coordinates = input.coordinates;
         mapped.invitedUsers = input.invitedUsers;
 
-        setEvents(prev => [mapped, ...prev.filter(event => event.id !== mapped.id)]);
+        // КРИТИЧЕСКИ ВАЖНО: Удаляем preview-event-temp и временные события ПЕРЕД добавлением нового события
+        // Это предотвращает дублирование - если событие уже есть (например, через syncEventsFromServer), заменяем его
+        setEvents(prev => {
+          const filtered = prev.filter(event => 
+            !event.id.includes('-temp') && 
+            !event.id.startsWith('preview-')
+          );
+          // Если событие с таким ID уже есть - заменяем его, иначе добавляем в начало
+          const existingIndex = filtered.findIndex(e => e.id === mapped.id);
+          if (existingIndex >= 0) {
+            const updated = [...filtered];
+            updated[existingIndex] = mapped;
+            return updated;
+          }
+          return [mapped, ...filtered];
+        });
 
         setEventProfiles(prev => {
           const existing = prev.find(p => p.eventId === mapped.id);
@@ -669,6 +803,37 @@ export function useEventActions({
           logger.warn('Failed to refresh invitations after event creation', error);
         }
 
+        // КРИТИЧЕСКИ ВАЖНО: После создания события синхронизируем с сервером, чтобы убедиться, что событие сохранено
+        // НО: на вебе нужно дождаться завершения синхронизации перед тем, как компонент размонтируется
+        try {
+          if (syncEventsFromServer) {
+            logger.info('🔄 Syncing events from server after event creation...');
+            const syncPromise = syncEventsFromServer();
+            
+            // На вебе ждем завершения синхронизации с таймаутом
+            if (typeof window !== 'undefined') {
+              try {
+                await Promise.race([
+                  syncPromise,
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('Sync timeout')), 10000))
+                ]);
+                logger.info('✅ Events synced successfully after event creation');
+              } catch (syncError) {
+                logger.warn('⚠️ Sync timeout or error after event creation, but event was created on server', syncError);
+                // Все равно продолжаем, так как событие уже создано на сервере
+              }
+            } else {
+              // На мобильных просто ждем
+              await syncPromise;
+              logger.info('✅ Events synced successfully after event creation');
+            }
+          }
+        } catch (error) {
+          logger.warn('⚠️ Failed to sync events after event creation', error);
+          // Не бросаем ошибку, так как событие уже добавлено в локальное состояние
+          // И событие уже создано на сервере (видно по 201 статусу)
+        }
+
         return mapped;
       } catch (error) {
         logger.error('Failed to create event', error);
@@ -687,6 +852,7 @@ export function useEventActions({
       setEvents,
       setEventProfiles,
       refreshPendingJoinRequests,
+      syncEventsFromServer,
     ],
   );
 
@@ -743,7 +909,10 @@ export function useEventActions({
       if (updates.maxParticipants) updateData.maxParticipants = updates.maxParticipants;
       if (updates.mediaUrl) updateData.mediaUrl = updates.mediaUrl;
       if (updates.date && updates.time) {
-        const start = new Date(`${updates.date}T${updates.time}:00`);
+        // КРИТИЧЕСКИ ВАЖНО: Создаем дату в локальном часовом поясе, а не UTC
+        const [year, month, day] = updates.date.split('-').map(Number);
+        const [hours, minutes] = updates.time.split(':').map(Number);
+        const start = new Date(year, month - 1, day, hours, minutes || 0, 0, 0);
         updateData.startTime = start.toISOString();
         updateData.endTime = new Date(start.getTime() + 2 * 60 * 60 * 1000).toISOString();
       }
@@ -814,7 +983,10 @@ export function useEventActions({
       isPastEvent = isEventPast(eventToDelete);
     } else if (eventToDelete) {
       // Fallback: проверяем вручную
-      const eventDate = new Date(`${eventToDelete.date}T${eventToDelete.time}:00`);
+      // КРИТИЧЕСКИ ВАЖНО: Создаем дату в локальном часовом поясе
+      const [year, month, day] = eventToDelete.date.split('-').map(Number);
+      const [hours, minutes] = eventToDelete.time.split(':').map(Number);
+      const eventDate = new Date(year, month - 1, day, hours, minutes || 0, 0, 0);
       isPastEvent = new Date().getTime() > eventDate.getTime();
     }
     
@@ -823,20 +995,40 @@ export function useEventActions({
     const actualToken = currentAccessTokenRef.current;
     const actualUserId = currentUserIdRef.current;
     
-    // ЕДИНАЯ ЛОГИКА: Всегда вызываем сервер для удаления участия
+    // КРИТИЧЕСКИ ВАЖНО: Проверяем, является ли пользователь организатором
+    // Если да - вызываем полное удаление события, если нет - удаление участия
+    const isOrganizer = eventToDelete?.organizerId === actualUserId;
+    
     let serverSuccess = false;
     let eventDeleted = false;
     
     if (actualToken && actualUserId) {
       try {
-        const response = await apiRequest(`/events/${id}/participation`, { method: 'DELETE' }, actualToken);
-        logger.info(`✅ Участие удалено на сервере для события ${id}`, response);
-        serverSuccess = true;
+        // КРИТИЧЕСКИ ВАЖНО: Проверка на временные события - не делаем запрос к серверу
+        if (id.includes('-temp') || id.startsWith('preview-')) {
+          logger.debug('Temporary event, skipping deletion on server:', id);
+          return;
+        }
         
-        // Проверяем, было ли событие полностью удалено (последний участник)
-        if (response?.eventDeleted) {
-          logger.info(`✅ Событие полностью удалено с сервера (был последний участник)`);
+        // Если пользователь организатор - вызываем полное удаление события
+        if (isOrganizer) {
+          logger.info(`Пользователь является организатором - вызываем полное удаление события`);
+          await apiRequest(`/events/${id}`, { method: 'DELETE' }, actualToken);
+          logger.info(`✅ Событие полностью удалено с сервера (организатор)`);
+          serverSuccess = true;
           eventDeleted = true;
+        } else {
+          // Если не организатор - вызываем удаление участия
+          logger.info(`Пользователь не является организатором - вызываем удаление участия`);
+          const response = await apiRequest(`/events/${id}/participation`, { method: 'DELETE' }, actualToken);
+          logger.info(`✅ Участие удалено на сервере для события ${id}`, response);
+          serverSuccess = true;
+          
+          // Проверяем, было ли событие полностью удалено (последний участник)
+          if (response?.eventDeleted) {
+            logger.info(`✅ Событие полностью удалено с сервера (был последний участник)`);
+            eventDeleted = true;
+          }
         }
       } catch (error) {
         // Обрабатываем ошибки удаления
@@ -847,8 +1039,17 @@ export function useEventActions({
             serverSuccess = true;
             eventDeleted = true;
           } 
-          // Для прошедших событий ошибка "Membership not found" может быть нормальной
-          else if (error.status === 400 && error.message?.includes('Membership not found')) {
+          // Для организатора ошибка "Only organizer can delete event" означает, что событие уже удалено или нет прав
+          else if (error.status === 403 && error.message?.includes('Only organizer can delete event')) {
+            logger.warn(`⚠️ Нет прав на удаление события ${id} (возможно, уже удалено)`);
+            // Если пользователь организатор по локальным данным, но сервер говорит, что нет прав - событие уже удалено
+            if (isOrganizer) {
+              serverSuccess = true;
+              eventDeleted = true;
+            }
+          }
+          // Для прошедших событий ошибка "Membership not found" может быть нормальной (только для не-организаторов)
+          else if (error.status === 400 && error.message?.includes('Membership not found') && !isOrganizer) {
             logger.warn(`⚠️ Membership not found на сервере для события ${id}, проверяем профиль...`);
             if (fetchEventProfile && isPastEvent) {
               try {
@@ -876,9 +1077,21 @@ export function useEventActions({
             }
           } else {
             logger.warn(`Ошибка при удалении на сервере для события ${id}:`, error);
+            // Если это ошибка для организатора - все равно считаем событие удаленным из локального состояния
+            if (isOrganizer) {
+              logger.warn(`Ошибка при удалении события организатором, но удаляем из локального состояния`);
+              serverSuccess = true;
+              eventDeleted = true;
+            }
           }
         } else {
           logger.warn(`Неизвестная ошибка при удалении на сервере для события ${id}:`, error);
+          // Если это ошибка для организатора - все равно считаем событие удаленным из локального состояния
+          if (isOrganizer) {
+            logger.warn(`Неизвестная ошибка при удалении события организатором, но удаляем из локального состояния`);
+            serverSuccess = true;
+            eventDeleted = true;
+          }
         }
       }
     }
@@ -886,9 +1099,53 @@ export function useEventActions({
     // КРИТИЧЕСКИ ВАЖНО: Если событие полностью удалено - удаляем из всех локальных состояний
     if (eventDeleted) {
       logger.info(`Событие полностью удалено - убираем из локального состояния`);
-      setEvents(prev => prev.filter(e => e.id !== id));
-      setEventProfiles(prev => prev.filter(p => p.eventId !== id));
-      setEventRequests(prev => prev.filter(req => req.eventId !== id));
+      
+      // КРИТИЧЕСКИ ВАЖНО: Сохраняем ID удаленного события, чтобы не вернуть его при синхронизации
+      const deletedEventId = id;
+      
+      // Помечаем событие как удаленное, чтобы оно не вернулось при синхронизации
+      if (markEventAsDeleted) {
+        markEventAsDeleted(deletedEventId);
+      }
+      
+      setEvents(prev => prev.filter(e => e.id !== deletedEventId));
+      setEventProfiles(prev => prev.filter(p => p.eventId !== deletedEventId));
+      setEventRequests(prev => prev.filter(req => req.eventId !== deletedEventId));
+      setChats(prev => prev.filter(c => c.eventId !== deletedEventId));
+      
+      // КРИТИЧЕСКИ ВАЖНО: Синхронизируем с сервером после удаления, но фильтруем удаленное событие
+      // Это особенно важно для прошедших событий, которые могут быть загружены при следующей синхронизации
+      if (syncEventsFromServer) {
+        try {
+          logger.info(`Синхронизируем события с сервером после удаления...`);
+          await syncEventsFromServer();
+          
+          // КРИТИЧЕСКИ ВАЖНО: После синхронизации еще раз проверяем и удаляем событие, если оно вернулось
+          // Это защита от race condition, когда синхронизация происходит до того, как сервер обработал удаление
+          setEvents(prev => {
+            const stillExists = prev.find(e => e.id === deletedEventId);
+            if (stillExists) {
+              logger.warn(`⚠️ Удаленное событие ${deletedEventId} вернулось после синхронизации, удаляем снова`);
+              return prev.filter(e => e.id !== deletedEventId);
+            }
+            return prev;
+          });
+          
+          setEventProfiles(prev => {
+            const stillExists = prev.find(p => p.eventId === deletedEventId);
+            if (stillExists) {
+              logger.warn(`⚠️ Профиль удаленного события ${deletedEventId} вернулся после синхронизации, удаляем снова`);
+              return prev.filter(p => p.eventId !== deletedEventId);
+            }
+            return prev;
+          });
+          
+          logger.info(`✅ Синхронизация завершена, событие должно быть удалено`);
+        } catch (syncError) {
+          logger.warn(`Ошибка при синхронизации после удаления события, но событие уже удалено из локального состояния:`, syncError);
+        }
+      }
+      
       return;
     }
 
@@ -896,11 +1153,10 @@ export function useEventActions({
     if (serverSuccess) {
       logger.info(`Удаление на сервере успешно - обновляем локальное состояние`);
       
-      // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий НЕ удаляем событие из локального состояния
-      // Событие должно остаться для других участников
-      // Только обновляем список участников в профиле события
+      // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий проверяем, остался ли пользователь участником/организатором
+      // Если нет - удаляем событие из локального состояния, чтобы оно не попало в счетчики
       if (isPastEvent) {
-        logger.info(`Прошедшее событие - обновляем только профиль, событие остается в списке`);
+        logger.info(`Прошедшее событие - проверяем, остался ли пользователь участником/организатором`);
         if (fetchEventProfile) {
           try {
             const updatedProfile = await fetchEventProfile(id);
@@ -912,23 +1168,77 @@ export function useEventActions({
                   participants: updatedProfile.participants
                 } : p
               ));
-              // КРИТИЧЕСКИ ВАЖНО: НЕ удаляем событие из events - оно должно остаться для других участников
-              // Только удаляем из eventRequests, если пользователь больше не участник
+              
+              // КРИТИЧЕСКИ ВАЖНО: Проверяем, является ли пользователь еще участником или организатором
+              const event = events.find(e => e.id === id);
+              const isStillOrganizer = event?.organizerId === actualUserId;
+              const isStillParticipant = updatedProfile.participants.includes(actualUserId || '');
+              
+              // Если пользователь больше не является ни организатором, ни участником - удаляем событие из локального состояния
+              // Это нужно, чтобы событие не попало в счетчики профиля
+              if (!isStillOrganizer && !isStillParticipant) {
+                logger.info(`Пользователь больше не является ни организатором, ни участником - удаляем событие из локального состояния`);
+                setEvents(prev => prev.filter(e => e.id !== id));
+                setEventProfiles(prev => prev.filter(p => p.eventId !== id));
+                setEventRequests(prev => prev.filter(req => req.eventId !== id));
+                setChats(prev => prev.filter(c => c.eventId !== id));
+                
+                // Синхронизируем с сервером после удаления
+                if (syncEventsFromServer) {
+                  try {
+                    await syncEventsFromServer();
+                  } catch (syncError) {
+                    logger.warn(`Ошибка при синхронизации после удаления события:`, syncError);
+                  }
+                }
+                
+                return;
+              }
+              
+              // Пользователь все еще участник или организатор - оставляем событие, но обновляем запросы
               setEventRequests(prev => prev.filter(req => 
                 !(req.eventId === id && req.status === 'accepted' && 
                   (req.fromUserId === actualUserId || req.toUserId === actualUserId))
               ));
             } else {
-              // Профиль должен существовать для всех событий - если не найден, это ошибка
-              logger.error(`Профиль не найден для события ${id} - это не должно происходить`);
-              setEventRequests(prev => prev.filter(req => 
-                !(req.eventId === id && req.status === 'accepted' && 
-                  (req.fromUserId === actualUserId || req.toUserId === actualUserId))
-              ));
+              // Профиль не найден - возможно событие удалено полностью, удаляем из локального состояния
+              logger.warn(`Профиль не найден для события ${id} - удаляем событие из локального состояния`);
+              setEvents(prev => prev.filter(e => e.id !== id));
+              setEventProfiles(prev => prev.filter(p => p.eventId !== id));
+              setEventRequests(prev => prev.filter(req => req.eventId !== id));
+              setChats(prev => prev.filter(c => c.eventId !== id));
+              return;
             }
           } catch (error) {
             logger.warn(`Не удалось обновить профиль с сервера:`, error);
-            // Не удаляем событие даже при ошибке - оно должно остаться для других участников
+            // При ошибке проверяем текущее состояние события
+            const event = events.find(e => e.id === id);
+            const isStillOrganizer = event?.organizerId === actualUserId;
+            const isStillParticipant = event?.participantsList?.includes(actualUserId || '') || 
+                                      event?.participantsData?.some((p: any) => {
+                                        const pUserId = p.userId || p.id;
+                                        return pUserId === actualUserId;
+                                      });
+            
+            // Если пользователь больше не является ни организатором, ни участником - удаляем событие
+            if (!isStillOrganizer && !isStillParticipant) {
+              logger.info(`Пользователь больше не является участником (по локальным данным) - удаляем событие из локального состояния`);
+              setEvents(prev => prev.filter(e => e.id !== id));
+              setEventProfiles(prev => prev.filter(p => p.eventId !== id));
+              setEventRequests(prev => prev.filter(req => req.eventId !== id));
+              setChats(prev => prev.filter(c => c.eventId !== id));
+              
+              // Синхронизируем с сервером после удаления
+              if (syncEventsFromServer) {
+                try {
+                  await syncEventsFromServer();
+                } catch (syncError) {
+                  logger.warn(`Ошибка при синхронизации после удаления события:`, syncError);
+                }
+              }
+              
+              return;
+            }
           }
         }
         // КРИТИЧЕСКИ ВАЖНО: Удаляем чат события полностью, если пользователь больше не является членом события
@@ -948,16 +1258,18 @@ export function useEventActions({
           setChats(prev => prev.filter(chat => !(chat.eventId === id && chat.type === 'event')));
           logger.info('✅ Чат события удален, так как пользователь больше не является членом события:', { eventId: id, userId: actualUserId });
         } else {
-          // Пользователь все еще член события - только удаляем из списка участников чата
+          // Пользователь все еще член события - только удаляем из списка участников чата и обновляем счетчик
           setChats(prev => prev.map(chat => {
             if (chat.eventId === id && chat.participants?.includes(actualUserId || '')) {
+              const updatedParticipants = chat.participants.filter((pid: string) => pid !== actualUserId);
               return {
                 ...chat,
-                participants: chat.participants.filter((pid: string) => pid !== actualUserId)
+                participants: updatedParticipants
               };
             }
             return chat;
           }));
+          logger.info('✅ Пользователь удален из участников чата, счетчик обновлен:', { eventId: id, userId: actualUserId });
         }
         return;
       } else {
@@ -974,19 +1286,19 @@ export function useEventActions({
     // Если удаление на сервере не удалось - делаем локальное удаление (fallback)
     logger.warn(`Удаление на сервере не удалось, делаем локальное удаление`);
     setEvents(prev => prev.filter(e => e.id !== id));
+    setEventProfiles(prev => prev.filter(p => p.eventId !== id));
     setEventRequests(prev => prev.filter(req => req.eventId !== id));
     setChats(prev => prev.filter(c => c.eventId !== id));
     
-    if (isPastEvent && actualUserId) {
-      setEventProfiles(prev => prev.map(p => 
-        p.eventId === id 
-          ? { ...p, participants: p.participants.filter(pid => pid !== actualUserId) }
-          : p
-      ));
-    } else {
-      setEventProfiles(prev => prev.filter(p => p.eventId !== id));
+    // Синхронизируем с сервером после локального удаления
+    if (syncEventsFromServer) {
+      try {
+        await syncEventsFromServer();
+      } catch (syncError) {
+        logger.warn(`Ошибка при синхронизации после локального удаления события:`, syncError);
+      }
     }
-  }, [accessToken, currentUserId, events, eventProfiles, isEventPast, fetchEventProfile, setEvents, setEventProfiles, setEventRequests, setChats]);
+  }, [accessToken, currentUserId, events, eventProfiles, isEventPast, fetchEventProfile, syncEventsFromServer, setEvents, setEventProfiles, setEventRequests, setChats]);
 
   // Обновляем ref при изменении deleteEvent для использования в cancelEvent
   deleteEventRef.current = deleteEvent;
@@ -1032,6 +1344,12 @@ export function useEventActions({
         // Это нужно для немедленного обновления UI, особенно счетчиков в шапке профиля
         // При отмене события (DELETE /events/:id) событие полностью удаляется с сервера,
         // поэтому мы должны удалить его из всех локальных состояний
+        
+        // КРИТИЧЕСКИ ВАЖНО: Помечаем событие как удаленное, чтобы оно не вернулось при синхронизации
+        if (markEventAsDeleted) {
+          markEventAsDeleted(eventId);
+        }
+        
         setEvents(prev => prev.filter(e => e.id !== eventId));
         setEventProfiles(prev => prev.filter(p => p.eventId !== eventId));
         setEventRequests(prev => prev.filter(req => req.eventId !== eventId));
@@ -1040,6 +1358,25 @@ export function useEventActions({
         // Синхронизируем с сервером для обновления остальных данных
         if (syncEventsFromServer) {
           await syncEventsFromServer();
+          
+          // КРИТИЧЕСКИ ВАЖНО: После синхронизации еще раз проверяем и удаляем событие, если оно вернулось
+          setEvents(prev => {
+            const stillExists = prev.find(e => e.id === eventId);
+            if (stillExists) {
+              logger.warn(`⚠️ Отмененное событие ${eventId} вернулось после синхронизации, удаляем снова`);
+              return prev.filter(e => e.id !== eventId);
+            }
+            return prev;
+          });
+          
+          setEventProfiles(prev => {
+            const stillExists = prev.find(p => p.eventId === eventId);
+            if (stillExists) {
+              logger.warn(`⚠️ Профиль отмененного события ${eventId} вернулся после синхронизации, удаляем снова`);
+              return prev.filter(p => p.eventId !== eventId);
+            }
+            return prev;
+          });
         }
         logger.info('✅ Событие отменено и удалено из локального состояния:', eventId);
       } catch (error) {
@@ -1063,6 +1400,22 @@ export function useEventActions({
       throw new Error('Необходима авторизация');
     }
 
+    // Проверяем, что пользователь является организатором события
+    const event = events.find(e => e.id === eventId);
+    if (!event) {
+      logger.warn('Cannot transfer organizer role: event not found', eventId);
+      throw new Error('Событие не найдено');
+    }
+
+    if (event.organizerId !== actualUserId) {
+      logger.warn('Cannot transfer organizer role: user is not organizer', {
+        eventId,
+        organizerId: event.organizerId,
+        currentUserId: actualUserId
+      });
+      throw new Error('Только организатор события может передать роль');
+    }
+
     try {
       const response = await apiRequest(
         `/events/${eventId}/transfer-organizer`,
@@ -1075,6 +1428,51 @@ export function useEventActions({
       
       logger.info('✅ Роль организатора передана:', { eventId, newOrganizerId });
       
+      // МГНОВЕННОЕ ОБНОВЛЕНИЕ UI - обновляем состояние локально до синхронизации с сервером
+      setEvents(prev => {
+        // Удаляем событие из списка для старого организатора (actualUserId)
+        // Старый организатор больше не должен видеть это событие в своем профиле
+        const filtered = prev.filter(e => {
+          if (e.id === eventId && e.organizerId === actualUserId) {
+            // Удаляем событие для старого организатора
+            return false;
+          }
+          return true;
+        });
+        
+        // Обновляем organizerId события для нового организатора
+        return filtered.map(e => {
+          if (e.id === eventId) {
+            return {
+              ...e,
+              organizerId: newOrganizerId,
+            };
+          }
+          return e;
+        });
+      });
+      
+      // Обновляем профиль события - удаляем старого организатора из участников
+      setEventProfiles(prev => prev.map(profile => {
+        if (profile.eventId === eventId) {
+          return {
+            ...profile,
+            participants: profile.participants.filter(pId => pId !== actualUserId),
+          };
+        }
+        return profile;
+      }));
+      
+      // Удаляем запросы на участие для старого организатора
+      setEventRequests(prev => prev.filter(req => 
+        !(req.eventId === eventId && (req.fromUserId === actualUserId || req.toUserId === actualUserId))
+      ));
+      
+      // Удаляем чаты события для старого организатора
+      setChats(prev => prev.filter(chat => 
+        !(chat.eventId === eventId && chat.participants.includes(actualUserId))
+      ));
+      
       // Синхронизируем с сервером для обновления данных
       if (syncEventsFromServer) {
         await syncEventsFromServer();
@@ -1086,7 +1484,7 @@ export function useEventActions({
       logger.error('❌ Ошибка при передаче роли организатора:', error);
       throw error;
     }
-  }, [accessToken, currentUserId, syncEventsFromServer, refreshPendingJoinRequests]);
+  }, [accessToken, currentUserId, events, syncEventsFromServer, refreshPendingJoinRequests]);
 
   const cancelOrganizerParticipation = useCallback(async (eventId: string) => {
     const actualToken = currentAccessTokenRef.current;

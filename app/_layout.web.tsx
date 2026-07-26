@@ -95,8 +95,8 @@ function RouterGate() {
 
   if (initializing) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f0f0f' }}>
-        <ActivityIndicator size="large" color="#8B5CF6" />
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0c' }}>
+        <ActivityIndicator size="large" color="#FF8D32" />
       </View>
     );
   }
@@ -123,8 +123,8 @@ export default function RootLayout() {
       console.warn('Initialization error (non-critical), retrying...');
       // Пробуем еще раз через небольшую задержку
       return (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f0f0f' }}>
-          <ActivityIndicator size="large" color="#8B5CF6" />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0c' }}>
+          <ActivityIndicator size="large" color="#FF8D32" />
         </View>
       );
     }

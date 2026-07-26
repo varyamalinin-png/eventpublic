@@ -153,6 +153,14 @@ export interface ServerChatMessage {
   text?: string;
   eventId?: string;
   postId?: string;
+  readBy?: string[];
+  reactions?: Array<{
+    id: string;
+    messageId: string;
+    userId: string;
+    emoji: string;
+    createdAt: string;
+  }>;
   createdAt?: string;
   [key: string]: unknown;
 }
@@ -194,9 +202,8 @@ export interface ServerEventProfilePost {
   author?: ServerUser;
   content?: string;
   photoUrl?: string;
-<<<<<<< HEAD
-  photoUrls?: string[];
-  captions?: string[];
+  photoUrls?: string[]; // Массив URL для карусели
+  captions?: string[]; // Массив подписей для каждого фото
   caption?: string;
   comments?: Array<{
     id: string;
@@ -206,10 +213,6 @@ export interface ServerEventProfilePost {
     content: string;
     createdAt?: string;
   }>;
-=======
-  photoUrls?: string[]; // Массив URL для карусели
-  captions?: string[]; // Массив подписей для каждого фото
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   createdAt?: string;
   [key: string]: unknown;
 }

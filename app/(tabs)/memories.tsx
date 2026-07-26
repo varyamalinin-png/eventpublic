@@ -1,21 +1,39 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, Dimensions } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, Dimensions, Platform, ActivityIndicator } from 'react-native';
 import TopBar from '../../components/TopBar';
 import MemoryPost from '../../components/MemoryPost';
 import { useEvents } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { useFocusEffect } from 'expo-router';
+import { useSafeRouter } from '../../utils/safeRouter';
 import { createLogger } from '../../utils/logger';
+import { AppIcon } from '../../components/ui/AppIcon';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// Для веб-версии используем ограниченную ширину контейнера (500px), для мобильных - полную ширину экрана
+const getContainerWidth = () => {
+  const screenWidth = Dimensions.get('window').width;
+  if (Platform.OS === 'web') {
+    return Math.min(screenWidth, 500);
+  }
+  return screenWidth;
+};
+const SCREEN_WIDTH = getContainerWidth();
 
 const logger = createLogger('Memories');
 
 export default function MemoriesScreen() {
+  // Безопасное получение router
+  const router = useSafeRouter();
+  
   const { eventProfiles, getUserData, friends, events, isEventPast, isUserEventMember, fetchEventProfile, isFriend } = useEvents();
   const { user: authUser } = useAuth();
   const { t } = useLanguage();
+  
+  // Функция навигации для передачи в MemoryPost
+  const handleNavigate = (path: string) => {
+    router.push(path);
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const loadedProfilesRef = useRef<Set<string>>(new Set());
@@ -24,147 +42,41 @@ export default function MemoriesScreen() {
   logger.debug('Список профилей:', eventProfiles.map(p => `${p.eventId}(${p.participants.length} участников, ${p.posts?.length || 0} постов)`).join(', ') || 'нет');
   
   // Загружаем профили для прошедших событий при открытии Memories
+  const [profilesLoading, setProfilesLoading] = React.useState(true);
+
+  const loadProfilesForPastEvents = React.useCallback(async () => {
+    if (!authUser?.id || !fetchEventProfile || events.length === 0) return;
+
+    const pastEvents = events.filter(event => isEventPast(event));
+    if (pastEvents.length === 0) { setProfilesLoading(false); return; }
+
+    let loaded = 0;
+    for (const event of pastEvents) {
+      if (eventProfiles.find(p => p.eventId === event.id)) { loaded++; continue; }
+      if (loadedProfilesRef.current.has(event.id)) { loaded++; continue; }
+
+      loadedProfilesRef.current.add(event.id);
+      try {
+        await fetchEventProfile(event.id);
+        loaded++;
+      } catch {
+        loadedProfilesRef.current.delete(event.id);
+      }
+    }
+    setProfilesLoading(false);
+  }, [authUser?.id, events, isEventPast, fetchEventProfile, eventProfiles]);
+
+  useEffect(() => {
+    setProfilesLoading(true);
+    loadProfilesForPastEvents();
+  }, [loadProfilesForPastEvents]);
+
   useFocusEffect(
     React.useCallback(() => {
-      logger.debug('useFocusEffect вызван:', { hasAuthUser: !!authUser?.id, hasFetchEventProfile: !!fetchEventProfile, eventsCount: events.length });
-      
-      if (!authUser?.id) {
-        logger.warn('useFocusEffect: нет authUser, пропуск загрузки');
-        return;
-      }
-      
-      if (!fetchEventProfile) {
-        logger.warn('useFocusEffect: нет fetchEventProfile, пропуск загрузки');
-        return;
-      }
-      
-      const loadProfilesForPastEvents = async () => {
-        logger.debug('useFocusEffect: начинаем загрузку профилей', { eventsCount: events.length, profilesCount: eventProfiles.length });
-        
-        // КРИТИЧЕСКИ ВАЖНО: Находим ВСЕ прошедшие события, независимо от участия
-        // Это нужно, чтобы загрузить профили даже для событий, где пользователь уже удалил себя
-        const pastEvents = events.filter(event => isEventPast(event));
-        
-        logger.debug('Найдено прошедших событий:', { pastEventsCount: pastEvents.length, totalEventsCount: events.length, profilesCount: eventProfiles.length });
-        
-        if (pastEvents.length === 0) {
-          logger.warn('Нет прошедших событий для загрузки профилей');
-          return;
-        }
-        
-        // Загружаем профили для каждого прошедшего события
-        let loadedCount = 0;
-        let skippedCount = 0;
-        let errorCount = 0;
-        
-        for (const event of pastEvents) {
-          // Проверяем, загружен ли уже профиль
-          const existingProfile = eventProfiles.find(p => p.eventId === event.id);
-          if (existingProfile) {
-            skippedCount++;
-            logger.debug(`Профиль для события ${event.id} уже загружен`, { postsCount: existingProfile.posts?.length || 0 });
-            continue;
-          }
-          
-          if (loadedProfilesRef.current.has(event.id)) {
-            logger.debug(`Профиль для события ${event.id} уже в процессе загрузки`);
-            continue;
-          }
-          
-          loadedProfilesRef.current.add(event.id);
-          try {
-            logger.debug(`Загружаем профиль для события ${event.id}`);
-            const profile = await fetchEventProfile(event.id);
-            if (profile) {
-              loadedCount++;
-              logger.info(`Профиль загружен для события ${event.id}`, { postsCount: profile.posts?.length || 0, participantsCount: profile.participants.length });
-            } else {
-              errorCount++;
-              logger.debug(`Профиль не загружен для события ${event.id} (вернулся null)`);
-              loadedProfilesRef.current.delete(event.id);
-            }
-          } catch (error) {
-            errorCount++;
-            logger.error(`Не удалось загрузить профиль для события ${event.id}:`, error);
-            loadedProfilesRef.current.delete(event.id);
-          }
-        }
-        
-        logger.info('Загрузка профилей завершена', { loaded: loadedCount, skipped: skippedCount, errors: errorCount, totalProfiles: eventProfiles.length + loadedCount });
-      };
-      
-      // ВСЕГДА загружаем профили при фокусе на экране Memories
-      // Это гарантирует загрузку профилей при открытии Memories
+      loadedProfilesRef.current.clear();
       loadProfilesForPastEvents();
-    }, [authUser?.id, events.length, isEventPast, fetchEventProfile, friends.length])
+    }, [loadProfilesForPastEvents])
   );
-  
-  // Дополнительная загрузка профилей при изменении events (если useFocusEffect не сработал)
-  // КРИТИЧЕСКИ ВАЖНО: Этот useEffect должен загружать профили при монтировании компонента
-  useEffect(() => {
-    logger.debug('useEffect для загрузки профилей:', { hasAuthUser: !!authUser?.id, hasFetchEventProfile: !!fetchEventProfile, eventsCount: events.length, profilesCount: eventProfiles.length });
-    
-    if (!authUser?.id || !fetchEventProfile) {
-      logger.warn('useEffect: пропуск загрузки', { hasAuthUser: !!authUser?.id, hasFetchEventProfile: !!fetchEventProfile });
-      return;
-    }
-    
-    if (events.length === 0) {
-      logger.warn('useEffect: нет событий для загрузки профилей');
-      return;
-    }
-    
-    const pastEvents = events.filter(event => isEventPast(event));
-    logger.debug('useEffect: найдено прошедших событий', { pastEventsCount: pastEvents.length, totalEventsCount: events.length });
-    
-    if (pastEvents.length === 0) {
-      logger.warn('useEffect: нет прошедших событий для загрузки профилей');
-      return;
-    }
-    
-    // Загружаем профили для всех прошедших событий
-    const loadProfiles = async () => {
-      let loadedCount = 0;
-      let skippedCount = 0;
-      let errorCount = 0;
-      
-      for (const event of pastEvents) {
-        // Проверяем, загружен ли уже профиль
-        const existingProfile = eventProfiles.find(p => p.eventId === event.id);
-        if (existingProfile) {
-          skippedCount++;
-          continue;
-        }
-        
-        if (loadedProfilesRef.current.has(event.id)) {
-          skippedCount++;
-          continue;
-        }
-        
-        loadedProfilesRef.current.add(event.id);
-        try {
-          logger.debug(`useEffect: загружаем профиль для события ${event.id}`);
-          const profile = await fetchEventProfile(event.id);
-          if (profile) {
-            loadedCount++;
-            logger.info(`useEffect: профиль загружен для события ${event.id}`, { postsCount: profile.posts?.length || 0, participantsCount: profile.participants.length });
-          } else {
-            errorCount++;
-            logger.debug(`useEffect: профиль не загружен для события ${event.id} (вернулся null)`);
-            loadedProfilesRef.current.delete(event.id);
-          }
-        } catch (error) {
-          errorCount++;
-          logger.error(`useEffect: не удалось загрузить профиль для события ${event.id}:`, error);
-          loadedProfilesRef.current.delete(event.id);
-        }
-      }
-      
-      logger.info('useEffect: загрузка профилей завершена', { loaded: loadedCount, skipped: skippedCount, errors: errorCount });
-    };
-    
-    loadProfiles();
-  }, [authUser?.id, events.length, isEventPast, fetchEventProfile, friends.length]); // Добавлен friends.length для перезагрузки при изменении списка друзей
 
   // Функция поиска для memories
   const handleMemoriesSearch = (query: string) => {
@@ -177,35 +89,15 @@ export default function MemoriesScreen() {
   const allPosts = useMemo(() => {
     const posts: Array<{ post: any; eventId: string }> = [];
     
-    console.log('📦 [Memories] allPosts: пересчет', { profilesCount: eventProfiles.length });
-    console.log('📦 [Memories] allPosts: список профилей', eventProfiles.map(p => `${p.eventId}(${p.participants.length} участников, ${p.posts?.length || 0} постов)`).join(', '));
     
     eventProfiles.forEach(profile => {
       // Проверяем, что профиль имеет посты
       if (profile.posts && profile.posts.length > 0) {
-        console.log(`📦 [Memories] Profile ${profile.eventId} has posts`, { 
-          postsCount: profile.posts.length, 
-          participantsCount: profile.participants.length,
-          postAuthors: profile.posts.map(p => p.authorId).join(', ')
-        });
         profile.posts.forEach(post => {
           posts.push({ post, eventId: profile.eventId });
         });
       } else {
-        console.log(`📦 [Memories] Profile ${profile.eventId} has no posts`, { participantsCount: profile.participants.length });
       }
-    });
-    
-    const postsInfo = posts.map(({post, eventId}) => ({
-      eventId,
-      postId: post.id,
-      authorId: post.authorId,
-      createdAt: post.createdAt
-    }));
-    
-    console.log('📦 [Memories] allPosts: итоговое количество постов', { 
-      count: posts.length,
-      postsInfo: JSON.stringify(postsInfo, null, 2)
     });
     
     return posts.sort((a, b) => 
@@ -213,103 +105,19 @@ export default function MemoriesScreen() {
     );
   }, [eventProfiles]);
 
-<<<<<<< HEAD
-=======
-  // Логируем изменения allPosts
-  useEffect(() => {
-    console.log('🔄 [Memories] allPosts изменился:', {
-      count: allPosts.length,
-      posts: allPosts.map(({post, eventId}) => `event:${eventId}, author:${post.authorId}, postId:${post.id}`).join('; ')
-    });
-  }, [allPosts.length]);
 
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
-  // Фильтруем посты - показываем посты только друзьям
   const filteredPosts = useMemo(() => {
-    // ПРИНУДИТЕЛЬНОЕ ЛОГИРОВАНИЕ - выводим всегда
-    console.log('🚀🚀🚀 [Memories] useMemo filteredPosts ВЫЗВАН! 🚀🚀🚀');
-    
     const currentUserId = authUser?.id;
-    if (!currentUserId) {
-      console.warn('❌ [Memories] filteredPosts: нет currentUserId');
-      return [];
-    }
-    
-<<<<<<< HEAD
-    logger.debug('filteredPosts: пересчет', { allPostsCount: allPosts.length, profilesCount: eventProfiles.length, currentUserId });
-=======
-    // КРИТИЧЕСКОЕ ЛОГИРОВАНИЕ - используем logger.debug для гарантии вывода
-    logger.debug('═══════════════════════════════════════════════════════════');
-    logger.debug('🔍 [Memories] НАЧАЛО ФИЛЬТРАЦИИ ПОСТОВ');
-    logger.debug('═══════════════════════════════════════════════════════════');
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
-    logger.debug('📊 [Memories] Статистика:', {
-      allPostsCount: allPosts.length,
-      profilesCount: eventProfiles.length,
-      currentUserId,
-      friendsCount: friends.length,
-      friendsList: friends
-    });
-    
-    // Логируем информацию о всех постах перед фильтрацией
-    logger.debug('📝 [Memories] ВСЕ ПОСТЫ ПЕРЕД ФИЛЬТРАЦИЕЙ:');
-    if (allPosts.length === 0) {
-      logger.warn('⚠️ [Memories] НЕТ ПОСТОВ ДЛЯ ФИЛЬТРАЦИИ!');
-    } else {
-      allPosts.forEach(({ post, eventId }, index) => {
-        const isAuthorFriend = isFriend(post.authorId);
-        logger.debug(`  [${index}] Пост ID: ${post.id}`, {
-          authorId: post.authorId,
-          eventId,
-          isCurrentUser: post.authorId === currentUserId,
-          isAuthorFriend,
-          authorInFriendsList: friends.includes(post.authorId),
-          willShow: post.authorId === currentUserId || isAuthorFriend
-        });
-      });
-    }
-<<<<<<< HEAD
-=======
-    
-    allPosts.forEach(({ post, eventId }, index) => {
-      const isAuthorFriend = isFriend(post.authorId);
-      console.log(`📝 [Memories] allPosts[${index}]:`, {
-        postId: post.id,
-        authorId: post.authorId,
-        eventId,
-        isCurrentUser: post.authorId === currentUserId,
-        isAuthorFriend,
-        willShow: post.authorId === currentUserId || isAuthorFriend
-      });
-    });
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
+    if (!currentUserId) return [];
     
     const filtered = allPosts.filter(({ post, eventId }) => {
       const isCurrentUser = post.authorId === currentUserId;
-      
-      logger.debug(`🔍 [Memories] Фильтрация поста ${post.id}:`, {
-        authorId: post.authorId,
-        currentUserId,
-        isCurrentUser,
-        eventId
-      });
-      
-      // Показываем свои посты всегда
+
       if (isCurrentUser) {
-        logger.debug(`✅ [Memories] Пост ${post.id} - свой пост, показываем`);
-<<<<<<< HEAD
-      
-=======
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
-        // Свой пост - показываем, но проверяем поиск
         if (searchQuery) {
           const lowerQuery = searchQuery.toLowerCase();
           const author = getUserData(post.authorId);
-<<<<<<< HEAD
-          const event = eventProfiles.find(ep => ep.eventId === eventId);
-=======
           const event = events.find(e => e.id === eventId);
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
           
           // Поиск по автору
           if (author?.name?.toLowerCase().includes(lowerQuery) || 
@@ -318,11 +126,7 @@ export default function MemoriesScreen() {
           }
           
           // Поиск по названию события
-<<<<<<< HEAD
-          if (event?.name?.toLowerCase().includes(lowerQuery)) {
-=======
           if (event?.title?.toLowerCase().includes(lowerQuery)) {
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
             return true;
           }
           
@@ -336,30 +140,11 @@ export default function MemoriesScreen() {
             return true;
           }
           
-        return false;
-      }
+          return false;
+        }
         return true;
       }
       
-<<<<<<< HEAD
-      // Для чужих постов - проверяем, является ли автор другом
-      const isAuthorFriend = isFriend(post.authorId);
-      
-      logger.debug(`👥 [Memories] Пост ${post.id} - проверка дружбы:`, {
-        authorId: post.authorId,
-        isAuthorFriend,
-        friendsList: friends,
-        friendsCount: friends.length,
-        authorInFriendsList: friends.includes(post.authorId)
-      });
-      
-      if (!isAuthorFriend) {
-        logger.warn(`❌ [Memories] Пост ${post.id} ОТФИЛЬТРОВАН: автор ${post.authorId} НЕ является другом текущего пользователя ${currentUserId}`);
-        return false;
-      }
-      
-      logger.debug(`✅ [Memories] Пост ${post.id} - автор является другом, показываем`);
-=======
       // Для чужих постов - проверяем два условия:
       // 1. Автор является другом
       // 2. ИЛИ автор поста и я - участники одного события (АВТОР_ПОСТА_УЧАСТНИК_НАШЕГО_РАЗДЕЛЕННОГО_СОБЫТИЯ)
@@ -379,28 +164,8 @@ export default function MemoriesScreen() {
         : false;
       
       const areSharedEventParticipants = areBothParticipants || areBothMembersInEvent;
-      
-      logger.debug(`👥 [Memories] Пост ${post.id} - проверка дружбы и совместного участия:`, {
-        authorId: post.authorId,
-        isAuthorFriend,
-        areBothParticipants,
-        areBothMembersInEvent,
-        areSharedEventParticipants,
-        friendsList: friends,
-        friendsCount: friends.length,
-        authorInFriendsList: friends.includes(post.authorId),
-        eventId,
-        postEventProfileExists: !!postEventProfile,
-        postEventExists: !!postEvent
-      });
-      
-      if (!isAuthorFriend && !areSharedEventParticipants) {
-        logger.warn(`❌ [Memories] Пост ${post.id} ОТФИЛЬТРОВАН: автор ${post.authorId} НЕ является другом И НЕ является участником общего события с текущим пользователем ${currentUserId}`);
-        return false;
-      }
-      
-      logger.debug(`✅ [Memories] Пост ${post.id} - автор является другом ИЛИ участником общего события, показываем`);
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
+
+      if (!isAuthorFriend && !areSharedEventParticipants) return false;
       
       // Поиск по тексту
       if (searchQuery) {
@@ -415,11 +180,7 @@ export default function MemoriesScreen() {
         }
         
         // Поиск по названию события
-<<<<<<< HEAD
-        if (event?.name?.toLowerCase().includes(lowerQuery)) {
-=======
         if (event?.title?.toLowerCase().includes(lowerQuery)) {
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
           return true;
         }
         
@@ -440,41 +201,9 @@ export default function MemoriesScreen() {
       return true;
     });
     
-    logger.debug('═══════════════════════════════════════════════════════════');
-    logger.debug('📊 [Memories] РЕЗУЛЬТАТЫ ФИЛЬТРАЦИИ:');
-    logger.debug(`   Всего постов: ${allPosts.length}`);
-    logger.debug(`   Отфильтровано: ${filtered.length}`);
-    logger.debug(`   Друзей: ${friends.length}`);
-    if (filtered.length > 0) {
-      logger.debug(`   Показанные посты: ${filtered.map(({post, eventId}) => `${eventId}-${post.id}`).join(', ')}`);
-    } else if (allPosts.length > 0) {
-      logger.warn('⚠️ [Memories] ВСЕ ПОСТЫ ОТФИЛЬТРОВАНЫ!');
-      const samplePost = allPosts[0];
-      logger.warn('   Пример поста:', {
-        postId: samplePost.post.id,
-        authorId: samplePost.post.authorId,
-        isAuthorFriend: isFriend(samplePost.post.authorId),
-        authorInFriendsList: friends.includes(samplePost.post.authorId),
-        currentUserId
-      });
-    }
-    logger.debug('═══════════════════════════════════════════════════════════');
-    
-<<<<<<< HEAD
-    logger.debug('filteredPosts: итоговое количество отфильтрованных постов', { count: filtered.length, posts: filtered.map(({post, eventId}) => `${eventId}-${post.id}`).join(', ') || 'нет' });
-=======
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
     return filtered;
-  }, [allPosts, searchQuery, friends, getUserData, eventProfiles, authUser?.id, isFriend]);
+  }, [allPosts, searchQuery, friends, getUserData, eventProfiles, authUser, isFriend]);
 
-  // Дополнительное логирование при изменении filteredPosts
-  useEffect(() => {
-    console.log('🔄 [Memories] filteredPosts изменился:', {
-      count: filteredPosts.length,
-      allPostsCount: allPosts.length,
-      friendsCount: friends.length
-    });
-  }, [filteredPosts.length, allPosts.length, friends.length]);
 
   // Группируем посты по автору и событию
   const groupedPosts = useMemo(() => {
@@ -495,6 +224,9 @@ export default function MemoriesScreen() {
       return dateB - dateA;
     });
   }, [filteredPosts]);
+
+  // В Memories (вкладка) показываем только посты, без папок
+  // Папки находятся в разделе Memories в профиле
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -551,80 +283,92 @@ export default function MemoriesScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="#8B5CF6"
+            tintColor="#FF8D32"
           />
         }
       >
         {(() => {
-          // ПРИНУДИТЕЛЬНОЕ ЛОГИРОВАНИЕ В РЕНДЕРЕ
-          console.log('🎨 [Memories] РЕНДЕР:', {
+          // Логирование рендера, только для постов (без папок)
+
+          logger.debug('Рендер MemoriesScreen (только посты)', {
             filteredPostsCount: filteredPosts.length,
-            allPostsCount: allPosts.length,
             profilesCount: eventProfiles.length,
-            friendsCount: friends.length
           });
-          
-          logger.debug('Рендер MemoriesScreen', { filteredPostsCount: filteredPosts.length, profilesCount: eventProfiles.length });
-          
+
           if (filteredPosts.length === 0) {
+            if (profilesLoading) {
               return (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyTitle}>{t.empty.noMemoriesTitle}</Text>
-              <Text style={styles.emptyText}>
-                {searchQuery 
-                  ? t.empty.searchNotFound
-                  : t.empty.noPostsYouAndFriends
-                }
-              </Text>
-            </View>
-          );
-          }
-          
-          return groupedPosts.map((group, groupIndex) => {
-            const isCarousel = group.length > 1;
-            // Ширина поста в карусели
-            const postWidth = isCarousel ? SCREEN_WIDTH * 0.85 : SCREEN_WIDTH;
-            
-            if (isCarousel) {
-              // Горизонтальная карусель для группы постов одного автора в одном событии
-              return (
-                <View key={`group-${groupIndex}`} style={styles.postGroupContainer}>
-                  <ScrollView
-                    horizontal
-                    pagingEnabled
-                    showsHorizontalScrollIndicator={false}
-                    decelerationRate="fast"
-                    snapToInterval={postWidth}
-                    snapToAlignment="start"
-                    style={styles.carouselScrollView}
-                    contentContainerStyle={styles.carouselContentContainer}
-                  >
-                    {group.map(({ post, eventId }, postIndex) => (
-                      <View 
-                        key={`${eventId}-${post.id}`} 
-                        style={[styles.carouselPostItem, { width: postWidth }]}
-                      >
-                        <MemoryPost 
-                          post={post}
-                          showOptions={true}
-                        />
-                      </View>
-                    ))}
-                  </ScrollView>
+                <View style={styles.emptyContainer}>
+                  <ActivityIndicator size="large" color="#FF8D32" />
                 </View>
               );
-            } else {
-              // Одиночный пост - полная ширина
-              const { post, eventId } = group[0];
-              return (
-                <MemoryPost 
-                  key={`${eventId}-${post.id}`}
-                  post={post}
-                  showOptions={true}
-                />
-              );
             }
-          });
+            return (
+              <View style={styles.emptyContainer}>
+                <AppIcon name="camera" size={60} color="rgba(244,244,245,0.25)" />
+                <Text style={styles.emptyTitle}>{t.empty.noMemoriesTitle || 'Пока нет воспоминаний'}</Text>
+                <Text style={styles.emptyText}>
+                  {searchQuery
+                    ? (t.empty.searchNotFound || 'Ничего не найдено')
+                    : (t.empty.noPostsYouAndFriends || 'Они появятся после завершения событий')}
+                </Text>
+              </View>
+            );
+          }
+
+          // Отрисовываем только посты (группированные по автору и событию)
+          return (
+            <View>
+              {groupedPosts.map((group, groupIndex) => {
+                const isCarousel = group.length > 1;
+                const postWidth = isCarousel ? SCREEN_WIDTH * 0.85 : SCREEN_WIDTH;
+
+                if (isCarousel) {
+                  return (
+                    <View
+                      key={`group-${groupIndex}`}
+                      style={styles.postGroupContainer}
+                    >
+                      <ScrollView
+                        horizontal
+                        pagingEnabled
+                        showsHorizontalScrollIndicator={false}
+                        decelerationRate="fast"
+                        snapToInterval={postWidth}
+                        snapToAlignment="start"
+                        style={styles.carouselScrollView}
+                        contentContainerStyle={styles.carouselContentContainer}
+                      >
+                        {group.map(({ post, eventId }) => (
+                          <View
+                            key={`${eventId}-${post.id}`}
+                            style={[styles.carouselPostItem, { width: postWidth }]}
+                          >
+                            <MemoryPost
+                              post={post}
+                              showOptions={true}
+                              onNavigate={handleNavigate}
+                            />
+                          </View>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  );
+                }
+
+                // Одиночный пост
+                const { post, eventId } = group[0];
+                return (
+                  <MemoryPost
+                    key={`${eventId}-${post.id}`}
+                    post={post}
+                    showOptions={true}
+                    onNavigate={handleNavigate}
+                  />
+                );
+              })}
+            </View>
+          );
         })()}
       </ScrollView>
     </View>
@@ -634,7 +378,7 @@ export default function MemoriesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   centered: {
     flex: 1,
@@ -645,7 +389,7 @@ const styles = StyleSheet.create({
   loginPromptTitle: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     marginBottom: 12,
     textAlign: 'center',
   },
@@ -659,8 +403,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingTop: 8,
-    paddingBottom: 100,
+    paddingTop: 12,
+    paddingBottom: 110,
   },
   emptyContainer: {
     flex: 1,
@@ -670,20 +414,22 @@ const styles = StyleSheet.create({
     paddingVertical: 64,
   },
   emptyTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    fontSize: 21,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+    color: '#f4f4f5',
+    marginTop: 16,
     marginBottom: 8,
     textAlign: 'center',
   },
   emptyText: {
-    fontSize: 14,
-    color: '#999999',
+    fontSize: 14.5,
+    color: 'rgba(244,244,245,0.5)',
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 21,
   },
   postGroupContainer: {
-    marginBottom: 16,
+    marginBottom: 18,
   },
   carouselScrollView: {
     flexGrow: 0,

@@ -1,7 +1,10 @@
-import { useState, useRef, useMemo, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Animated, PanResponder, Dimensions, Image, Platform } from 'react-native';
+import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Animated, PanResponder, Dimensions, Image, Platform, RefreshControl } from 'react-native';
 import { Link, useRouter, useFocusEffect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { useRefresh } from '../../hooks/useRefresh';
+import { SkeletonFeed } from '../../components/SkeletonCard';
+import * as Location from 'expo-location';
 import EventCard from '../../components/EventCard';
 import OrganizerCard from '../../components/OrganizerCard';
 import TopBar from '../../components/TopBar';
@@ -9,6 +12,7 @@ import { useEvents, Event, User } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { formatUsername, normalizeUsername } from '../../utils/username';
+import { apiRequest } from '../../services/api';
 
 interface FilterOptions {
   participantsMin?: number;
@@ -26,19 +30,15 @@ interface EventFolder {
   eventIds: string[];
 }
 
-export default function ExploreScreen() {
-  // ВЕБ-ПРОВЕРКИ: Логирование инициализации
-  useEffect(() => {
-    if (typeof window !== 'undefined' && Platform.OS === 'web') {
-      console.log('[Explore] Component mounted on web');
-      console.log('[Explore] Window available:', typeof window !== 'undefined');
-      console.log('[Explore] Platform.OS:', Platform.OS);
-    }
-  }, []);
+// Количество событий, подгружаемых за один раз (прогрессивный рендеринг)
+const PAGE_SIZE = 12;
 
+export default function ExploreScreen() {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'GLOB' | 'FRIENDS'>('GLOB');
   const [searchQuery, setSearchQuery] = useState('');
+  // Прогрессивный рендеринг: начинаем с PAGE_SIZE событий, добавляем при скролле к концу
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [eventHeights, setEventHeights] = useState<{[key: string]: number}>({});
   const handleEventLayout = (eventId: string, height: number) => {
     setEventHeights(prev => ({
@@ -51,10 +51,21 @@ export default function ExploreScreen() {
   const [showOrganizers, setShowOrganizers] = useState(false);
   const translateX = useRef(new Animated.Value(0)).current;
   const eventsScrollViewRef = useRef<ScrollView>(null);
+  const { refreshing, onRefresh } = useRefresh();
+  const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+          setUserCoords({ lat: loc.coords.latitude, lon: loc.coords.longitude });
+        }
+      } catch {}
+    })();
+  }, []);
   const organizersScrollViewRef = useRef<ScrollView>(null);
-  const [eventsScrollY, setEventsScrollY] = useState(0);
-  const [organizersScrollY, setOrganizersScrollY] = useState(0);
-  const isSyncingRef = useRef(false);
   
   const router = useRouter();
   
@@ -95,44 +106,12 @@ export default function ExploreScreen() {
   
   const { events, getUserData, getOrganizerStats, getFriendsForEvents, userFolders, createUserFolder, getGlobalEvents, isUserEventMember, eventProfiles, fetchEventProfile } = eventsContext;
   const { user: authUser } = authContext;
+  const accessToken = (authContext as any).accessToken ?? null;
   const currentUserId = authUser?.id ?? null;
 
-  // ВЕБ-ПРОВЕРКИ: Детальное логирование для веб-версии
   useEffect(() => {
-    if (typeof window !== 'undefined' && Platform.OS === 'web') {
-      console.log('[Explore] Data check:', {
-        eventsCount: Array.isArray(events) ? events.length : 'NOT_ARRAY',
-        eventsType: typeof events,
-        currentUserId,
-        userFoldersCount: Array.isArray(userFolders) ? userFolders.length : 'NOT_ARRAY',
-        hasGetUserData: typeof getUserData === 'function',
-        hasGetGlobalEvents: typeof getGlobalEvents === 'function',
-      });
-    }
-  }, [events, currentUserId, userFolders, getUserData, getGlobalEvents]);
+  }, [accessToken, currentUserId]);
 
-  // ОТЛАДКА: Показываем информацию о загрузке данных (только на мобильных, не на вебе)
-  useEffect(() => {
-    if (Platform.OS !== 'web' && events.length === 0 && currentUserId) {
-      // Показываем Alert только один раз через 3 секунды после загрузки
-      const timer = setTimeout(() => {
-        Alert.alert(
-          'Отладка',
-          `Событий: ${events.length}\nПользователь: ${currentUserId ? 'да' : 'нет'}\nПроверьте логи в консоли`,
-          [{ text: 'OK' }]
-        );
-      }, 3000);
-      return () => clearTimeout(timer);
-    } else if (Platform.OS === 'web' && events.length === 0 && currentUserId) {
-      // На вебе просто логируем в консоль
-      console.warn('[Explore] No events loaded after 3 seconds', {
-        eventsCount: events.length,
-        hasUserId: !!currentUserId,
-        eventsIsArray: Array.isArray(events),
-      });
-    }
-  }, [events.length, currentUserId]);
-  
   // Отслеживаем количество событий для прокрутки к началу при появлении новых
   const prevEventsCountRef = useRef<number>(0);
   
@@ -291,7 +270,10 @@ export default function ExploreScreen() {
     });
   };
 
-  // Получаем организаторов в том же порядке, что и события
+  // Получаем организаторов в том же порядке, что и события.
+  // ВАЖНО: НЕ вызываем getOrganizerStats здесь — это триггерит /complaints/count для каждого
+  // организатора (2-3с на запрос) и вызывает каскадные ре-рендеры через setOrganizerStatsCache.
+  // Статистика грузится лениво внутри OrganizerCard при открытии панели.
   const getOrganizersForEvents = (eventsList: Event[]) => {
     if (!eventsList || !Array.isArray(eventsList)) {
       return [];
@@ -301,17 +283,13 @@ export default function ExploreScreen() {
       .map(event => {
         try {
           const userData = getUserData(event.organizerId);
-          const stats = getOrganizerStats(event.organizerId);
-          if (!userData || !userData.id || !userData.name) {
-            console.warn('[Explore] Invalid userData for organizer:', event.organizerId);
-            return null;
-          }
+          if (!userData) return null;
           // Вычисляем sharedEvents если это не текущий пользователь
           const sharedEvents = currentUserId && currentUserId !== event.organizerId
             ? events.filter(e => isUserEventMember(e, currentUserId) && isUserEventMember(e, event.organizerId)).length
             : undefined;
           return {
-            eventId: event.id, // Добавляем ID события для связи
+            eventId: event.id,
             organizerId: event.organizerId,
             name: userData.name,
             username: userData.username,
@@ -319,9 +297,10 @@ export default function ExploreScreen() {
             age: userData.age,
             bio: userData.bio,
             geoPosition: userData.geoPosition,
+            // Плейсхолдер — реальные данные грузит OrganizerCard сам
             stats: {
-              ...stats,
-              sharedEvents
+              totalEvents: 0, organizedEvents: 0, participatedEvents: 0,
+              complaints: 0, friends: 0, sharedEvents
             }
           };
         } catch (error) {
@@ -335,75 +314,34 @@ export default function ExploreScreen() {
 
   // PanResponder для свайпа вправо
   const panResponder = PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gestureState) => {
-      return (gestureState.dx > 20 && !showOrganizers) || (Math.abs(gestureState.dx) > 20 && showOrganizers);
-    },
-    onPanResponderMove: (_, gestureState) => {
-      if (gestureState.dx > 0) {
-        // Свайп вправо - показываем организаторов
-        const maxTranslate = 350; // Максимальное смещение
-        const translateValue = Math.min(gestureState.dx, maxTranslate);
-        translateX.setValue(translateValue);
-      } else if (gestureState.dx < 0 && showOrganizers) {
-        // Свайп влево при открытых организаторах
-        const currentValue = showOrganizers ? 350 : 0;
-        const translateValue = Math.max(currentValue + gestureState.dx, 0);
-        translateX.setValue(translateValue);
+    onMoveShouldSetPanResponderCapture: (_, gs) =>
+      Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > 15,
+    onMoveShouldSetPanResponder: (_, gs) =>
+      Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > 15,
+    onPanResponderMove: (_, gs) => {
+      if (gs.dx > 0 && !showOrganizers) {
+        translateX.setValue(Math.min(gs.dx, ORGANIZER_WIDTH));
+      } else if (gs.dx < 0 && showOrganizers) {
+        translateX.setValue(Math.max(ORGANIZER_WIDTH + gs.dx, 0));
       }
     },
-    onPanResponderRelease: (_, gestureState) => {
-      if (gestureState.dx > 150 && !showOrganizers) {
-        // Показываем организаторов
-        Animated.spring(translateX, {
-          toValue: 350,
-          useNativeDriver: true,
-        }).start();
+    onPanResponderRelease: (_, gs) => {
+      if (gs.dx > 100 && !showOrganizers) {
+        Animated.spring(translateX, { toValue: ORGANIZER_WIDTH, useNativeDriver: true }).start();
         setShowOrganizers(true);
-      } else if (gestureState.dx < -150 && showOrganizers) {
-        // Скрываем организаторов
-        Animated.spring(translateX, {
-          toValue: 0,
-          useNativeDriver: true,
-        }).start();
+      } else if (gs.dx < -100 && showOrganizers) {
+        Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
         setShowOrganizers(false);
-        setActiveTab('GLOB'); // Возвращаем на GLOB при скрытии
-      } else if (showOrganizers) {
-        // Возвращаем в исходное положение
-        Animated.spring(translateX, {
-          toValue: 350,
-          useNativeDriver: true,
-        }).start();
       } else {
-        // Возвращаем в исходное положение
-        Animated.spring(translateX, {
-          toValue: 0,
-          useNativeDriver: true,
-        }).start();
+        Animated.spring(translateX, { toValue: showOrganizers ? ORGANIZER_WIDTH : 0, useNativeDriver: true }).start();
       }
     },
   });
 
-  // Функции синхронизации скролла - ОБНОВЛЕНО для точной синхронизации
-  const EVENT_CARD_HEIGHT = 350; // Высота карточки события для синхронизации скролла
-  const ORGANIZER_CARD_HEIGHT = 350; // ТОЧНО ТА ЖЕ высота карточки организатора
-
-  const syncScrollToOrganizers = (scrollY: number) => {
-    if (!isSyncingRef.current && organizersScrollViewRef.current && Math.abs(scrollY - eventsScrollY) > 20) {
-      isSyncingRef.current = true;
-      organizersScrollViewRef.current.scrollTo({ y: scrollY, animated: false });
-      setEventsScrollY(scrollY);
-      setTimeout(() => { isSyncingRef.current = false; }, 100);
-    }
-  };
-
-  const syncScrollToEvents = (scrollY: number) => {
-    if (!isSyncingRef.current && eventsScrollViewRef.current && Math.abs(scrollY - organizersScrollY) > 20) {
-      isSyncingRef.current = true;
-      eventsScrollViewRef.current.scrollTo({ y: scrollY, animated: false });
-      setOrganizersScrollY(scrollY);
-      setTimeout(() => { isSyncingRef.current = false; }, 100);
-    }
-  };
+  const ORGANIZER_WIDTH = 300;
+  const rawScreenW = Dimensions.get('window').width;
+  const SCREEN_W = Platform.OS === 'web' ? Math.min(rawScreenW, 500) : rawScreenW;
+  const ROW_WIDTH = SCREEN_W + ORGANIZER_WIDTH;
 
   // Получаем все уникальные метки из событий
   const allAvailableTags = useMemo(() => {
@@ -497,11 +435,30 @@ export default function ExploreScreen() {
   
   // Применяем фильтры и поиск с мемоизацией
   const globEvents = useMemo(() => {
-    // Используем getGlobalEvents() для GLOB - только события, на которые еще не откликался
     const globalEvents = getGlobalEvents();
     const filtered = filterEvents(globalEvents);
-    return searchEvents(filtered, searchQuery);
-  }, [getGlobalEvents, filters, searchQuery]);
+    let result = searchEvents(filtered, searchQuery);
+    // Sort by distance if user location available (Haversine formula for accurate geo-distance)
+    if (userCoords && !searchQuery) {
+      const haversineDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      };
+      result = [...result].sort((a, b) => {
+        const distA = a.latitude && a.longitude
+          ? haversineDistance(userCoords.lat, userCoords.lon, a.latitude, a.longitude) : 999;
+        const distB = b.latitude && b.longitude
+          ? haversineDistance(userCoords.lat, userCoords.lon, b.latitude, b.longitude) : 999;
+        return distA - distB;
+      });
+    }
+    return result;
+  }, [getGlobalEvents, filters, searchQuery, userCoords]);
   
   // Прокручиваем к началу при появлении нового события организатора
   useEffect(() => {
@@ -548,9 +505,11 @@ export default function ExploreScreen() {
 
   // Мемоизируем вычисления чтобы избежать лишних ререндеров
   const currentEvents = useMemo(() => getCurrentTabEvents(), [activeTab, globEvents, folderEvents]);
-  const organizersForCurrentEvents = useMemo(() => 
-    getOrganizersForEvents(currentEvents), 
-    [currentEvents, getUserData, getOrganizerStats, currentUserId, events, isUserEventMember]
+  const organizersForCurrentEvents = useMemo(() =>
+    getOrganizersForEvents(currentEvents),
+    // getOrganizerStats намеренно исключён — см. getOrganizersForEvents
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentEvents, getUserData, currentUserId, events, isUserEventMember]
   );
 
   // Функции для работы с папками
@@ -652,72 +611,13 @@ export default function ExploreScreen() {
     }
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: '#FFF', fontSize: 16 }}>Загрузка...</Text>
+        <SkeletonFeed count={3} />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      {/* Лента организаторов (слева) */}
-      <Animated.View 
-        style={[
-          styles.organizersContainer,
-          { transform: [{ translateX: translateX.interpolate({
-            inputRange: [0, 350],
-            outputRange: [-350, 0],
-            extrapolate: 'clamp'
-          }) }] }
-        ]}
-      >
-        {/* Заголовок "Организаторы" на том же уровне что и табы GLOB/FRIENDS */}
-        <View style={styles.organizersTitleBar}>
-          <View style={[
-            styles.organizerTab, 
-            showOrganizers && styles.activeTab
-          ]}>
-            <Text style={[
-              styles.tabText,
-              showOrganizers && styles.activeTabText
-            ]}>{t.explore.organizers}</Text>
-          </View>
-        </View>
-        
-        <ScrollView 
-          ref={organizersScrollViewRef}
-          contentContainerStyle={styles.organizersScrollContent}
-          onScroll={(event) => {
-            const scrollY = event.nativeEvent.contentOffset.y;
-            syncScrollToEvents(scrollY);
-          }}
-          scrollEventThrottle={16}
-        >
-          {organizersForCurrentEvents && organizersForCurrentEvents.length > 0 ? organizersForCurrentEvents.map((organizer, index) => {
-            if (!organizer || !organizer.organizerId || !organizer.eventId) {
-              console.warn('[Explore] Invalid organizer:', organizer);
-              return null;
-            }
-            const correspondingEvent = currentEvents && currentEvents[index];
-            const eventHeight = correspondingEvent ? eventHeights[correspondingEvent.id] : undefined;
-            return (
-              <OrganizerCard
-                key={`${organizer.eventId}-${organizer.organizerId}`}
-                organizerId={organizer.organizerId}
-                name={organizer.name || ''}
-                age={organizer.age || ''}
-                username={organizer.username || ''}
-                avatar={organizer.avatar || ''}
-                bio={organizer.bio || ''}
-                geoPosition={organizer.geoPosition || ''}
-                stats={organizer.stats}
-                correspondingEventId={organizer.eventId}
-                eventHeight={eventHeight}
-                currentUserId={currentUserId}
-              />
-            );
-          }).filter(Boolean) : null}
-        </ScrollView>
-      </Animated.View>
 
       {/* Статичная верхняя панель - поиск и карта */}
       <TopBar
@@ -770,7 +670,7 @@ export default function ExploreScreen() {
             {getAppliedFilters().map((filter, index) => (
               <View key={`${filter.type}-${index}`} style={styles.appliedFilterTag}>
                 <Text style={styles.appliedFilterText}>
-                  {filter.type === 'selectedTags' ? filter.value : `${filter.label}: ${filter.value}`}
+                  {filter.type === 'selectedTags' ? ({ 'age_18_plus': '18+', 'age_21_plus': '21+', 'women_only': 'women only', 'men_only': 'men only', 'recurring': 'recurring', 'starting_soon': 'starting soon', 'массовое': 'массовое' }[filter.value as string] || filter.value) : `${filter.label}: ${filter.value}`}
                 </Text>
                 <TouchableOpacity
                   style={styles.removeFilterButton}
@@ -882,7 +782,7 @@ export default function ExploreScreen() {
                         styles.tagButtonText,
                         isSelected && styles.tagButtonTextSelected
                       ]}>
-                        {tag}
+                        {{ 'age_18_plus': '18+', 'age_21_plus': '21+', 'age_16_plus': '16+', 'women_only': 'women only', 'men_only': 'men only', 'recurring': 'recurring', 'starting_soon': 'starting soon', 'массовое': 'массовое', 'регулярное': 'recurring' }[tag] || tag}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -903,47 +803,59 @@ export default function ExploreScreen() {
       )}
 
 
-      {/* Контент лент - свайпаемая часть */}
-      <Animated.View 
-        style={[
-          styles.swipeableContent,
-          { transform: [{ translateX: translateX }] }
-        ]}
-        {...panResponder.panHandlers}
-      >
-      <ScrollView 
+      {/* Контент — единая широкая лента, сдвигается горизонтально */}
+      <View style={{ flex: 1, overflow: 'hidden' }} {...panResponder.panHandlers}>
+      <Animated.View style={{ flex: 1, width: SCREEN_W + ORGANIZER_WIDTH, transform: [{ translateX: Animated.subtract(translateX, new Animated.Value(ORGANIZER_WIDTH)) }] }}>
+      <ScrollView
         ref={eventsScrollViewRef}
-        contentContainerStyle={styles.eventsContainer}
+        contentContainerStyle={{ paddingBottom: 24 }}
+        removeClippedSubviews={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF8D32" />}
         onScroll={(event) => {
-          const scrollY = event.nativeEvent.contentOffset.y;
-          syncScrollToOrganizers(scrollY);
+          const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+          if (contentSize.height - contentOffset.y - layoutMeasurement.height < 1500) {
+            setVisibleCount(prev => prev + PAGE_SIZE);
+          }
         }}
-        scrollEventThrottle={16}
+        scrollEventThrottle={100}
       >
-        {/* Панель с табами GLOB/FRIENDS - теперь часть прокручиваемого контента */}
-        <View style={styles.tabsBar}>
-          <TouchableOpacity 
+        {/* Табы — ряд с организаторским spacer слева */}
+        <View style={{ flexDirection: 'row', width: SCREEN_W + ORGANIZER_WIDTH }}>
+          <View style={{ width: ORGANIZER_WIDTH, paddingHorizontal: 8 }}>
+            <View style={styles.tabsBar}>
+              <View style={[styles.tab, styles.activeTab]}>
+                <Text style={[styles.tabText, styles.activeTabText]}>{t.explore.organizers}</Text>
+              </View>
+            </View>
+          </View>
+        <View style={[styles.tabsBar, { width: SCREEN_W, paddingHorizontal: 20 }]} {...(Platform.OS === 'web' ? { nativeID: 'explore-tabs-bar', dataSet: { exploreTabsBar: 'true' } } : {})}>
+          <TouchableOpacity
             style={[styles.tab, activeTab === 'GLOB' && styles.activeTab]}
             onPress={() => {
               setActiveTab('GLOB');
+              setVisibleCount(PAGE_SIZE);
               setShowOrganizers(false);
               translateX.setValue(0);
             }}
+            {...(Platform.OS === 'web' ? { dataSet: { active: activeTab === 'GLOB' ? 'true' : 'false' } } : {})}
           >
             <Text style={[styles.tabText, activeTab === 'GLOB' && styles.activeTabText]}>GLOB</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={[styles.tab, activeTab === 'FRIENDS' && styles.activeTab]}
             onPress={() => {
               setActiveTab('FRIENDS');
+              setVisibleCount(PAGE_SIZE);
               setShowOrganizers(false);
               translateX.setValue(0);
             }}
+            {...(Platform.OS === 'web' ? { dataSet: { active: activeTab === 'FRIENDS' ? 'true' : 'false' } } : {})}
           >
             <Text style={[styles.tabText, activeTab === 'FRIENDS' && styles.activeTabText]}>FRIENDS</Text>
           </TouchableOpacity>
 
+        </View>
         </View>
 
         {/* Папки для FRIENDS - перемещены внутрь ScrollView */}
@@ -986,43 +898,65 @@ export default function ExploreScreen() {
             </ScrollView>
           </View>
         )}
+
         {activeTab === 'GLOB' ? (
           globEvents.length > 0 ? (
-            globEvents.map((event) => (
-            <EventCard
-                key={event.id}
-                id={event.id}
-                title={event.title}
-                description={event.description}
-                date={event.date}
-                time={event.time}
-                displayDate={event.displayDate}
-                location={event.location}
-                price={event.price}
-                participants={event.participants}
-                maxParticipants={event.maxParticipants}
-                organizerAvatar={event.organizerAvatar}
-                organizerId={event.organizerId}
-              variant="default"
-                mediaUrl={event.mediaUrl}
-                mediaType={event.mediaType}
-                mediaAspectRatio={event.mediaAspectRatio}
-                participantsList={event.participantsList}
-                participantsData={event.participantsData}
-                context="explore"
-                tags={event.tags}
-                onLayout={(height) => handleEventLayout(event.id, height)}
-              />
-            ))
+            globEvents.slice(0, visibleCount).map((event) => {
+              const org = organizersForCurrentEvents?.find(o => o.eventId === event.id);
+              return (
+                <View key={event.id} style={{ flexDirection: 'row', width: SCREEN_W + ORGANIZER_WIDTH }}>
+                  <View style={{ width: ORGANIZER_WIDTH, paddingHorizontal: 8 }}>
+                    <OrganizerCard
+                      organizerId={event.organizerId}
+                      name={org?.name || ''}
+                      age={org?.age || ''}
+                      username={org?.username || ''}
+                      avatar={org?.avatar || event.organizerAvatar || ''}
+                      bio={org?.bio || ''}
+                      geoPosition={org?.geoPosition || ''}
+                      stats={org?.stats || { totalEvents: 0, organizedEvents: 0, participatedEvents: 0, complaints: 0, friends: 0 }}
+                      correspondingEventId={event.id}
+                      eventHeight={eventHeights[event.id]}
+                      currentUserId={currentUserId}
+                    />
+                  </View>
+                  <View style={{ width: SCREEN_W, paddingHorizontal: 20 }}>
+                    <EventCard
+                      id={event.id}
+                      title={event.title}
+                      description={event.description}
+                      date={event.date}
+                      time={event.time}
+                      displayDate={event.displayDate}
+                      location={event.location}
+                      price={event.price}
+                      participants={event.participants}
+                      maxParticipants={event.maxParticipants}
+                      organizerAvatar={event.organizerAvatar}
+                      organizerId={event.organizerId}
+                      variant="default"
+                      mediaUrl={event.mediaUrl}
+                      mediaType={event.mediaType}
+                      mediaAspectRatio={event.mediaAspectRatio}
+                      participantsList={event.participantsList}
+                      participantsData={event.participantsData}
+                      context="explore"
+                      tags={event.tags}
+                      onLayout={(height) => handleEventLayout(event.id, height)}
+                    />
+                  </View>
+                </View>
+              );
+            })
           ) : (
-            <View style={styles.emptyState}>
+            <View style={[styles.emptyState, { width: SCREEN_W, paddingHorizontal: 20 }]}>
               <Text style={styles.emptyText}>{t.empty.noEvents}</Text>
               <Text style={styles.emptySubtext}>{t.empty.noEventsSubtext}</Text>
             </View>
           )
         ) : (
           folderEvents.length > 0 ? (
-            folderEvents.map((event) => (
+            folderEvents.slice(0, visibleCount).map((event) => (
             <EventCard
                 key={event.id}
                 id={event.id}
@@ -1057,6 +991,7 @@ export default function ExploreScreen() {
         )}
       </ScrollView>
       </Animated.View>
+      </View>
 
       {/* Модальное окно создания папки */}
       <Modal
@@ -1099,42 +1034,16 @@ export default function ExploreScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
-  },
-  organizersContainer: {
-    position: 'absolute',
-    left: 0,
-    top: 130, // Увеличиваем чтобы точно избежать перекрытия строки поиска
-    width: 350,
-    bottom: 0, // Используем bottom вместо height для правильного позиционирования
-    backgroundColor: '#121212',
-    zIndex: 1,
-  },
-  organizersTitleBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingBottom: 10,
-    // Убираем paddingTop чтобы выровнять с tabsBar на одной высоте
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  organizersTitleText: {
-    color: '#FFF',
-    fontSize: 18,
-    fontWeight: '500',
-  },
-  organizersScrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 0, // Убираем отступ сверху для выравнивания с событиями
-    paddingBottom: 100,
+    backgroundColor: '#0a0a0c',
   },
   mainContent: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   swipeableContent: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
+    overflow: 'hidden',
   },
   topBar: {
     flexDirection: 'row',
@@ -1147,7 +1056,7 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 20,
     paddingHorizontal: 15,
     paddingVertical: 8,
@@ -1157,12 +1066,12 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: '#FFF',
+    color: '#f4f4f5',
     marginLeft: 8,
   },
   searchIcon: {
     fontSize: 18,
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
   },
   mapButton: {
     padding: 8,
@@ -1193,7 +1102,7 @@ const styles = StyleSheet.create({
   },
   activeTab: {
     borderBottomWidth: 2,
-    borderBottomColor: '#0066CC',
+    borderBottomColor: '#f4f4f5',
   },
   tabText: {
     color: '#888',
@@ -1201,13 +1110,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   activeTabText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
   },
   eventsContainer: {
     paddingHorizontal: 20,
     paddingTop: 0,
-    paddingBottom: 20,
+    paddingBottom: 24,
   },
   eventCard: {
     width: '48%',
@@ -1221,12 +1130,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 60,
+    paddingHorizontal: 24,
   },
   emptyText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginBottom: 8,
+    textAlign: 'center',
   },
   emptySubtext: {
     fontSize: 14,
@@ -1235,14 +1146,14 @@ const styles = StyleSheet.create({
   },
   // Стили для фильтров
   filtersPanel: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#141417',
     paddingHorizontal: 20,
     paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   filtersTitle: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 15,
@@ -1268,21 +1179,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   filterInput: {
-    backgroundColor: '#333',
-    color: '#FFF',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    color: '#f4f4f5',
     paddingHorizontal: 10,
     paddingVertical: 8,
-    borderRadius: 6,
+    borderRadius: 10,
     fontSize: 14,
     flex: 1,
     marginRight: 8,
   },
   filterInputWide: {
-    backgroundColor: '#333',
-    color: '#FFF',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    color: '#f4f4f5',
     paddingHorizontal: 10,
     paddingVertical: 8,
-    borderRadius: 6,
+    borderRadius: 10,
     fontSize: 14,
     flex: 1,
   },
@@ -1295,22 +1210,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     paddingVertical: 8,
     marginRight: 10,
-    borderRadius: 6,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#666',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   clearFiltersText: {
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     fontSize: 14,
   },
   applyFiltersButton: {
     paddingHorizontal: 15,
     paddingVertical: 8,
-    backgroundColor: '#8B5CF6',
-    borderRadius: 6,
+    backgroundColor: '#FF8D32',
+    borderRadius: 10,
   },
   applyFiltersText: {
-    color: '#FFF',
+    color: '#0A0A0A',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1328,30 +1243,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: '#555',
+    borderColor: 'rgba(255,255,255,0.1)',
     marginRight: 8,
     marginBottom: 4,
   },
   tagButtonSelected: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
+    borderColor: '#FF8D32',
   },
   tagButtonText: {
     color: '#CCC',
     fontSize: 13,
   },
   tagButtonTextSelected: {
-    color: '#FFF',
+    color: '#0A0A0A',
     fontWeight: '600',
   },
   // Стили для папок
   usersSearchResults: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#141417',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   usersSearchScrollContent: {
     paddingHorizontal: 20,
@@ -1367,39 +1282,39 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 30,
     marginBottom: 8,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   userSearchUsername: {
     fontSize: 12,
-    color: '#FFF',
+    color: '#f4f4f5',
     textAlign: 'center',
     maxWidth: 70,
   },
   // Стили для примененных фильтров
   appliedFiltersContainer: {
-    backgroundColor: '#1a1a1a',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
   },
   appliedFiltersScrollContent: {
-    paddingHorizontal: 20,
-    paddingRight: 20,
+    gap: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   appliedFilterTag: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#8B5CF6',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginRight: 8,
+    backgroundColor: 'rgba(255,141,50,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,141,50,0.3)',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
   },
   appliedFilterText: {
-    color: '#FFF',
+    color: '#FF8D32',
     fontSize: 13,
-    fontWeight: '500',
-    marginRight: 6,
+    fontWeight: '600',
+    marginRight: 8,
   },
   removeFilterButton: {
     width: 18,
@@ -1410,7 +1325,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   removeFilterIcon: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -1422,14 +1337,14 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#444',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
     alignSelf: 'center',
   },
   addFolderIconSmall: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.5)',
     fontSize: 16,
     fontWeight: 'normal',
   },
@@ -1446,20 +1361,20 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginRight: 10,
     borderRadius: 20,
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: '#555',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   selectedFolder: {
-    backgroundColor: '#8B5CF6',
-    borderColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
+    borderColor: '#FF8D32',
   },
   folderText: {
     color: '#CCC',
     fontSize: 14,
   },
   selectedFolderText: {
-    color: '#FFF',
+    color: '#0A0A0A',
     fontWeight: '600',
   },
   // Стили для модального окна
@@ -1471,25 +1386,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   modalContent: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
+    backgroundColor: '#141417',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
     padding: 20,
     width: '100%',
     maxWidth: 300,
   },
   modalTitle: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 15,
     textAlign: 'center',
   },
   modalInput: {
-    backgroundColor: '#333',
-    color: '#FFF',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    color: '#f4f4f5',
     paddingHorizontal: 15,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 14,
     fontSize: 16,
     marginBottom: 20,
   },
@@ -1500,28 +1419,30 @@ const styles = StyleSheet.create({
   modalCancelButton: {
     paddingHorizontal: 20,
     paddingVertical: 10,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#666',
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     flex: 1,
     marginRight: 10,
   },
   modalCancelText: {
-    color: '#CCC',
+    color: 'rgba(244,244,245,0.65)',
     fontSize: 16,
     textAlign: 'center',
   },
   modalCreateButton: {
     paddingHorizontal: 20,
     paddingVertical: 10,
-    backgroundColor: '#8B5CF6',
-    borderRadius: 8,
+    backgroundColor: '#FF8D32',
+    borderRadius: 12,
     flex: 1,
   },
   modalCreateText: {
-    color: '#FFF',
+    color: '#0A0A0A',
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
   },
 });
+

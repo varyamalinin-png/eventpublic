@@ -140,13 +140,13 @@ export default function EventFolderViewScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   scrollView: {
     flex: 1,
   },
   loadingText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 16,
     textAlign: 'center',
     marginTop: 50,
@@ -162,7 +162,7 @@ const styles = StyleSheet.create({
     paddingTop: 50,
   },
   backText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 16,
   },
   folderCardContainer: {
@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     marginBottom: 16,
   },
   eventCardContainer: {

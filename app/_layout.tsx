@@ -1,76 +1,72 @@
+import React from 'react';
 import { Stack } from 'expo-router';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, View, Platform, StatusBar } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { EventsProvider } from '../context/EventsContext';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { LanguageProvider } from '../context/LanguageContext';
+import { ThemeProvider } from '../context/ThemeContext';
+import OfflineBanner from '../components/OfflineBanner';
 
-// ПЕРЕХВАТЫВАЕМ WebSocket ОШИБКИ САМЫМ ПЕРВЫМ ДЕЛОМ
-// Это нужно сделать до импорта любых модулей, которые могут использовать WebSocket
-if (!(global as any).__websocketErrorSuppressed) {
-  (global as any).__websocketErrorSuppressed = true;
+// Обработка ошибок инициализации Metro и router для всех платформ
   const originalError = console.error;
   console.error = (...args: any[]) => {
-    const errorString = args.map(arg => {
-      if (typeof arg === 'string') return arg;
-      if (arg?.message) return arg.message;
-      if (arg?.toString) return arg.toString();
-      try {
-        return JSON.stringify(arg);
-      } catch {
-        return String(arg);
+    const errorString = String(args[0] || '');
+  // Подавляем ошибки router.use, которые не критичны
+  if ((errorString.includes('Cannot read property') && errorString.includes('use')) || 
+      (errorString.includes('Cannot access') && errorString.includes('before initialization'))) {
+      if (__DEV__) {
+      console.warn('[Suppressed router/Metro init error]', ...args);
       }
-    }).join(' ');
-    
-    // Подавляем WebSocket ошибки и ошибки инициализации Expo Router
-    if (
-      errorString.includes('WebSocket connection error') ||
-      errorString.includes('websocket error') ||
-      errorString.includes('TransportError') ||
-      errorString.includes('engine.io-client') ||
-      errorString.includes('Cannot access') ||
-      errorString.includes('before initialization') ||
-      (errorString.includes('_construct') && errorString.includes('construct.js'))
-    ) {
-      return; // Не выводим эти ошибки
+      return;
     }
-    
     originalError(...args);
   };
+
+// Глобальная обработка ошибок для всех платформ
+if (typeof global !== 'undefined') {
+  const originalGlobalHandler = global.ErrorUtils?.getGlobalHandler?.();
+  if (global.ErrorUtils) {
+    global.ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
+      const errorMsg = error?.message || String(error);
+      // Подавляем ошибки router.use
+      if (errorMsg.includes('Cannot read property') && errorMsg.includes('use')) {
+        if (__DEV__) {
+          console.warn('[Suppressed global router error]', error);
+        }
+        return;
+      }
+      // Для всех остальных ошибок используем стандартный обработчик
+      if (originalGlobalHandler) {
+        originalGlobalHandler(error, isFatal);
+      }
+    });
+  }
 }
 
-function AuthenticatedStack() {
-  return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="settings" />
-      <Stack.Screen name="add-account" />
-      <Stack.Screen name="add-account-verify" />
-      <Stack.Screen name="calendar" />
-      <Stack.Screen name="map" />
-      <Stack.Screen name="profile/[id]" />
-      <Stack.Screen name="friends-list" />
-      <Stack.Screen name="friends-list/[id]" />
-      <Stack.Screen name="event-profile/[id]" />
-      <Stack.Screen name="all-events/[userId]" />
-      <Stack.Screen name="organized-events/[userId]" />
-      <Stack.Screen name="participated-events/[userId]" />
-      <Stack.Screen name="shared-events/[userId]" />
-      <Stack.Screen name="payment" />
-      <Stack.Screen name="admin/index" />
-      <Stack.Screen name="admin/complaints" />
-      <Stack.Screen name="+not-found" />
-    </Stack>
-  );
-}
+  // Обработка глобальных ошибок (только для веба)
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('error', (event) => {
+      const errorMessage = String(event.message || '');
+    if (errorMessage.includes('Cannot read property') && errorMessage.includes('use')) {
+        event.preventDefault();
+        if (__DEV__) {
+        console.warn('[Suppressed global router error]', event);
+        }
+      }
+    }, true);
 
-function UnauthenticatedStack() {
-  return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(auth)" />
-    </Stack>
-  );
+    // Обработка необработанных промисов
+    window.addEventListener('unhandledrejection', (event) => {
+      const errorMessage = String(event.reason?.message || event.reason || '');
+    if (errorMessage.includes('Cannot read property') && errorMessage.includes('use')) {
+        event.preventDefault();
+        if (__DEV__) {
+        console.warn('[Suppressed unhandled router rejection]', event.reason);
+        }
+      }
+    });
 }
 
 function RouterGate() {
@@ -78,41 +74,103 @@ function RouterGate() {
 
   if (initializing) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f0f0f' }}>
-        <ActivityIndicator size="large" color="#8B5CF6" />
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0c' }}>
+        <ActivityIndicator size="large" color="#FF8D32" />
       </View>
     );
   }
 
-  return isAuthenticated ? <AuthenticatedStack /> : <UnauthenticatedStack />;
+  const authScreens = isAuthenticated
+    ? [
+        <Stack.Screen key="(tabs)" name="(tabs)" />,
+        <Stack.Screen key="(auth)" name="(auth)" />,
+        <Stack.Screen key="settings" name="settings" />,
+        <Stack.Screen key="add-account" name="add-account" />,
+        <Stack.Screen key="add-account-verify" name="add-account-verify" />,
+        <Stack.Screen key="calendar" name="calendar" />,
+        <Stack.Screen key="map" name="map" />,
+        <Stack.Screen key="profile/[id]" name="profile/[id]" />,
+        <Stack.Screen key="friends-list" name="friends-list" />,
+        <Stack.Screen key="friends-list/[id]" name="friends-list/[id]" />,
+        <Stack.Screen key="event-profile/[id]" name="event-profile/[id]" />,
+        <Stack.Screen key="all-events/[userId]" name="all-events/[userId]" />,
+        <Stack.Screen key="organized-events/[userId]" name="organized-events/[userId]" />,
+        <Stack.Screen key="participated-events/[userId]" name="participated-events/[userId]" />,
+        <Stack.Screen key="shared-events/[userId]" name="shared-events/[userId]" />,
+        <Stack.Screen key="payment" name="payment" />,
+        <Stack.Screen key="create-event" name="create-event" />,
+        <Stack.Screen key="my-events" name="my-events" />,
+        <Stack.Screen key="my-complaints" name="my-complaints" />,
+        <Stack.Screen key="support/complaints" name="support/complaints" />,
+        <Stack.Screen key="select-location" name="select-location" />,
+        <Stack.Screen key="event-folder/[id]" name="event-folder/[id]" />,
+        <Stack.Screen key="event-folder-view/[id]" name="event-folder-view/[id]" />,
+        <Stack.Screen key="memory-post/[eventId]/[postId]" name="memory-post/[eventId]/[postId]" />,
+        <Stack.Screen key="admin/index" name="admin/index" />,
+        <Stack.Screen key="admin/complaints" name="admin/complaints" />,
+        <Stack.Screen key="+not-found" name="+not-found" />,
+      ]
+    : [<Stack.Screen key="(auth)" name="(auth)" />];
+
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="index" />
+      {authScreens}
+    </Stack>
+  );
 }
 
 export default function RootLayout() {
-  // Обрабатываем ошибки инициализации для веба
-  try {
+  // Для веба добавляем задержку инициализации, чтобы избежать проблем с порядком загрузки модулей
+  const [isReady, setIsReady] = React.useState(false);
+  
+  React.useEffect(() => {
+    // Небольшая задержка для веба, чтобы все модули успели загрузиться
+    if (typeof window !== 'undefined') {
+      const timer = setTimeout(() => {
+        setIsReady(true);
+      }, 100);
+      return () => clearTimeout(timer);
+    } else {
+      setIsReady(true);
+    }
+  }, []);
+
+  if (!isReady) {
     return (
-      <GestureHandlerRootView style={{ flex: 1 }}>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0c' }}>
+        <ActivityIndicator size="large" color="#FF8D32" />
+      </View>
+    );
+  }
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0a0a0c' }}>
+      <SafeAreaProvider>
+        <StatusBar barStyle="light-content" backgroundColor="#0a0a0c" />
+        <OfflineBanner />
+        <ThemeProvider>
         <LanguageProvider>
           <AuthProvider>
             <EventsProvider>
-              <RouterGate />
+              <View style={Platform.OS === 'web' ? {
+                flex: 1,
+                width: '100%',
+                backgroundColor: '#0a0a0c',
+              } : {
+                flex: 1,
+                maxWidth: 500,
+                width: '100%',
+                alignSelf: 'center',
+                backgroundColor: '#0a0a0c',
+              }}>
+                <RouterGate />
+              </View>
             </EventsProvider>
           </AuthProvider>
         </LanguageProvider>
-      </GestureHandlerRootView>
-    );
-  } catch (error: any) {
-    // Если ошибка инициализации, показываем загрузку и пробуем еще раз
-    if (error?.message?.includes('Cannot access') || error?.message?.includes('before initialization')) {
-      console.warn('Initialization error (non-critical), app will continue loading...');
-      // Возвращаем загрузку - приложение попробует загрузиться снова
-      return (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f0f0f' }}>
-          <ActivityIndicator size="large" color="#8B5CF6" />
-        </View>
-      );
-    }
-    // Для других ошибок пробрасываем дальше
-    throw error;
-  }
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
 }

@@ -1,4 +1,6 @@
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, FlatList } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, FlatList, Platform } from 'react-native';
+
+
 import { useEvents } from '../context/EventsContext';
 import { Link } from 'expo-router';
 import { useLanguage } from '../context/LanguageContext';
@@ -46,17 +48,17 @@ export default function FriendsListScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   header: {
     paddingHorizontal: 20,
     paddingTop: 60,
     paddingBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   title: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 24,
     fontWeight: 'bold',
   },
@@ -69,7 +71,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   friendAvatar: {
     width: 60,
@@ -81,18 +83,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   friendName: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 4,
   },
   friendUsername: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     marginBottom: 2,
   },
   friendLocation: {
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     fontSize: 12,
   },
   emptyContainer: {
@@ -102,7 +104,7 @@ const styles = StyleSheet.create({
     paddingTop: 100,
   },
   emptyText: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 16,
     textAlign: 'center',
     fontStyle: 'italic',

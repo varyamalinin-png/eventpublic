@@ -213,13 +213,13 @@ export default function OrganizedEventsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   header: {
     paddingTop: 60,
     paddingBottom: 15,
     paddingHorizontal: 20,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -227,13 +227,13 @@ const styles = StyleSheet.create({
     marginRight: 15,
   },
   backText: {
-    color: '#007AFF',
+    color: '#FF8D32',
     fontSize: 16,
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: '#f4f4f5',
     flex: 1,
   },
   scrollView: {
@@ -250,7 +250,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     textAlign: 'center',
     marginTop: 20,
     width: '100%',

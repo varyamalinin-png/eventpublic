@@ -11,13 +11,9 @@ interface FolderCardProps {
   variant?: 'profile' | 'feed'; // 'profile' - для профиля (две объединенные карточки), 'feed' - для ленты (16:9)
 }
 
-export default function FolderCard({ folder, onPress, onSwipeDelete, variant = 'profile' }: FolderCardProps) {
-  // Для профиля: размер = две карточки + отступ между ними
-  const containerPadding = 40; // 20px с каждой стороны
-  const gap = 15; // Отступ между карточками
-  const availableWidth = SCREEN_WIDTH - containerPadding;
-  const singleCardWidth = (availableWidth - gap * 2) / 3; // Ширина одной мини-карточки
-  const folderWidth = singleCardWidth * 2 + gap; // Две карточки + отступ
+function FolderCard({ folder, onPress, onSwipeDelete, variant = 'profile' }: FolderCardProps) {
+  // Для профиля: ширина должна задаваться родительским компонентом
+  // Не рассчитываем ширину здесь, чтобы родитель мог контролировать размер
 
   // Форматируем продолжительность в формате дд.мм.гг - дд.мм.гг
   const formatDuration = () => {
@@ -52,13 +48,11 @@ export default function FolderCard({ folder, onPress, onSwipeDelete, variant = '
           resizeMode="cover"
         />
         <View style={styles.feedOverlay}>
-          <View style={styles.feedTitleContainer}>
-            <View style={styles.feedTitleWithCountContainer}>
-              <Text style={styles.feedFolderName} numberOfLines={1}>{folder.name}</Text>
-              <Text style={styles.feedEventCount}>
-                {folder.eventCount || folder.events?.length || 0} {folder.eventCount === 1 || folder.events?.length === 1 ? 'event' : 'events'}
-              </Text>
-            </View>
+          <View style={styles.feedTitleWithCountContainer}>
+            <Text style={styles.feedFolderName} numberOfLines={1}>{folder.name}</Text>
+            <Text style={styles.feedEventCount}>
+              {folder.eventCount || folder.events?.length || 0} {folder.eventCount === 1 || folder.events?.length === 1 ? 'event' : 'events'}
+            </Text>
           </View>
           {folder.description && (
             <Text style={styles.feedDescription} numberOfLines={2}>
@@ -92,13 +86,9 @@ export default function FolderCard({ folder, onPress, onSwipeDelete, variant = '
     );
   }
 
-  // Для профиля: две объединенные мини-карточки
-  // Высота должна быть такой же, как у EventCard в варианте miniature_1 (110px)
-  const cardHeight = 110; // Фиксированная высота, как у miniature_1
-
   return (
     <TouchableOpacity
-      style={[styles.profileContainer, { width: folderWidth, height: cardHeight }]}
+      style={[styles.profileContainer, { height: '100%' }]}
       onPress={onPress}
       activeOpacity={0.9}
     >
@@ -108,13 +98,11 @@ export default function FolderCard({ folder, onPress, onSwipeDelete, variant = '
         resizeMode="cover"
       />
       <View style={styles.profileOverlay}>
-        <View style={styles.profileTitleContainer}>
-          <View style={styles.profileTitleWithCountContainer}>
-            <Text style={styles.profileFolderName} numberOfLines={2}>{folder.name}</Text>
-            <Text style={styles.profileEventCount}>
-              {folder.eventCount || folder.events?.length || 0} {folder.eventCount === 1 || folder.events?.length === 1 ? 'event' : 'events'}
-            </Text>
-          </View>
+        <View style={styles.profileTitleWithCountContainer}>
+          <Text style={styles.profileFolderName} numberOfLines={2}>{folder.name}</Text>
+          <Text style={styles.profileEventCount}>
+            {folder.eventCount || folder.events?.length || 0} {folder.eventCount === 1 || folder.events?.length === 1 ? 'event' : 'events'}
+          </Text>
         </View>
         {folder.participants && folder.participants.length > 0 && (
           <View style={styles.profileParticipantsOverlay}>
@@ -143,6 +131,8 @@ export default function FolderCard({ folder, onPress, onSwipeDelete, variant = '
   );
 }
 
+export default React.memo(FolderCard);
+
 const styles = StyleSheet.create({
   // Стили для варианта feed (лента)
   feedContainer: {
@@ -150,7 +140,7 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#141417',
   },
   feedImage: {
     width: '100%',
@@ -163,35 +153,38 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 20,
   },
-  feedTitleContainer: {
-    backgroundColor: 'rgba(42, 42, 42, 0.8)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-    marginRight: 12,
-  },
   feedTitleWithCountContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
   },
   feedFolderName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#f4f4f5',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   feedEventCount: {
     fontSize: 11,
-    color: '#AAAAAA',
+    color: '#f4f4f5',
     fontStyle: 'italic',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   feedDescription: {
     fontSize: 14,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     marginTop: 8,
     marginBottom: 8,
     lineHeight: 20,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   feedParticipantsOverlay: {
     flexDirection: 'row',
@@ -204,7 +197,7 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     borderWidth: 0.5,
-    borderColor: '#FFFFFF',
+    borderColor: 'rgba(255,255,255,0.15)',
   },
   feedParticipantMore: {
     backgroundColor: '#4A4A4A',
@@ -212,7 +205,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   feedParticipantMoreText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 10,
     fontWeight: 'bold',
   },
@@ -221,10 +214,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#2A2A2A',
-    marginRight: 15,
-    marginBottom: 10,
-    marginTop: 5,
+    marginRight: 0, // Убираем marginRight, он задается родителем
+    marginBottom: 0, // Убираем marginBottom, он задается родителем
+    marginTop: 0, // Убираем marginTop, он задается родителем
     alignSelf: 'flex-start',
+    width: '100%', // Занимает всю доступную ширину от родителя
   },
   profileImage: {
     width: '100%',
@@ -240,28 +234,28 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-end',
   },
-  profileTitleContainer: {
-    backgroundColor: 'rgba(42, 42, 42, 0.8)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-    marginRight: 8,
-  },
   profileTitleWithCountContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    alignSelf: 'flex-start',
+    marginRight: 8,
   },
   profileFolderName: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#f4f4f5',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   profileEventCount: {
     fontSize: 10,
-    color: '#AAAAAA',
+    color: '#f4f4f5',
     fontStyle: 'italic',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   profileParticipantsOverlay: {
     flexDirection: 'row',
@@ -272,7 +266,7 @@ const styles = StyleSheet.create({
     height: 18,
     borderRadius: 9,
     borderWidth: 0.5,
-    borderColor: '#FFFFFF',
+    borderColor: 'rgba(255,255,255,0.15)',
   },
   profileParticipantMore: {
     backgroundColor: '#4A4A4A',
@@ -280,7 +274,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   profileParticipantMoreText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 8,
     fontWeight: 'bold',
   },

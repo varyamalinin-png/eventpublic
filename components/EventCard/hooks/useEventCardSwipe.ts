@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Animated } from 'react-native';
+import { Animated, Platform } from 'react-native';
 
 export const useEventCardSwipe = () => {
   const translateX = useRef(new Animated.Value(0)).current;
@@ -7,7 +7,7 @@ export const useEventCardSwipe = () => {
   const swipeX = useRef(0);
 
   const resetSwipe = () => {
-    Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
+    Animated.spring(translateX, { toValue: 0, useNativeDriver: Platform.OS !== 'web' }).start();
     setShowSwipeButtons(false);
     swipeX.current = 0;
   };

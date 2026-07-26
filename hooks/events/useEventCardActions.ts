@@ -47,7 +47,10 @@ export function useEventCardActions({
     // ЛЕНТЫ EXPLORE (GLOB/FRIENDS)
     if (context === 'explore') {
       if (isPast) {
-        return [];
+        // Для прошедших событий показываем минимальный набор действий
+        actions.push({ id: 'share', label: t.events.share, isClickable: true });
+        actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
+        return actions;
       }
 
       // Предстоящее время
@@ -64,7 +67,12 @@ export function useEventCardActions({
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
       } else if (relationship === 'accepted') {
-        return [];
+        // Кнопка "Перейти в чат" - активна только если участников >= 2
+        if (participantsCount >= 2) {
+          actions.push({ id: 'go_to_chat', label: t.events.goToChat || 'Перейти в чат', isClickable: true });
+        } else {
+          actions.push({ id: 'go_to_chat', label: t.events.goToChat || 'Перейти в чат', isClickable: false });
+        }
       } else if (relationship === 'organizer') {
         actions.push({ id: 'change_parameters', label: t.events.changeParameters, isClickable: true });
         actions.push({ id: 'change_visibility', label: t.events.changeVisibility, isClickable: true });
@@ -72,6 +80,12 @@ export function useEventCardActions({
         actions.push({ id: 'cancel_event', label: t.events.cancelEvent, isClickable: true });
         if (event.isRecurring) {
           actions.push({ id: 'extend_recurring', label: t.events.extendRecurring || 'Продлить', isClickable: true });
+        }
+        // Кнопка "Перейти в чат" - активна только если участников >= 2
+        if (participantsCount >= 2) {
+          actions.push({ id: 'go_to_chat', label: t.events.goToChat || 'Перейти в чат', isClickable: true });
+        } else {
+          actions.push({ id: 'go_to_chat', label: t.events.goToChat || 'Перейти в чат', isClickable: false });
         }
         actions.push({ id: 'share', label: t.events.share, isClickable: true });
         actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
@@ -121,6 +135,12 @@ export function useEventCardActions({
           actions.push({ id: 'report', label: t.events.report, isClickable: true });
         } else if (relationship === 'accepted') {
           actions.push({ id: 'cancel_participation', label: t.events.cancelParticipation });
+          // Кнопка "Перейти в чат" - активна только если участников >= 2
+          if (participantsCount >= 2) {
+            actions.push({ id: 'go_to_chat', label: t.events.goToChat || 'Перейти в чат', isClickable: true });
+          } else {
+            actions.push({ id: 'go_to_chat', label: t.events.goToChat || 'Перейти в чат', isClickable: false });
+          }
           actions.push({ id: 'share', label: t.events.share, isClickable: true });
           actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
           actions.push({ id: 'report', label: t.events.report, isClickable: true });
@@ -132,6 +152,12 @@ export function useEventCardActions({
             actions.push({ id: 'transfer_organizer_role', label: t.events.transferOrganizerRole || 'Передать роль организатора', isClickable: true });
           }
           actions.push({ id: 'remove_participant', label: t.events.removeParticipant, isClickable: true });
+          // Кнопка "Перейти в чат" - активна только если участников >= 2
+          if (participantsCount >= 2) {
+            actions.push({ id: 'go_to_chat', label: t.events.goToChat || 'Перейти в чат', isClickable: true });
+          } else {
+            actions.push({ id: 'go_to_chat', label: t.events.goToChat || 'Перейти в чат', isClickable: false });
+          }
           actions.push({ id: 'share', label: t.events.share, isClickable: true });
           actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
         } else if (relationship === 'non_member') {
@@ -167,6 +193,12 @@ export function useEventCardActions({
         if (relationship === 'accepted') {
           actions.push({ id: 'cancel_participation', label: t.events.cancelParticipation });
           actions.push({ id: 'change_visibility', label: t.events.changeVisibility });
+          // Кнопка "Перейти в чат" - активна только если участников >= 2
+          if (participantsCount >= 2) {
+            actions.push({ id: 'go_to_chat', label: t.events.goToChat || 'Перейти в чат', isClickable: true });
+          } else {
+            actions.push({ id: 'go_to_chat', label: t.events.goToChat || 'Перейти в чат', isClickable: false });
+          }
           actions.push({ id: 'share', label: t.events.share, isClickable: true });
           actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
         } else if (relationship === 'organizer') {
@@ -177,6 +209,12 @@ export function useEventCardActions({
             actions.push({ id: 'transfer_organizer_role', label: t.events.transferOrganizerRole || 'Передать роль организатора', isClickable: true });
           }
           actions.push({ id: 'change_visibility', label: t.events.changeVisibility, isClickable: true });
+          // Кнопка "Перейти в чат" - активна только если участников >= 2
+          if (participantsCount >= 2) {
+            actions.push({ id: 'go_to_chat', label: t.events.goToChat || 'Перейти в чат', isClickable: true });
+          } else {
+            actions.push({ id: 'go_to_chat', label: t.events.goToChat || 'Перейти в чат', isClickable: false });
+          }
           actions.push({ id: 'share', label: t.events.share, isClickable: true });
           actions.push({ id: 'save', label: getSaveButtonLabel(), isClickable: true });
         }

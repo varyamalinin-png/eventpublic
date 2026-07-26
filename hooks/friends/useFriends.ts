@@ -169,13 +169,12 @@ export function useFriends({
         });
       }
     } catch (error) {
-      // Проверяем только 401/403 - другие ошибки не должны вызывать logout
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-        if (await handleUnauthorizedError(error)) {
-          return;
-        }
+        if (await handleUnauthorizedError(error)) return;
+        logger.debug('[Friends] Unauthorized loading friends');
+        return;
       }
-      logger.error('Failed to load friends from API', error);
+      logger.warn('[Friends] Failed to load friends from API', error);
     }
   }, [applyServerUserDataToState, handleUnauthorizedError]);
 

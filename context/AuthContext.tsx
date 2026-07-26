@@ -1,6 +1,17 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { apiRequest, ApiError } from '../services/api';
+
+/** На вебе при полной потере сессии редиректим на /login без перезагрузки страницы пользователем */
+function redirectToLoginIfWeb() {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    const path = window.location.pathname || '';
+    if (path !== '/login' && path !== '/auth' && !path.startsWith('/verify-email')) {
+      window.location.href = '/login';
+    }
+  }
+}
 
 const ACCESS_TOKEN_KEY = 'auth.accessToken';
 const REFRESH_TOKEN_KEY = 'auth.refreshToken';
@@ -68,9 +79,12 @@ interface AuthContextShape {
 
 const AuthContext = createContext<AuthContextShape | undefined>(undefined);
 
+// Отключено, чтобы не засорять терминал; для отладки заменить на (...a: unknown[]) => authLog('[Auth]', ...a)
+const authLog = (..._args: unknown[]) => {};
+
 export const useAuth = () => {
   const ctx = useContext(AuthContext);
-  if (!ctx) {
+  if (ctx === undefined || ctx === null) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return ctx;
@@ -172,10 +186,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const next = updater(accountsToUse);
       
       // Важно: сохраняем ВСЕ аккаунты, включая неактивные
-      console.log('[Auth] updateAccounts: обновление аккаунтов, было:', accountsToUse.length, 'стало:', next.length);
+      authLog('[Auth] updateAccounts: обновление аккаунтов, было:', accountsToUse.length, 'стало:', next.length);
       if (next.length < accountsToUse.length && !options?.skipWarning) {
-        // Пропускаем предупреждение только если это намеренное удаление (например, при logout последнего аккаунта)
-        console.error('[Auth] updateAccounts: ВНИМАНИЕ! Количество аккаунтов уменьшилось! Было:', accountsToUse.length, 'стало:', next.length, 'потерянные:', accountsToUse.filter(p => !next.find(n => n.userId === p.userId)).map(a => a.userId));
+        authLog('[Auth] updateAccounts: количество аккаунтов уменьшилось, было:', accountsToUse.length, 'стало:', next.length);
       }
       
       // Сохраняем в storage ПЕРЕД обновлением состояния React
@@ -237,7 +250,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const activeIdFromStorage = await storageGet(ACTIVE_ACCOUNT_KEY, secureStorageAvailable);
     const currentActiveId = userIdToRemove || activeIdFromStorage || activeAccountId;
     
-    console.log('[Auth] clearSessionAndRemoveAccount: удаление аккаунта', currentActiveId, 'userIdToRemove:', userIdToRemove, 'activeAccountId:', activeAccountId, 'activeIdFromStorage:', activeIdFromStorage);
+    authLog('[Auth] clearSessionAndRemoveAccount: удаление аккаунта', currentActiveId, 'userIdToRemove:', userIdToRemove, 'activeAccountId:', activeAccountId, 'activeIdFromStorage:', activeIdFromStorage);
     
     // Очищаем сессию
     await clearSession();
@@ -246,7 +259,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (currentActiveId) {
       await updateAccounts(prev => {
         const filtered = prev.filter(acc => acc.userId !== currentActiveId);
-        console.log('[Auth] clearSessionAndRemoveAccount: удален аккаунт', currentActiveId, 'осталось аккаунтов:', filtered.length);
+        authLog('[Auth] clearSessionAndRemoveAccount: удален аккаунт', currentActiveId, 'осталось аккаунтов:', filtered.length);
         return filtered;
       }, { skipWarning: true });
       
@@ -263,15 +276,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser({
             id: nextAccount.userId,
             email: nextAccount.email || '',
-<<<<<<< HEAD
-            username: nextAccount.username || '',
-            name: nextAccount.name || '',
-            avatarUrl: nextAccount.avatarUrl || '',
-=======
             username: nextAccount.username || undefined,
             name: nextAccount.name || undefined,
             avatarUrl: nextAccount.avatarUrl || undefined,
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
           });
         }
       }
@@ -307,9 +314,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // КРИТИЧЕСКИ ВАЖНО: сохраняем ВСЕ существующие аккаунты, только обновляем текущий
         const otherAccounts = prev.filter(acc => acc.userId !== updated.userId);
         const result = [updated, ...otherAccounts];
-        console.log('[Auth] upsertAccount: сохранено аккаунтов:', result.length, 'обновлен:', updated.userId, 'другие аккаунты:', otherAccounts.map(a => a.userId));
+        authLog('[Auth] upsertAccount: сохранено аккаунтов:', result.length, 'обновлен:', updated.userId, 'другие аккаунты:', otherAccounts.map(a => a.userId));
         if (result.length < prev.length) {
-          console.error('[Auth] upsertAccount: ВНИМАНИЕ! Количество аккаунтов уменьшилось! Было:', prev.length, 'стало:', result.length, 'потерянные:', prev.filter(a => !result.find(r => r.userId === a.userId)).map(a => a.userId));
+          authLog('[Auth] upsertAccount: количество аккаунтов уменьшилось, было:', prev.length, 'стало:', result.length);
         }
         return result;
       });
@@ -324,8 +331,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const normalizeMediaUrl = useCallback((input?: string | null) => {
     if (!input) return undefined;
     try {
-      // Получаем storage URL из переменной окружения или используем дефолтный
-      const storageUrl = process.env.EXPO_PUBLIC_STORAGE_URL || 'http://192.168.0.39:9000';
+      // Получаем storage URL из переменной окружения (поддерживаем и EXPO_PUBLIC для мобильных, и NEXT_PUBLIC для веба)
+      const storageUrl = (typeof process !== 'undefined' && process.env) 
+        ? (process.env.NEXT_PUBLIC_STORAGE_URL || process.env.EXPO_PUBLIC_STORAGE_URL || 'https://iwent.ru/storage')
+        : 'https://iwent.ru/storage';
       
       // Заменяем старые IP адреса на актуальный storage URL
       let normalized = input;
@@ -338,11 +347,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-<<<<<<< HEAD
-  const refreshSessionRef = useRef<((token?: string) => Promise<void>) | null>(null);
-
-=======
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
   const fetchProfile: (tokenOverride?: string | null) => Promise<void> = useCallback(
     async (tokenOverride: string | null = null): Promise<void> => {
       const tokenToUse = tokenOverride ?? accessToken;
@@ -380,7 +384,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // КРИТИЧЕСКИ ВАЖНО: Получаем userId из storage напрямую, так как состояние может быть устаревшим
             const activeIdFromStorage = await storageGet(ACTIVE_ACCOUNT_KEY, secureStorageAvailable);
             const currentUserId = activeIdFromStorage || activeAccountId || user?.id || null;
-            console.log('[Auth] fetchProfile refresh error: удаление аккаунта', currentUserId, 'activeAccountId:', activeAccountId, 'activeIdFromStorage:', activeIdFromStorage, 'user?.id:', user?.id);
+            authLog('[Auth] fetchProfile refresh error: удаление аккаунта', currentUserId, 'activeAccountId:', activeAccountId, 'activeIdFromStorage:', activeIdFromStorage, 'user?.id:', user?.id);
             await clearSessionAndRemoveAccount(currentUserId);
             return;
           }
@@ -390,7 +394,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // КРИТИЧЕСКИ ВАЖНО: Получаем userId из storage напрямую, так как состояние может быть устаревшим
           const activeIdFromStorage = await storageGet(ACTIVE_ACCOUNT_KEY, secureStorageAvailable);
           const currentUserId = activeIdFromStorage || activeAccountId || user?.id || null;
-          console.log('[Auth] fetchProfile: удаление аккаунта', currentUserId, 'activeAccountId:', activeAccountId, 'activeIdFromStorage:', activeIdFromStorage, 'user?.id:', user?.id);
+          authLog('[Auth] fetchProfile: удаление аккаунта', currentUserId, 'activeAccountId:', activeAccountId, 'activeIdFromStorage:', activeIdFromStorage, 'user?.id:', user?.id);
           await clearSessionAndRemoveAccount(currentUserId);
           return;
         } else {
@@ -402,11 +406,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const handleAccountAuthFailure: (failingAccountId: string | null) => Promise<boolean> = useCallback(
-<<<<<<< HEAD
     async (failingAccountId: string | null): Promise<boolean> => {
-=======
-    async (failingAccountId: string | null) => {
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
       const failureKey = failingAccountId || 'null';
       
       // Защита от рекурсивных вызовов
@@ -416,7 +416,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       
       handlingAuthFailure.current.add(failureKey);
-      console.log('[Auth] Handling account auth failure for:', failingAccountId);
+      authLog('[Auth] Handling account auth failure for:', failingAccountId);
       
       try {
         // Удаляем невалидный аккаунт
@@ -433,7 +433,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Если есть другие аккаунты, пытаемся переключиться на первый
         if (remainingAccounts.length > 0) {
           const fallbackAccount = remainingAccounts[0];
-          console.log('[Auth] Attempting to switch to fallback account:', fallbackAccount.userId);
+          authLog('[Auth] Attempting to switch to fallback account:', fallbackAccount.userId);
           
           // Проверяем, не обрабатываем ли мы уже этот аккаунт
           const fallbackKey = fallbackAccount.userId;
@@ -441,6 +441,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             console.warn('[Auth] Fallback account is already being handled, clearing session');
             await persistActiveAccount(null);
             await clearSession();
+            redirectToLoginIfWeb();
             return false;
           }
           
@@ -463,7 +464,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               accessToken: fallbackAccount.accessToken, 
               refreshToken: fallbackAccount.refreshToken 
             });
-            console.log('[Auth] Successfully switched to fallback account');
+            authLog('[Auth] Successfully switched to fallback account');
             handlingAuthFailure.current.delete(failureKey);
             return true;
           } catch (error: any) {
@@ -494,7 +495,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     accessToken: updatedFallback.accessToken, 
                     refreshToken: updatedFallback.refreshToken 
                   });
-                  console.log('[Auth] Successfully switched to fallback account after refresh');
+                  authLog('[Auth] Successfully switched to fallback account after refresh');
                   handlingAuthFailure.current.delete(failureKey);
                   return true;
                 }
@@ -510,15 +511,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             await persistActiveAccount(null);
             await clearSession();
             handlingAuthFailure.current.delete(failureKey);
+            redirectToLoginIfWeb();
             return false;
           }
         }
 
         // Если других аккаунтов нет, полностью очищаем сессию
-        console.log('[Auth] No valid accounts remaining, clearing session');
+        authLog('[Auth] No valid accounts remaining, clearing session');
         await persistActiveAccount(null);
         await clearSession();
         handlingAuthFailure.current.delete(failureKey);
+        redirectToLoginIfWeb();
         return false;
       } finally {
         // Убеждаемся, что удаляем ключ даже при ошибке
@@ -543,7 +546,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Защита от повторных вызовов с тем же токеном
       const refreshKey = `${refreshTokenToUse.substring(0, 20)}`;
       if (refreshingTokens.current.has(refreshKey)) {
-        console.log('[Auth] Refresh already in progress for this token, skipping');
+        authLog('[Auth] Refresh already in progress for this token, skipping');
         return;
       }
       
@@ -574,16 +577,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           error instanceof ApiError
             ? error.status === 401 || error.status === 403
             : (error as any)?.message?.toLowerCase?.().includes('invalid refresh');
-        
-        const isNetworkError = 
-          (error as any)?.message?.toLowerCase?.().includes('network request failed') ||
-          (error as any)?.message?.toLowerCase?.().includes('failed to fetch');
+
+        const errMsg = (error as any)?.message ?? '';
+        const isAbortOrTimeout =
+          (error as any)?.name === 'AbortError' ||
+          errMsg.includes('Aborted') ||
+          errMsg.toLowerCase().includes('timed out') ||
+          errMsg === 'Network request timed out';
+        const isNetworkError =
+          isAbortOrTimeout ||
+          errMsg.toLowerCase().includes('network request failed') ||
+          errMsg.toLowerCase().includes('failed to fetch');
 
         if (isNetworkError) {
-          // При сетевой ошибке не пытаемся обновлять токен бесконечно
-          console.warn('[Auth] Network error, stopping refresh attempts');
           refreshingTokens.current.delete(refreshKey);
-          await clearSession();
+          if (isAbortOrTimeout) {
+            // Таймаут/прерывание — не выкидываем пользователя, сессия остаётся; повторный refresh попробуют при следующем запросе
+            console.warn('[Auth] Refresh aborted or timed out, keeping session');
+            return;
+          }
+          console.warn('[Auth] Network error during refresh, keeping session');
           return;
         }
 
@@ -595,7 +608,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const switched = await handleAccountAuthFailure(activeAccountId ?? null);
           if (!switched) {
             // Если не удалось переключиться на другой аккаунт, сессия уже очищена
-            console.log('[Auth] Session cleared after auth failure');
+            authLog('[Auth] Session cleared after auth failure');
           }
           return;
         }
@@ -619,6 +632,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ],
   );
 
+  // Устанавливаем refreshSessionRef для использования в других местах
+  useEffect(() => {
+    refreshSessionRef.current = refreshSession;
+  }, [refreshSession]);
+
   const bootstrapSession = useCallback(async () => {
     try {
       const [accountsRaw, activeIdRaw, storedAccess, storedRefresh] = await Promise.all([
@@ -638,7 +656,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const storageAccountIds = new Set(parsedAccounts.map(acc => acc.userId));
         const sessionAccounts = accounts.filter(acc => !storageAccountIds.has(acc.userId));
         mergedAccounts = [...parsedAccounts, ...sessionAccounts];
-        console.log('[Auth] bootstrapSession: загружено из storage:', parsedAccounts.length, 'из сессии:', sessionAccounts.length, 'всего:', mergedAccounts.length);
+        authLog('[Auth] bootstrapSession: загружено из storage:', parsedAccounts.length, 'из сессии:', sessionAccounts.length, 'всего:', mergedAccounts.length);
       } else {
         // Если в storage нет аккаунтов, используем аккаунты из текущей сессии
         mergedAccounts = accounts.length > 0 ? accounts : parsedAccounts;
@@ -753,7 +771,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     // Защита от повторных вызовов bootstrapSession
     if (hasBootstrapped.current) {
-      console.log('[Auth] bootstrapSession уже был вызван, пропускаем');
+      authLog('[Auth] bootstrapSession уже был вызван, пропускаем');
       return;
     }
     
@@ -771,7 +789,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [bootstrapSession]);
 
   useEffect(() => {
-    console.log('[Auth] state', {
+    authLog('[Auth] state', {
       initializing,
       hasAccessToken: Boolean(accessToken),
       hasRefreshToken: Boolean(refreshToken),
@@ -780,6 +798,118 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       activeAccountId,
     });
   }, [initializing, accessToken, refreshToken, user, accounts.length, activeAccountId]);
+
+  // Функция для декодирования JWT токена
+  const decodeJWT = useCallback((token: string): { exp?: number; [key: string]: any } | null => {
+    try {
+      const base64Url = token.split('.')[1];
+      if (!base64Url) return null;
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      return JSON.parse(jsonPayload);
+    } catch (error) {
+      console.warn('[Auth] Failed to decode JWT token', error);
+      return null;
+    }
+  }, []);
+
+  // Функция для проверки истечения токена
+  const isTokenExpired = useCallback((token: string): boolean => {
+    const decoded = decodeJWT(token);
+    if (!decoded || !decoded.exp) return true;
+    // Проверяем с запасом в 2 минуты, чтобы обновить токен до истечения
+    const expirationTime = decoded.exp * 1000; // exp в секундах, конвертируем в миллисекунды
+    const now = Date.now();
+    return now >= (expirationTime - 120000); // 2 минуты запаса
+  }, [decodeJWT]);
+
+  // Автоматическое обновление токена перед истечением
+  useEffect(() => {
+    if (!accessToken || !refreshToken || !refreshSessionRef.current) return;
+
+    // Проверяем, не истек ли токен уже
+    if (isTokenExpired(accessToken)) {
+      authLog('[Auth] Access token expired, refreshing...');
+      refreshSessionRef.current(refreshToken).catch((error) => {
+        console.warn('[Auth] Failed to auto-refresh expired token', error);
+      });
+      return;
+    }
+
+    // Вычисляем время до истечения токена
+    const decoded = decodeJWT(accessToken);
+    if (!decoded || !decoded.exp) return;
+
+    const expirationTime = decoded.exp * 1000;
+    const now = Date.now();
+    const timeUntilExpiration = expirationTime - now;
+    const refreshTime = timeUntilExpiration - 120000; // Обновляем за 2 минуты до истечения
+
+    if (refreshTime <= 0) {
+      // Токен истекает очень скоро, обновляем сразу
+      authLog('[Auth] Access token expires soon, refreshing immediately...');
+      refreshSessionRef.current(refreshToken).catch((error) => {
+        console.warn('[Auth] Failed to auto-refresh token', error);
+      });
+      return;
+    }
+
+    // Устанавливаем таймер для автоматического обновления
+    authLog(`Scheduling token refresh in ${Math.round(refreshTime / 1000)} seconds`);
+    const timeoutId = setTimeout(() => {
+      authLog('[Auth] Auto-refreshing token before expiration...');
+      refreshSessionRef.current?.(refreshToken).catch((error) => {
+        console.warn('[Auth] Failed to auto-refresh token', error);
+      });
+    }, refreshTime);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [accessToken, refreshToken, isTokenExpired, decodeJWT]);
+
+  // Обновление токена при возврате на страницу (для веб)
+  useEffect(() => {
+    // Проверяем, что мы в веб-окружении (document и window доступны только в браузере)
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && accessToken && refreshToken) {
+        // Проверяем, не истек ли токен пока страница была неактивна
+        if (isTokenExpired(accessToken)) {
+          authLog('[Auth] Page became visible, token expired, refreshing...');
+          refreshSessionRef.current?.(refreshToken).catch((error) => {
+            console.warn('[Auth] Failed to refresh token on visibility change', error);
+          });
+        }
+      }
+    };
+
+    const handleFocus = () => {
+      if (accessToken && refreshToken) {
+        // При фокусе также проверяем токен
+        if (isTokenExpired(accessToken)) {
+          authLog('[Auth] Window focused, token expired, refreshing...');
+          refreshSessionRef.current?.(refreshToken).catch((error) => {
+            console.warn('[Auth] Failed to refresh token on focus', error);
+          });
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [accessToken, refreshToken, isTokenExpired]);
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -794,7 +924,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           null,
         );
         
-        console.log('[Auth] login: получены данные', { userId: data.user?.id, hasTokens: !!data.accessToken });
+        authLog('[Auth] login: получены данные', { userId: data.user?.id, hasTokens: !!data.accessToken });
         
         // КРИТИЧЕСКИ ВАЖНО: Сначала сохраняем аккаунт и устанавливаем активный аккаунт
         // Потом устанавливаем сессию, чтобы токены соответствовали активному аккаунту
@@ -807,30 +937,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
           // Явно устанавливаем активный аккаунт ПЕРЕД установкой сессии
           await persistActiveAccount(data.user.id);
-          console.log('[Auth] login: активный аккаунт установлен на', data.user.id);
+          authLog('[Auth] login: активный аккаунт установлен на', data.user.id);
           // Теперь устанавливаем сессию с токенами нового аккаунта
           await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
         } else {
-<<<<<<< HEAD
-          await fetchProfile(data.accessToken);
-          // fetchProfile уже обновил пользователя и аккаунт через setUser и upsertAccount
-          if (user?.id) {
-            await persistActiveAccount(user.id);
-            console.log('[Auth] login: активный аккаунт установлен на', user.id);
-=======
           // Загружаем профиль - fetchProfile сам установит пользователя через setUser
           await fetchProfile(data.accessToken);
           // После fetchProfile пользователь уже установлен через setUser внутри fetchProfile
           // и аккаунт уже сохранен через upsertAccount внутри fetchProfile
           if (user?.id) {
             await persistActiveAccount(user.id);
-            console.log('[Auth] login: активный аккаунт установлен на', user.id);
-            await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
-          } else {
-            // Если профиль не загружен, все равно устанавливаем сессию
-            await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
->>>>>>> e1b9553 (Рефакторинг: вынесены стили, удалены неиспользуемые компоненты, исправлена логика transfer organizer role)
+            authLog('[Auth] login: активный аккаунт установлен на', user.id);
           }
+          // Устанавливаем сессию с токенами
           await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
         }
       } finally {
@@ -844,6 +963,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     async (idToken: string) => {
       setLoading(true);
       try {
+        authLog('[Auth] loginWithGoogle: starting with idToken length:', idToken?.length || 0);
         const data = await apiRequest(
           '/auth/google',
           {
@@ -852,6 +972,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           },
           null,
         );
+        authLog('[Auth] loginWithGoogle: API request succeeded, data:', data ? 'received' : 'empty');
         await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
         if (data.user) {
           setUser(data.user);
@@ -859,14 +980,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             accessToken: data.accessToken,
             refreshToken: data.refreshToken,
           });
+          // КРИТИЧЕСКИ ВАЖНО: Для Google OAuth email уже подтвержден, поэтому сразу устанавливаем активный аккаунт
+          if (data.user.id) {
+            await persistActiveAccount(data.user.id);
+            authLog('[Auth] loginWithGoogle: активный аккаунт установлен на', data.user.id);
+          }
         } else {
           await fetchProfile(data.accessToken);
+          // После fetchProfile пользователь уже установлен через setUser внутри fetchProfile
+          if (user?.id) {
+            await persistActiveAccount(user.id);
+            authLog('[Auth] loginWithGoogle: активный аккаунт установлен на', user.id);
+          }
         }
+        // Даем время для обновления состояния и запуска синхронизации в EventsContext
+        // Это гарантирует, что данные загрузятся сразу после входа
+        await new Promise(resolve => setTimeout(resolve, 100));
+        authLog('[Auth] loginWithGoogle: completed successfully');
+      } catch (error: any) {
+        console.error('[Auth] loginWithGoogle: error occurred:', error);
+        // Преобразуем ошибку в читаемое сообщение
+        let errorMessage = 'Не удалось войти через Google';
+        if (error instanceof ApiError) {
+          // Если body - это строка (возможно HTML), извлекаем только текст
+          if (typeof error.body === 'string') {
+            // Удаляем HTML теги и обрезаем длину
+            errorMessage = error.body.replace(/<[^>]*>/g, '').trim().substring(0, 200);
+            if (!errorMessage) {
+              errorMessage = error.message || 'Не удалось войти через Google';
+            }
+          } else if (error.body?.message) {
+            errorMessage = error.body.message;
+          } else if (error.message) {
+            errorMessage = error.message;
+          }
+        } else if (error?.message) {
+          errorMessage = error.message;
+        }
+        console.error('[Auth] loginWithGoogle: throwing error with message:', errorMessage);
+        throw new Error(errorMessage);
       } finally {
         setLoading(false);
       }
     },
-    [setSession, upsertAccount, fetchProfile],
+    [setSession, upsertAccount, fetchProfile, persistActiveAccount, user],
   );
 
   const register = useCallback(
@@ -908,18 +1065,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const verifyEmail = useCallback(async (token: string) => {
+    authLog('[Auth] verifyEmail called', { tokenLength: token?.length || 0, tokenPreview: token?.substring(0, 20) + '...' });
     const data = await apiRequest(
       '/auth/verify-email',
       {
         method: 'POST',
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token: token.trim() }), // Убеждаемся что токен без пробелов
       },
       null,
     );
     
     // КРИТИЧЕСКИ ВАЖНО: Если сервер вернул токены после верификации, устанавливаем сессию
     if (data?.accessToken && data?.user) {
-      console.log('[Auth] verifyEmail: получены токены, устанавливаем сессию для пользователя', data.user.id);
+      authLog('[Auth] verifyEmail: получены токены, устанавливаем сессию для пользователя', data.user.id);
       await setSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
       setUser(data.user);
       // Сохраняем аккаунт и устанавливаем активный аккаунт
@@ -928,7 +1086,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshToken: data.refreshToken,
       });
       await persistActiveAccount(data.user.id);
-      console.log('[Auth] verifyEmail: сессия установлена, активный аккаунт:', data.user.id);
+      authLog('[Auth] verifyEmail: сессия установлена, активный аккаунт:', data.user.id);
     }
     
     return data;
@@ -1041,17 +1199,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const logout = useCallback(async () => {
-    // Получаем актуальный список аккаунтов из storage ПЕРЕД любыми операциями
-    const accountsRaw = await storageGet(ACCOUNTS_KEY, secureStorageAvailable);
+    // Получаем актуальный список аккаунтов и активный аккаунт из storage ПЕРЕД любыми операциями
+    const [accountsRaw, activeIdRaw] = await Promise.all([
+      storageGet(ACCOUNTS_KEY, secureStorageAvailable),
+      storageGet(ACTIVE_ACCOUNT_KEY, secureStorageAvailable),
+    ]);
     const parsedAccounts = parseAccounts(accountsRaw);
-    const currentAccountId = activeAccountId || user?.id;
+    // КРИТИЧНО: при 401 logout может вызваться до восстановления state (activeAccountId/user) — берём id из storage
+    const currentAccountId = activeAccountId || user?.id || activeIdRaw || null;
     
-    console.log('[Auth] logout: начало, аккаунтов в storage:', parsedAccounts.length, 'текущий:', currentAccountId);
+    authLog('[Auth] logout: начало, аккаунтов в storage:', parsedAccounts.length, 'текущий:', currentAccountId);
     
     if (!currentAccountId) {
+      // Нет активного аккаунта (гонка после 401 или первый запуск) — только очищаем сессию, НЕ трогаем список аккаунтов
       await clearSession();
-      await updateAccounts(() => []);
       await persistActiveAccount(null);
+      redirectToLoginIfWeb();
       return false;
     }
 
@@ -1069,9 +1232,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const filtered = accountsToUse.filter(acc => acc.userId !== currentAccountId);
     const nextAccount = filtered[0];
     
-    console.log('[Auth] logout: удаление аккаунта', currentAccountId, 'из', accountsToUse.length, 'аккаунтов');
-    console.log('[Auth] logout: осталось аккаунтов', filtered.length, 'следующий:', nextAccount?.userId);
-    console.log('[Auth] logout: все аккаунты после фильтрации:', filtered.map(a => a.userId));
+    authLog('[Auth] logout: удаление аккаунта', currentAccountId, 'из', accountsToUse.length, 'аккаунтов');
+    authLog('[Auth] logout: осталось аккаунтов', filtered.length, 'следующий:', nextAccount?.userId);
+    authLog('[Auth] logout: все аккаунты после фильтрации:', filtered.map(a => a.userId));
 
     // КРИТИЧЕСКИ ВАЖНО: updateAccounts теперь сам сохраняет в storage
     // и читает актуальные данные перед обновлением
@@ -1097,6 +1260,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     await persistActiveAccount(null);
     await clearSession();
+    redirectToLoginIfWeb();
     return false;
   }, [activeAccountId, user?.id, accessToken, accounts, clearSession, updateAccounts, persistActiveAccount, setSession, setUser, secureStorageAvailable]);
 

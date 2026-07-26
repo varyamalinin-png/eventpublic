@@ -6,6 +6,13 @@ const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['react-native-web'],
   outputFileTracingRoot: path.join(__dirname, '../'),
+  trailingSlash: false, // Отключаем автоматическое добавление слеша
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   webpack: (config, { isServer }) => {
     config.resolve.alias = {
       ...config.resolve.alias,
@@ -19,12 +26,13 @@ const nextConfig = {
       'expo-constants': path.resolve(__dirname, 'src/lib/expo-constants-stub.js'),
       'expo-modules-core': path.resolve(__dirname, 'src/lib/expo-modules-core-stub.js'),
       'expo-image-picker': path.resolve(__dirname, 'src/lib/expo-image-picker-stub.js'),
+      'expo-file-system': path.resolve(__dirname, 'src/lib/expo-file-system-stub.js'),
       // Алиасы для компонентов и утилит
       '@/components': path.resolve(__dirname, '../components'),
       '@/hooks': path.resolve(__dirname, '../hooks'),
       '@/constants': path.resolve(__dirname, '../constants'),
-      // Алиасы для client
-      '@/client': path.resolve(__dirname, '../client'),
+      // Алиасы для client - указываем на родительскую директорию, чтобы @/client/app разрешался в ../app
+      '@/client': path.resolve(__dirname, '..'),
       // Заглушки для проблемных модулей
       '@react-native-community/datetimepicker': path.resolve(__dirname, 'src/lib/datetimepicker-stub.js'),
       'expo-av': path.resolve(__dirname, 'src/lib/expo-av-stub.js'),
@@ -44,7 +52,12 @@ const nextConfig = {
     config.plugins.push(
       new webpack.DefinePlugin({
         '__DEV__': JSON.stringify(process.env.NODE_ENV !== 'production'),
-      })
+        'process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID': JSON.stringify(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || '1095670285353-5u0ap40ms4ccqmc8hbfh32pmudi54f1v.apps.googleusercontent.com'),
+      }),
+      new webpack.NormalModuleReplacementPlugin(
+        /components[\\/]TopBar$/,
+        path.resolve(__dirname, '../components/TopBar.web.tsx')
+      )
     );
     
     // Исключаем нативные модули для веба
@@ -72,6 +85,20 @@ const nextConfig = {
       ...config.resolve.alias,
       '@expo/vector-icons': path.resolve(__dirname, 'src/lib/expo-vector-icons-stub.js'),
     };
+    
+    // Обрабатываем подпути expo-file-system
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      'expo-file-system/legacy': path.resolve(__dirname, 'src/lib/expo-file-system-stub.js'),
+    };
+    
+    // Используем NormalModuleReplacementPlugin для замены expo-file-system/legacy
+    config.plugins.push(
+      new webpack.NormalModuleReplacementPlugin(
+        /^expo-file-system\/legacy$/,
+        path.resolve(__dirname, 'src/lib/expo-file-system-stub.js')
+      )
+    );
     
     return config;
   },

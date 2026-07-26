@@ -1,15 +1,55 @@
 import { Tabs } from 'expo-router';
 import { Ionicons, FontAwesome, MaterialIcons } from '@expo/vector-icons';
-import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Text, Platform, Animated } from 'react-native';
 import { Link } from 'expo-router';
 import { useEvents } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
-import { useMemo } from 'react';
+import { useMemo, useRef, useCallback } from 'react';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('TabBadge');
 
+/** Tab bar button with spring scale animation on press (Task 2c) */
+function AnimatedTabBarButton({ children, onPress, accessibilityState, style, ...rest }: any) {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = useCallback(() => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.82,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 4,
+    }).start();
+  }, [scaleAnim]);
+
+  const handlePressOut = useCallback(() => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 30,
+      bounciness: 8,
+    }).start();
+  }, [scaleAnim]);
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      activeOpacity={1}
+      style={style}
+      {...rest}
+    >
+      <Animated.View style={{ transform: [{ scale: scaleAnim }], alignItems: 'center', justifyContent: 'center' }}>
+        {children}
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
 export default function TabLayout() {
+  const isWeb = Platform.OS === 'web';
+
   const { chats, unreadNotificationsCount } = useEvents();
   const { user } = useAuth();
   const currentUserId = useMemo(() => user?.id ?? null, [user]);
@@ -18,16 +58,13 @@ export default function TabLayout() {
   // Текущая логика просто проверяет, что последнее сообщение не от текущего пользователя,
   // но это не означает, что сообщение непрочитано - пользователь мог уже прочитать его
   // Поэтому временно отключаем подсчет непрочитанных сообщений
-  // TODO: Добавить поле readAt или lastReadAt в Chat/ChatMessage для правильного определения прочитанности
   const unreadMessagesCount = useMemo(() => {
-    // Временно возвращаем 0, так как нет правильной логики определения прочитанности сообщений
-    // if (!currentUserId) return 0;
-    // return chats.filter(chat => {
-    //   const lastMessage = chat.lastMessage;
-    //   // Если есть последнее сообщение и оно не от текущего пользователя, считаем чат непрочитанным
-    //   return lastMessage && lastMessage.fromUserId !== currentUserId;
-    // }).length;
-    return 0;
+    if (!currentUserId) return 0;
+    return chats.filter(chat => {
+      const last = chat.lastMessage;
+      if (!last || last.fromUserId === currentUserId) return false;
+      return !last.readBy?.includes(currentUserId);
+    }).length;
   }, [chats, currentUserId]);
 
   // Общее количество непрочитанных (только уведомления, без сообщений)
@@ -36,18 +73,24 @@ export default function TabLayout() {
     logger.debug('TabBadge counts', { unreadMessagesCount, unreadNotificationsCount, total });
     return total;
   }, [unreadMessagesCount, unreadNotificationsCount]);
+
+  // На вебе используем только WebTabBar (в каждой странице), нативный таб-бар не показываем
+  const tabBarStyle = isWeb ? { ...styles.tabBar, display: 'none' as const } : styles.tabBar;
+
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#FFF', // Белый цвет для активных иконок
+        tabBarActiveTintColor: '#f4f4f5', // Белый цвет для активных иконок
         tabBarInactiveTintColor: '#888', // Серый цвет для неактивных иконок
-        tabBarStyle: styles.tabBar,
+        tabBarStyle,
         tabBarBackground: () => (
           <View style={styles.tabBarBackground} />
         ),
+        // Spring animation on tab bar button press (Task 2c)
+        tabBarButton: (props) => <AnimatedTabBarButton {...props} />,
       }}
     >
-      {/* Explore */}
+      {/* Explore - лента глоб (первый таб) */}
       <Tabs.Screen
         name="explore"
         options={{
@@ -59,7 +102,7 @@ export default function TabLayout() {
         }}
       />
 
-      {/* Memories */}
+      {/* Memories - лента меморис постов (второй таб) */}
       <Tabs.Screen
         name="memories"
         options={{
@@ -71,12 +114,13 @@ export default function TabLayout() {
         }}
       />
 
-      {/* Create */}
+      {/* Create - скрыт на вебе, показывается только на мобильных */}
       <Tabs.Screen
         name="create"
         options={{
           title: 'Create',
           headerShown: false,
+          href: isWeb ? null : undefined, // Скрываем на вебе
           tabBarIcon: ({ focused, color }) => (
             <Ionicons 
               name="add-circle-outline" 
@@ -87,7 +131,7 @@ export default function TabLayout() {
         }}
       />
 
-      {/* Inbox */}
+      {/* Inbox - сообщения (четвертый таб) */}
       <Tabs.Screen
         name="inbox"
         options={{
@@ -108,12 +152,13 @@ export default function TabLayout() {
         }}
       />
 
-      {/* Profile */}
+      {/* Profile - скрыт на вебе, показывается только на мобильных */}
       <Tabs.Screen
         name="profile"
         options={{
           title: '',
           headerShown: false,
+          href: isWeb ? null : undefined, // Скрываем на вебе
           tabBarIcon: ({ color }) => (
             <Ionicons name="person-outline" size={24} color={color} />
           )
@@ -136,14 +181,19 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   tabBar: {
     position: 'absolute',
-    borderTopWidth: 0, // Убираем верхнюю границу
+    borderTopWidth: 0,
     elevation: 0,
-    height: 60,
-    backgroundColor: '#121212', // Темный фон как у основного экрана
+    height: 82,
+    paddingBottom: 20,
+    backgroundColor: '#141417',
+    ...(Platform.OS === 'web' && {
+      maxWidth: 500,
+      width: '100%',
+    }),
   },
   tabBarBackground: {
     flex: 1,
-    backgroundColor: '#121212', // Темный фон
+    backgroundColor: '#141417',
   },
   headerRight: {
     flexDirection: 'row',
@@ -176,10 +226,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#121212',
+    borderColor: '#141417',
   },
   badgeText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 10,
     fontWeight: '700',
   },

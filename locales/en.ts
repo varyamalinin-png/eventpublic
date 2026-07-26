@@ -404,8 +404,8 @@ export const en = {
     addPhoto: 'Add photo',
     orAddByLink: 'Or add photo by link:',
     mediaType: 'Media type:',
-    photo: '📷 Photo',
-    video: '🎥 Video',
+    photo: 'Photo',
+    video: 'Video',
     inviteFriends: 'Invite friends',
     selectFriends: 'Select friends to invite',
     recurring: 'Recurring',
@@ -551,6 +551,8 @@ export const en = {
     from: 'From',
     tags: 'Tags:',
     folderName: 'Folder name',
+    recommendations: 'Recommendations',
+    friends: 'friends',
   },
 
   // Event Profile

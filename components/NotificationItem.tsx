@@ -13,160 +13,228 @@ interface NotificationItemProps {
   onDelete?: () => void;
 }
 
-export default function NotificationItem({ notification, onPress, onDelete }: NotificationItemProps) {
+// Иконка и цвет для каждого типа уведомления
+function getTypeConfig(type: string) {
+  switch (type) {
+    case 'EVENT_PARTICIPANT_JOINED': return { emoji: '✓', color: '#34C759' };
+    case 'EVENT_PARTICIPANT_LEFT':  return { emoji: '↩', color: '#FF3B30' };
+    case 'EVENT_UPDATED':           return { emoji: '✏', color: '#FF8D32' };
+    case 'EVENT_CANCELLED':         return { emoji: '✕', color: '#FF3B30' };
+    case 'EVENT_POST_ADDED':        return { emoji: '📷', color: '#AF52DE' };
+    default:                        return { emoji: '🔔', color: '#FF8D32' };
+  }
+}
+
+function NotificationItem({ notification, onPress, onDelete }: NotificationItemProps) {
   const router = useRouter();
   const { t } = useLanguage();
   const { getUserData, events } = useEvents();
   const { payload, type } = notification;
-  
+
   const actor = payload.actorId ? getUserData(payload.actorId) : null;
   const event = payload.eventId ? events.find(e => e.id === payload.eventId) : null;
   const eventMediaUrl = payload.eventMediaUrl || (event?.mediaUrl);
+  const isUnread = !notification.readAt;
+  const typeConfig = getTypeConfig(type);
 
-  // Определяем текст уведомления
   const getNotificationText = () => {
     const actorName = payload.actorName || actor?.name || (t.notifications.user || 'User');
-    
     switch (type) {
       case 'EVENT_UPDATED':
-        return `${actorName} ${t.notifications.changed || 'changed'} ${payload.changedField || (t.notifications.parameters || 'parameters')} ${t.notifications.in || 'in'}`;
+        return { actor: actorName, action: `${t.notifications.changed || 'changed'} ${payload.changedField || (t.notifications.parameters || 'parameters')} ${t.notifications.in || 'in'}`, eventName: event?.title || payload.eventTitle };
       case 'EVENT_CANCELLED': {
-        // Для отмененных событий добавляем дату
         const eventDate = (payload as any).eventDate || event?.date;
         const formattedDate = eventDate ? formatDate(eventDate) : '';
-        return `${actorName} ${t.notifications.cancelled || 'cancelled'} ${t.notifications.event || 'event'}${formattedDate ? ` ${formattedDate}` : ''}`;
+        return { actor: actorName, action: `${t.notifications.cancelled || 'cancelled'} ${t.notifications.event || 'event'}${formattedDate ? ` ${formattedDate}` : ''}` };
       }
       case 'EVENT_PARTICIPANT_JOINED':
-        return `${actorName} ${t.notifications.joined || 'joined'}`;
+        return { actor: actorName, action: `${t.notifications.joined || 'joined'}`, eventName: event?.title || payload.eventTitle };
       case 'EVENT_PARTICIPANT_LEFT':
-        return `${actorName} ${t.notifications.left || 'left'} ${t.notifications.event || 'event'}`;
+        return { actor: actorName, action: `${t.notifications.left || 'left'} ${t.notifications.event || 'event'}`, eventName: event?.title || payload.eventTitle };
       case 'EVENT_POST_ADDED':
-        return `${actorName} ${t.notifications.posted || 'posted'} ${t.notifications.post || 'post'} ${t.notifications.in || 'in'}`;
+        return { actor: actorName, action: `${t.notifications.posted || 'posted'} ${t.notifications.post || 'post'} ${t.notifications.in || 'in'}`, eventName: event?.title || payload.eventTitle };
       default:
-        return t.notifications.newNotification || 'New notification';
+        return { actor: '', action: t.notifications.newNotification || 'New notification' };
     }
   };
 
   const handlePress = () => {
-    // Для отмененных событий не переходим на профиль события
-    if (type === 'EVENT_CANCELLED') {
-      onPress?.();
-      return;
-    }
-    
-    if (payload.eventId) {
-      router.push(`/event-profile/${payload.eventId}`);
-    }
+    if (type === 'EVENT_CANCELLED') { onPress?.(); return; }
+    if (payload.eventId) router.push(`/event-profile/${payload.eventId}`);
     onPress?.();
   };
 
   const handleAvatarPress = () => {
-    if (payload.actorId) {
-      router.push(`/profile/${payload.actorId}`);
-    }
+    if (payload.actorId) router.push(`/profile/${payload.actorId}`);
   };
 
-  // Для отмененных событий весь контейнер некликабелен
   const isCancelled = type === 'EVENT_CANCELLED';
-  
-  const ContainerComponent = isCancelled ? View : TouchableOpacity;
-  const containerProps = isCancelled ? {} : { onPress: handlePress, activeOpacity: 0.7 };
-  
+  const notifText = getNotificationText();
+
   return (
-    <ContainerComponent
-      style={[styles.container, !notification.readAt && styles.unread]}
-      {...containerProps}
+    <TouchableOpacity
+      style={[styles.container, isUnread && styles.containerUnread]}
+      onPress={isCancelled ? undefined : handlePress}
+      activeOpacity={isCancelled ? 1 : 0.72}
     >
-      {/* Мини-аватарка (кликабельная) */}
-      <TouchableOpacity onPress={handleAvatarPress} activeOpacity={0.7}>
+      {/* Левый акцент-бар для непрочитанных */}
+      {isUnread && <View style={styles.unreadBar} />}
+
+      {/* Аватар с типовым бейджем */}
+      <TouchableOpacity style={styles.avatarWrapper} onPress={handleAvatarPress} activeOpacity={0.7}>
         {actor?.avatar ? (
           <Image source={{ uri: actor.avatar }} style={styles.avatar} />
         ) : (
           <View style={[styles.avatar, styles.avatarPlaceholder]}>
-            <Text style={styles.avatarText}>
+            <Text style={styles.avatarInitial}>
               {actor?.name?.[0]?.toUpperCase() || '?'}
             </Text>
           </View>
         )}
+        {/* Тип-бейдж */}
+        <View style={[styles.typeBadge, { backgroundColor: typeConfig.color }]}>
+          <Text style={styles.typeBadgeText}>{typeConfig.emoji}</Text>
+        </View>
       </TouchableOpacity>
 
-      {/* Текст уведомления */}
+      {/* Текст */}
       <View style={styles.textContainer}>
-        <Text style={styles.text}>
-          {getNotificationText()}
+        <Text style={styles.textMain} numberOfLines={2}>
+          <Text style={styles.actorName}>{notifText.actor} </Text>
+          <Text style={styles.actionText}>{notifText.action}</Text>
+          {notifText.eventName ? (
+            <Text style={styles.eventName}> «{notifText.eventName}»</Text>
+          ) : null}
         </Text>
+        <Text style={styles.timeAgo}>{formatTimeAgo(notification.createdAt)}</Text>
       </View>
-      
-      {/* Иконка события */}
-      {/* Для отмененных событий иконка некликабельна */}
+
+      {/* Превью события */}
       {eventMediaUrl && (
-        type === 'EVENT_CANCELLED' ? (
-          <Image source={{ uri: eventMediaUrl }} style={styles.eventIcon} />
-        ) : (
-          <TouchableOpacity onPress={handlePress} activeOpacity={0.7}>
-            <Image source={{ uri: eventMediaUrl }} style={styles.eventIcon} />
-          </TouchableOpacity>
-        )
+        <Image source={{ uri: eventMediaUrl }} style={styles.eventThumb} />
       )}
 
-      {/* Время получения уведомления - самый правый элемент */}
-      <Text style={styles.timeAgo}>
-        {formatTimeAgo(notification.createdAt)}
-      </Text>
-    </ContainerComponent>
+      {/* Кнопка удаления */}
+      {onDelete && (
+        <TouchableOpacity style={styles.deleteBtn} onPress={onDelete} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Text style={styles.deleteBtnText}>✕</Text>
+        </TouchableOpacity>
+      )}
+    </TouchableOpacity>
   );
 }
+
+export default React.memo(NotificationItem);
 
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E1E1E',
-    backgroundColor: '#121212',
-  },
-  unread: {
-    backgroundColor: '#1A1A1A',
-  },
-  avatar: {
-    width: 40,
-    height: 40,
+    marginHorizontal: 12,
+    marginBottom: 8,
     borderRadius: 20,
+    backgroundColor: '#16161a',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    overflow: 'hidden',
+  },
+  containerUnread: {
+    backgroundColor: 'rgba(255,141,50,0.07)',
+    borderColor: 'rgba(255,141,50,0.2)',
+  },
+  unreadBar: {
+    position: 'absolute',
+    left: 0,
+    top: 10,
+    bottom: 10,
+    width: 3,
+    borderRadius: 3,
+    backgroundColor: '#FF8D32',
+  },
+  avatarWrapper: {
+    position: 'relative',
     marginRight: 12,
   },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 17,
+    backgroundColor: '#3a3a3f',
+  },
   avatarPlaceholder: {
-    backgroundColor: '#333',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  avatarText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
+  avatarInitial: {
+    color: '#f4f4f5',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  typeBadge: {
+    position: 'absolute',
+    bottom: -3,
+    right: -3,
+    width: 20,
+    height: 20,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#16161a',
+  },
+  typeBadgeText: {
+    fontSize: 9,
+    color: '#f4f4f5',
+    fontWeight: '700',
   },
   textContainer: {
     flex: 1,
     marginRight: 8,
   },
-  text: {
-    fontSize: 13,
-    color: '#FFF',
-    lineHeight: 18,
+  textMain: {
+    fontSize: 13.5,
+    lineHeight: 19,
+    marginBottom: 4,
   },
-  eventIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    marginLeft: 8,
-    marginRight: 8,
+  actorName: {
+    color: '#f4f4f5',
+    fontWeight: '700',
+  },
+  actionText: {
+    color: 'rgba(244,244,245,0.6)',
+    fontWeight: '400',
+  },
+  eventName: {
+    color: '#FF8D32',
+    fontWeight: '600',
   },
   timeAgo: {
-    fontSize: 12,
-    color: '#999',
-    minWidth: 50,
-    textAlign: 'right',
+    fontSize: 11.5,
+    color: 'rgba(244,244,245,0.35)',
+    fontWeight: '500',
+  },
+  eventThumb: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    marginLeft: 4,
+    marginRight: 4,
+    backgroundColor: '#1c1c20',
+  },
+  deleteBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  deleteBtnText: {
+    fontSize: 11,
+    color: 'rgba(244,244,245,0.45)',
+    fontWeight: '700',
   },
 });
-

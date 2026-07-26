@@ -44,26 +44,12 @@ export default function AddAccountVerifyScreen() {
     const targetEmail = params.email || email;
     const isDifferentEmail = targetEmail && user?.email && targetEmail.toLowerCase() !== user.email.toLowerCase();
     
-    console.log('[AddAccountVerify] useEffect check:', {
-      isAuthenticated,
-      emailVerified: user?.emailVerified,
-      hasVerifiedOnThisPage: hasVerifiedOnThisPage.current,
-      userIdChanged,
-      currentUserId,
-      initialUserId: initialUserId.current,
-      targetEmail,
-      currentUserEmail: user?.email,
-      isDifferentEmail,
-    });
-    
     // Перенаправляем ТОЛЬКО если:
     // 1. Пользователь авторизован И
     // 2. Email подтвержден И
     // 3. Был успешный verify на этой странице (hasVerifiedOnThisPage.current === true)
     // НЕ перенаправляем, если это просто старый аккаунт с подтвержденным email
     if (isAuthenticated && user?.emailVerified && hasVerifiedOnThisPage.current) {
-      console.log('[AddAccountVerify] ✅ Email verified, user authenticated, redirecting to settings');
-      console.log('[AddAccountVerify] Current user:', user.id, user.email);
       // После подтверждения второго аккаунта возвращаемся в настройки
       // Небольшая задержка, чтобы убедиться, что состояние обновилось
       setTimeout(() => {
@@ -115,8 +101,6 @@ export default function AddAccountVerifyScreen() {
       
       // Если сервер вернул токены, пользователь автоматически залогинен
       if (result && result.accessToken && result.user) {
-        console.log('[AddAccountVerify] ✅ Email verified successfully, tokens received');
-        console.log('[AddAccountVerify] New user:', result.user.id, result.user.email);
         hasVerifiedOnThisPage.current = true; // Отмечаем, что verify был успешным на этой странице
         setStatusMessage('Email успешно подтверждён! Вы автоматически вошли в приложение.');
         // useEffect выше обработает переход в настройки
@@ -152,7 +136,7 @@ export default function AddAccountVerifyScreen() {
             style={styles.backButton}
             onPress={() => router.back()}
           >
-            <Ionicons name="arrow-back" size={24} color="#FFF" />
+            <Ionicons name="arrow-back" size={24} color="#f4f4f5" />
             <Text style={styles.backButtonText}>Назад</Text>
           </TouchableOpacity>
 
@@ -205,7 +189,7 @@ export default function AddAccountVerifyScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Введите email"
-                placeholderTextColor="#777"
+                placeholderTextColor="rgba(244,244,245,0.35)"
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -220,7 +204,7 @@ export default function AddAccountVerifyScreen() {
               disabled={resending}
             >
               {resending ? (
-                <ActivityIndicator color="#FFF" />
+                <ActivityIndicator color="#f4f4f5" />
               ) : (
                 <Text style={styles.secondaryButtonText}>Отправить письмо повторно</Text>
               )}
@@ -238,7 +222,7 @@ export default function AddAccountVerifyScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Вставьте токен из письма"
-                placeholderTextColor="#777"
+                placeholderTextColor="rgba(244,244,245,0.35)"
                 value={token}
                 onChangeText={setToken}
                 autoCapitalize="none"
@@ -252,7 +236,7 @@ export default function AddAccountVerifyScreen() {
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#FFF" />
+                <ActivityIndicator color="#f4f4f5" />
               ) : (
                 <Text style={styles.primaryButtonText}>Подтвердить</Text>
               )}
@@ -267,7 +251,7 @@ export default function AddAccountVerifyScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#0a0a0c',
   },
   scrollContent: {
     flexGrow: 1,
@@ -286,7 +270,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   backButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     marginLeft: 8,
     fontWeight: '500',
@@ -294,24 +278,24 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
     marginBottom: 24,
     textAlign: 'center',
   },
   instructionBox: {
-    backgroundColor: '#1f1f1f',
+    backgroundColor: '#141417',
     padding: 16,
     borderRadius: 12,
     marginBottom: 24,
   },
   instructionTitle: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 12,
@@ -320,7 +304,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   instructionItem: {
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     lineHeight: 20,
   },
@@ -348,13 +332,13 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   sectionTitle: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 8,
   },
   sectionDescription: {
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     marginBottom: 16,
   },
@@ -362,14 +346,14 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   inputLabel: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 8,
   },
   input: {
-    backgroundColor: '#1f1f1f',
-    color: '#FFF',
+    backgroundColor: '#141417',
+    color: '#f4f4f5',
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 12,
@@ -378,27 +362,27 @@ const styles = StyleSheet.create({
     borderColor: '#2a2a2a',
   },
   primaryButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 8,
   },
   primaryButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
   },
   secondaryButton: {
-    backgroundColor: '#1f1f1f',
+    backgroundColor: '#141417',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#8B5CF6',
+    borderColor: '#FF8D32',
   },
   secondaryButtonText: {
-    color: '#8B5CF6',
+    color: '#FF8D32',
     fontSize: 16,
     fontWeight: '600',
   },

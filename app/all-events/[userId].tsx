@@ -1,6 +1,6 @@
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import EventCard from '../../components/EventCard';
 import { useEvents, Event } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
@@ -11,7 +11,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export default function AllEventsScreen() {
   const { userId } = useLocalSearchParams();
   const router = useRouter();
-  const { events, getUserData, isUserEventMember } = useEvents();
+  const { events, eventProfiles, getUserData, isUserEventMember, isEventPast } = useEvents();
   const { user: authUser } = useAuth();
   const { t } = useLanguage();
   const [showEventFeed, setShowEventFeed] = useState(false);
@@ -34,10 +34,15 @@ export default function AllEventsScreen() {
 
   const userData = getUserData(targetUserId);
   
-  // Все события где я_член_события (текущие и прошлые)
-  const allEvents = events.filter(event => 
-    isUserEventMember(event, targetUserId)
-  );
+  // Все события пользователя. Для прошедших — организатор или profile.participants (единый принцип с профилем).
+  const allEvents = useMemo(() => {
+    return events.filter(event => {
+      if (!isEventPast(event)) return isUserEventMember(event, targetUserId);
+      if (event.organizerId === targetUserId) return true;
+      const profile = eventProfiles.find(p => p.eventId === event.id);
+      return profile ? profile.participants.includes(targetUserId) : false;
+    });
+  }, [events, eventProfiles, targetUserId, isUserEventMember, isEventPast]);
 
   const handleEventPress = (event: Event) => {
     setSelectedEvent(event);
@@ -188,13 +193,13 @@ export default function AllEventsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   header: {
     paddingTop: 60,
     paddingBottom: 15,
     paddingHorizontal: 20,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -202,13 +207,13 @@ const styles = StyleSheet.create({
     marginRight: 15,
   },
   backText: {
-    color: '#007AFF',
+    color: '#FF8D32',
     fontSize: 16,
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: '#f4f4f5',
     flex: 1,
   },
   scrollView: {
@@ -225,7 +230,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     textAlign: 'center',
     marginTop: 20,
     width: '100%',

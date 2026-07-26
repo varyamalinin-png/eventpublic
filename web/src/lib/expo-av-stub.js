@@ -5,6 +5,7 @@ import { View } from 'react-native';
 export const Video = React.forwardRef((props, ref) => {
   return <View ref={ref} {...props} />;
 });
+Video.displayName = 'Video';
 
 export const Audio = {
   Sound: class {

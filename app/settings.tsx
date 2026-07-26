@@ -11,8 +11,10 @@ import {
   Image,
   ActivityIndicator,
   Platform,
+  Linking,
 } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
+import { useSafeRouter } from '../utils/safeRouter';
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -22,11 +24,15 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { API_BASE_URL, apiRequest, ApiError } from '../services/api';
 import { createLogger } from '../utils/logger';
+import { AppIcon, AppIconName } from '../components/ui/AppIcon';
+import { Palette } from '../constants/DesignSystem';
+import { useTheme } from '../context/ThemeContext';
+import { settingsStyles as styles } from "../styles/settings.styles";
 
 const logger = createLogger('Settings');
 
 export default function SettingsScreen() {
-  const router = useRouter();
+  const router = useSafeRouter();
   const { getUserData, updateUserData, getSavedEvents, getSavedMemoryPosts, eventProfiles } = useEvents();
   const {
     user: authUser,
@@ -45,20 +51,7 @@ export default function SettingsScreen() {
   const { language, setLanguage, t } = useLanguage();
   const currentUserId = authUser?.id ?? null;
 
-  if (!currentUserId) {
-    return (
-      <View style={[styles.container, styles.centered]}>
-        <Text style={styles.loginPromptTitle}>{t.settings.authorize}</Text>
-        <Text style={styles.loginPromptText}>{t.settings.authorizePrompt}</Text>
-        <TouchableOpacity style={styles.loginButton} onPress={() => router.push('/(auth)')}>
-          <Text style={styles.loginButtonText}>{t.settings.goToLogin}</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  const userData = getUserData(currentUserId);
-  
+  // ВСЕ ХУКИ ДОЛЖНЫ БЫТЬ ОБЪЯВЛЕНЫ ДО УСЛОВНОГО RETURN
   // Получаем данные пользователя из AuthContext для новых полей
   const [userProfile, setUserProfile] = useState<any>(null);
   
@@ -132,7 +125,7 @@ export default function SettingsScreen() {
   const [smartSuggestions, setSmartSuggestions] = useState(true);
   const [autoAddEvents, setAutoAddEvents] = useState(true);
   const [confirmFriendRequests, setConfirmFriendRequests] = useState(true);
-  const [theme, setTheme] = useState<'light' | 'dark' | 'auto'>('dark');
+  const { mode: theme, setMode: setTheme } = useTheme();
   
   // Модальные окна
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -158,7 +151,37 @@ export default function SettingsScreen() {
   const [editCity, setEditCity] = useState('');
   const [editBio, setEditBio] = useState('');
   const [updating, setUpdating] = useState(false);
-const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+
+  // useMemo хуки также должны быть перед условным return
+  const activeStoredAccount = useMemo(
+    () => (currentUserId ? accounts.find(acc => acc.userId === currentUserId) ?? null : null),
+    [accounts, currentUserId],
+  );
+
+  const otherAccounts = useMemo(
+    () => accounts.filter(acc => acc.userId !== currentUserId),
+    [accounts, currentUserId],
+  );
+
+  // УСЛОВНЫЙ RETURN ПОСЛЕ ВСЕХ ХУКОВ
+  if (!currentUserId) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={styles.loginPromptTitle}>{t.settings.authorize}</Text>
+        <Text style={styles.loginPromptText}>{t.settings.authorizePrompt}</Text>
+        <TouchableOpacity style={styles.loginButton} onPress={() => router.push('/(auth)')}>
+          <Text style={styles.loginButtonText}>{t.settings.goToLogin}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const userData = getUserData(currentUserId);
+  // Для моментального UI-обновления после загрузки аватара используем локально сохранённое значение из EventsContext.
+  // AuthContext может обновиться чуть позже (refreshUser), но пользователь должен видеть новую картинку сразу.
+  const avatarPreviewUri =
+    userData.avatar ?? authUser?.avatarUrl ?? activeStoredAccount?.avatarUrl ?? '';
 
 const resolveAssetInfo = (asset: ImagePicker.ImagePickerAsset) => {
   const fallbackName = `avatar-${Date.now()}.jpg`;
@@ -177,23 +200,39 @@ const resolveAssetInfo = (asset: ImagePicker.ImagePickerAsset) => {
   return { name: normalizedName, mimeType };
 };
 
-const uploadAvatarAsset = async (asset: ImagePicker.ImagePickerAsset) => {
+const uploadAvatarAsset = async (asset: ImagePicker.ImagePickerAsset | { uri: string; file?: File; type?: string; name?: string }) => {
   if (!asset?.uri) {
-    Alert.alert('Ошибка', 'Не удалось прочитать файл.');
+    if (Platform.OS === 'web') {
+      window.alert('Ошибка: Не удалось прочитать файл.');
+    } else {
+      Alert.alert('Ошибка', 'Не удалось прочитать файл.');
+    }
     return;
   }
   if (!accessToken || !currentUserId) {
-    Alert.alert('Ошибка', 'Авторизуйтесь заново.');
+    if (Platform.OS === 'web') {
+      window.alert('Ошибка: Авторизуйтесь заново.');
+    } else {
+      Alert.alert('Ошибка', 'Авторизуйтесь заново.');
+    }
     return;
   }
 
-  const { name, mimeType } = resolveAssetInfo(asset);
   const formData = new FormData();
-  formData.append('file', {
-    uri: asset.uri,
-    name,
-    type: mimeType,
-  } as any);
+  
+  if (Platform.OS === 'web' && (asset as any).file) {
+    // Для веба используем File объект напрямую
+    const file = (asset as any).file as File;
+    formData.append('file', file);
+  } else {
+    // Для мобильных платформ используем старую логику
+    const { name, mimeType } = resolveAssetInfo(asset as ImagePicker.ImagePickerAsset);
+    formData.append('file', {
+      uri: asset.uri,
+      name,
+      type: mimeType,
+    } as any);
+  }
 
   setAvatarUploading(true);
   try {
@@ -226,12 +265,21 @@ const uploadAvatarAsset = async (asset: ImagePicker.ImagePickerAsset) => {
       updateUserData(currentUserId, { avatar: undefined });
     }
     await refreshUser();
-    Alert.alert('Успех', 'Фото профиля обновлено');
+    
+    if (Platform.OS === 'web') {
+      window.alert('Успех: Фото профиля обновлено');
+    } else {
+      Alert.alert('Успех', 'Фото профиля обновлено');
+    }
     setShowAvatarModal(false);
   } catch (error: any) {
     const errorMessage = error?.message || 'Не удалось загрузить фото. Проверьте подключение к интернету.';
     logger.error('Avatar upload failed:', errorMessage);
-    Alert.alert('Ошибка', errorMessage);
+    if (Platform.OS === 'web') {
+      window.alert(`Ошибка: ${errorMessage}`);
+    } else {
+      Alert.alert('Ошибка', errorMessage);
+    }
   } finally {
     setAvatarUploading(false);
   }
@@ -270,33 +318,15 @@ const removeAvatarFromServer = async () => {
   } finally {
     setAvatarUploading(false);
   }
-};
-
-
-  const activeStoredAccount = useMemo(
-    () => (currentUserId ? accounts.find(acc => acc.userId === currentUserId) ?? null : null),
-    [accounts, currentUserId],
-  );
-
-  const otherAccounts = useMemo(
-    () => accounts.filter(acc => acc.userId !== currentUserId),
-    [accounts, currentUserId],
-  );
+  };
   
   const handleDeleteAccount = () => {
     Alert.alert(
       'Удаление аккаунта',
-      'Вы уверены, что хотите удалить аккаунт? Это действие нельзя отменить.',
+      'Для удаления аккаунта и всех связанных данных напишите на support@iwent.ru с указанием вашего email. Мы обработаем запрос в течение 30 дней.',
       [
+        { text: 'Написать в поддержку', onPress: () => Linking.openURL('mailto:support@iwent.ru?subject=Запрос на удаление аккаунта') },
         { text: 'Отмена', style: 'cancel' },
-        { 
-          text: 'Удалить', 
-          style: 'destructive',
-          onPress: () => {
-            // Логика удаления аккаунта
-            Alert.alert('Аккаунт удален');
-          }
-        }
       ]
     );
   };
@@ -363,7 +393,7 @@ const removeAvatarFromServer = async () => {
       quality: 0.8,
     });
 
-    if (!result.canceled && result.assets[0]) {
+    if (!result.canceled && !result.cancelled && result.assets && result.assets[0]) {
       await uploadAvatarAsset(result.assets[0]);
     }
   };
@@ -382,7 +412,7 @@ const removeAvatarFromServer = async () => {
       quality: 0.8,
     });
 
-    if (!result.canceled && result.assets[0]) {
+    if (!result.canceled && !result.cancelled && result.assets && result.assets[0]) {
       await uploadAvatarAsset(result.assets[0]);
     }
   };
@@ -409,12 +439,9 @@ const removeAvatarFromServer = async () => {
   };
 
   const handleAddAccount = (mode: 'login' | 'register' = 'login') => {
-    console.log('[Settings] handleAddAccount called, mode:', mode);
     // Переходим на отдельную страницу для добавления аккаунта (доступна авторизованным пользователям)
     // Используем тот же формат, что и для /settings
     const targetPath = `/add-account?mode=${mode}`;
-    console.log('[Settings] Navigating to:', targetPath);
-    console.log('[Settings] Router object:', router);
     router.push(targetPath);
   };
 
@@ -620,9 +647,43 @@ const removeAvatarFromServer = async () => {
 
   const showImageOptions = () => {
     if (avatarUploading) {
-      Alert.alert('Подождите', 'Сначала завершите текущую загрузку.');
+      if (Platform.OS === 'web') {
+        window.alert('Подождите, сначала завершите текущую загрузку.');
+      } else {
+        Alert.alert('Подождите', 'Сначала завершите текущую загрузку.');
+      }
       return;
     }
+
+    if (Platform.OS === 'web') {
+      // Для веба используем input type="file"
+      const input = document.createElement('input');
+      input.type = 'file';
+      // HEIC/HEIF часто ломают серверную оптимизацию (sharp). Разрешаем только совместимые форматы.
+      input.accept = 'image/png,image/jpeg,image/webp';
+      input.onchange = async (event) => {
+        const files = (event.target as HTMLInputElement).files;
+        if (files && files.length > 0) {
+          const file = files[0];
+          const type = (file.type || '').toLowerCase();
+          if (type.includes('heic') || type.includes('heif')) {
+            window.alert('Формат HEIC/HEIF пока не поддерживается. Выберите JPG/PNG/WebP.');
+            return;
+          }
+          // Создаем объект, похожий на ImagePickerAsset для веба
+          const asset: any = {
+            uri: URL.createObjectURL(file),
+            file: file, // Сохраняем File объект для загрузки
+            type: file.type || 'image/jpeg',
+            name: file.name || `avatar-${Date.now()}.jpg`,
+          };
+          await uploadAvatarAsset(asset);
+        }
+      };
+      input.click();
+      return;
+    }
+
     Alert.alert(
       'Выберите фото',
       'Откуда хотите добавить фото?',
@@ -635,10 +696,10 @@ const removeAvatarFromServer = async () => {
     );
   };
   
-  const renderSection = (icon: string, title: string, children: React.ReactNode) => (
+  const renderSection = (icon: AppIconName, title: string, children: React.ReactNode) => (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionIcon}>{icon}</Text>
+        <AppIcon name={icon} size={18} color={Palette.text} />
         <Text style={styles.sectionTitle}>{title}</Text>
       </View>
       {children}
@@ -669,8 +730,8 @@ const removeAvatarFromServer = async () => {
       <Switch
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: '#333', true: '#8B5CF6' }}
-        thumbColor={value ? '#FFF' : '#999'}
+        trackColor={{ false: 'rgba(255,255,255,0.08)', true: '#FF8D32' }}
+        thumbColor={value ? '#f4f4f5' : 'rgba(244,244,245,0.5)'}
       />
     </View>
   );
@@ -679,22 +740,43 @@ const removeAvatarFromServer = async () => {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color="#f4f4f5" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t.settings.title}</Text>
         <View style={{ width: 24 }} />
       </View>
       
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        {/* БЫСТРАЯ СМЕНА АВАТАРКИ */}
+        {renderSection('camera', t.settings.profileVisibility.profilePhoto, (
+          <>
+            {renderSettingItem(
+              t.settings.profileVisibility.profilePhoto,
+              t.settings.profileVisibility.uploadDelete,
+              () => setShowAvatarModal(true),
+              avatarPreviewUri ? (
+                <Image
+                  source={{ uri: avatarPreviewUri }}
+                  style={styles.settingAvatarPreview}
+                />
+              ) : (
+                <View style={[styles.settingAvatarPreview, styles.accountAvatarPlaceholder]}>
+                  <Ionicons name="person-outline" size={18} color="#BBBBCC" />
+                </View>
+              )
+            )}
+          </>
+        ))}
+
         {/* АККАУНТЫ */}
-        {renderSection('🧑‍🤝‍🧑', t.settings.accounts.title, (
+        {renderSection('users', t.settings.accounts.title, (
           <View style={styles.accountsCard}>
             <Text style={styles.subsectionTitle}>{t.settings.accounts.currentAccount}</Text>
             <View style={[styles.accountRow, styles.accountRowActive]}>
               <View style={styles.accountInfo}>
-                { (authUser?.avatarUrl ?? activeStoredAccount?.avatarUrl ?? userData.avatar) ? (
+                { (userData.avatar ?? authUser?.avatarUrl ?? activeStoredAccount?.avatarUrl) ? (
                   <Image
-                    source={{ uri: authUser?.avatarUrl ?? activeStoredAccount?.avatarUrl ?? userData.avatar }}
+                    source={{ uri: userData.avatar ?? authUser?.avatarUrl ?? activeStoredAccount?.avatarUrl }}
                     style={styles.accountAvatar}
                   />
                 ) : (
@@ -756,7 +838,7 @@ const removeAvatarFromServer = async () => {
             )}
 
             <TouchableOpacity style={styles.accountAddButton} onPress={() => handleAddAccount('login')}>
-              <Ionicons name="add-circle-outline" size={20} color="#8B5CF6" style={{ marginRight: 8 }} />
+              <Ionicons name="add-circle-outline" size={20} color="#FF8D32" style={{ marginRight: 8 }} />
               <Text style={styles.accountAddButtonText}>{t.settings.accounts.addAccount}</Text>
             </TouchableOpacity>
             <Text style={styles.accountHint}>
@@ -766,18 +848,16 @@ const removeAvatarFromServer = async () => {
         ))}
 
         {/* 1. АККАУНТ И БЕЗОПАСНОСТЬ */}
-        {renderSection('🔐', t.settings.accountSecurity.title, (
+        {renderSection('lock', t.settings.accountSecurity.title, (
           <>
-            {renderSettingItem(t.settings.accountSecurity.email, 'user@example.com', () => setShowEmailModal(true))}
+            {renderSettingItem(t.settings.accountSecurity.email, authUser?.email ?? '—', () => setShowEmailModal(true))}
             {renderSettingItem(t.settings.accountSecurity.password, '••••••••', () => setShowPasswordModal(true))}
             {renderSwitchItem(t.settings.accountSecurity.twoFactorAuth, twoFactorAuth, setTwoFactorAuth)}
-            {renderSettingItem(t.settings.accountSecurity.linkedSocials, 'Facebook, Google, Apple ID', () => {})}
-            {renderSettingItem(t.settings.accountSecurity.activeDevices, undefined, () => {})}
           </>
         ))}
         
         {/* 2. ПРОФИЛЬ И ВИДИМОСТЬ */}
-        {renderSection('👤', t.settings.profileVisibility.title, (
+        {renderSection('user', t.settings.profileVisibility.title, (
           <>
             <Text style={styles.subsectionTitle}>{t.settings.profileVisibility.basicInfo}</Text>
             {renderSettingItem(t.settings.profileVisibility.name, userProfile?.name || userData.name || t.settings.profileVisibility.notSpecified, () => {
@@ -810,29 +890,23 @@ const removeAvatarFromServer = async () => {
               setEditBio(userProfile?.bio || userData.bio || '');
               setShowBioModal(true);
             })}
-            {renderSettingItem(t.settings.profileVisibility.profilePhoto, t.settings.profileVisibility.uploadDelete, () => setShowAvatarModal(true))}
             
             <Text style={styles.subsectionTitle}>{t.settings.profileVisibility.privacy}</Text>
-            {renderSettingItem(t.settings.profileVisibility.whoSeesProfile, t.settings.profileVisibility.all, () => {})}
-            {renderSettingItem(t.settings.profileVisibility.whoCanInvite, t.settings.profileVisibility.friends, () => {})}
             {renderSwitchItem(t.settings.profileVisibility.showAge, showAge, handleUpdateShowAge)}
           </>
         ))}
         
         {/* 3. СОБЫТИЯ */}
-        {renderSection('📅', t.settings.events.title, (
+        {renderSection('calendar', t.settings.events.title, (
           <>
             {renderSwitchItem(t.settings.events.smartSuggestions, smartSuggestions, setSmartSuggestions)}
-            <Text style={styles.subsectionTitle}>{t.settings.events.calendarSync}</Text>
-            {renderSettingItem(t.settings.events.googleCalendar, undefined, () => {})}
-            {renderSettingItem(t.settings.events.appleCalendar, undefined, () => {})}
             {renderSwitchItem(t.settings.events.autoAddAccepted, autoAddEvents, setAutoAddEvents)}
             {renderSettingItem(t.settings.events.reminders, `${reminderHours} ${t.settings.events.reminderHours}`, () => setShowReminderModal(true))}
           </>
         ))}
         
         {/* 3.5. СОХРАНЕННОЕ */}
-        {renderSection('💾', t.settings.saved.title, (
+        {renderSection('bookmark', t.settings.saved.title, (
           <>
             {renderSettingItem(
               t.settings.saved.savedEvents,
@@ -848,62 +922,66 @@ const removeAvatarFromServer = async () => {
         ))}
         
         {/* 4. ЯЗЫК И РЕГИОН */}
-        {renderSection('🌐', t.settings.languageRegion.title, (
+        {renderSection('globe', t.settings.languageRegion.title, (
           <>
             {renderSettingItem(
               t.settings.languageRegion.appLanguage,
               language === 'en' ? t.settings.languageRegion.english : t.settings.languageRegion.russian,
               () => setShowLanguageModal(true)
             )}
-            {renderSettingItem(t.settings.languageRegion.timezone, t.settings.languageRegion.automatic, () => {})}
-            {renderSettingItem(t.settings.languageRegion.measurementSystem, t.settings.languageRegion.metric, () => {})}
-            {renderSettingItem(t.settings.languageRegion.eventSearchRegion, t.settings.languageRegion.currentCity, () => {})}
           </>
         ))}
         
         {/* 5. ДРУЗЬЯ И СООБЩЕСТВО */}
-        {renderSection('👥', t.settings.friendsCommunity.title, (
+        {renderSection('users', t.settings.friendsCommunity.title, (
           <>
             {renderSettingItem(t.settings.friendsCommunity.friends, undefined, () => router.push('/friends-list'))}
-            {renderSettingItem(t.settings.friendsCommunity.blockedUsers, undefined, () => {})}
             <Text style={styles.subsectionTitle}>{t.settings.friendsCommunity.friendshipSettings}</Text>
-            {renderSettingItem(t.settings.friendsCommunity.whoCanAdd, t.settings.profileVisibility.all, () => {})}
             {renderSwitchItem(t.settings.friendsCommunity.confirmRequests, confirmFriendRequests, setConfirmFriendRequests)}
-            {renderSettingItem(t.settings.friendsCommunity.groups, undefined, () => {})}
           </>
         ))}
         
         {/* 6. ВНЕШНИЙ ВИД */}
-        {renderSection('🎨', t.settings.appearance.title, (
+        {renderSection('image', t.settings.appearance.title, (
           <>
             {renderSettingItem(t.settings.appearance.theme, theme === 'dark' ? t.settings.appearance.dark : theme === 'light' ? t.settings.appearance.light : t.settings.appearance.auto, () => {
               const themes: ('light' | 'dark' | 'auto')[] = ['light', 'dark', 'auto'];
               const currentIndex = themes.indexOf(theme);
               setTheme(themes[(currentIndex + 1) % themes.length]);
             })}
-            {renderSettingItem(t.settings.appearance.textSize, t.settings.appearance.medium, () => {})}
-            {renderSettingItem(t.settings.appearance.experimental, undefined, () => {})}
           </>
         ))}
         
         {/* 7. ПРИЛОЖЕНИЕ */}
-        {renderSection('📱', t.settings.app.title, (
+        {renderSection('smartphone', t.settings.app.title, (
           <>
-            {renderSettingItem(t.settings.app.about, t.settings.app.version, () => {})}
-            {renderSettingItem(t.settings.app.freeSpace, undefined, () => {})}
-            {renderSettingItem(t.settings.app.backup, undefined, () => {})}
-            {renderSettingItem(t.settings.app.exportData, undefined, () => {})}
+            {renderSettingItem(t.settings.app.about, t.settings.app.version)}
           </>
         ))}
         
         {/* 8. ПОДДЕРЖКА */}
-        {renderSection('❓', t.settings.support.title, (
+        {renderSection('help', t.settings.support.title, (
           <>
-            {renderSettingItem(t.settings.support.help, undefined, () => {})}
-            {renderSettingItem(t.settings.support.reportProblem, undefined, () => {})}
-            {renderSettingItem(t.settings.support.leaveReview, undefined, () => {})}
-            {renderSettingItem(t.settings.support.terms, undefined, () => {})}
-            {renderSettingItem(t.settings.support.privacy, undefined, () => {})}
+            {renderSettingItem(t.settings.support.help, undefined, () => {
+              Linking.openURL('mailto:support@iwent.ru');
+            })}
+            {renderSettingItem(t.settings.support.reportProblem, undefined, () => {
+              Linking.openURL('mailto:support@iwent.ru?subject=Bug Report');
+            })}
+            {renderSettingItem(t.settings.support.terms, undefined, () => {
+              if (Platform.OS === 'web') {
+                router.push('/privacy');
+              } else {
+                Linking.openURL('https://iwent.ru/privacy');
+              }
+            })}
+            {renderSettingItem(t.settings.support.privacy, undefined, () => {
+              if (Platform.OS === 'web') {
+                router.push('/privacy');
+              } else {
+                Linking.openURL('https://iwent.ru/privacy');
+              }
+            })}
             {renderSettingItem(t.settings.support.myComplaints, undefined, () => router.push('/my-complaints'))}
             {(() => {
               logger.debug('Checking admin panel visibility:', { 
@@ -923,7 +1001,7 @@ const removeAvatarFromServer = async () => {
         ))}
         
         {/* 9. АККАУНТ */}
-        {renderSection('🚪', t.settings.account.title, (
+        {renderSection('logout', t.settings.account.title, (
           <>
             {renderSettingItem(t.settings.account.deactivate, undefined, handleDeactivateAccount)}
             <TouchableOpacity style={styles.dangerItem} onPress={handleDeleteAccount}>
@@ -980,7 +1058,7 @@ const removeAvatarFromServer = async () => {
                 onPress={handleChangeEmail}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#FFF" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1038,7 +1116,7 @@ const removeAvatarFromServer = async () => {
                 onPress={handleChangePassword}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#FFF" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1077,7 +1155,7 @@ const removeAvatarFromServer = async () => {
                 onPress={handleUpdateName}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#FFF" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1120,7 +1198,7 @@ const removeAvatarFromServer = async () => {
                 onPress={handleUpdateGender}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#FFF" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1142,7 +1220,27 @@ const removeAvatarFromServer = async () => {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Дата рождения</Text>
             
-            {Platform.OS === 'ios' ? (
+            {Platform.OS === 'web' ? (
+              <input
+                type="date"
+                value={editDateOfBirth ? editDateOfBirth.toISOString().split('T')[0] : ''}
+                max={new Date().toISOString().split('T')[0]}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    setEditDateOfBirth(new Date(e.target.value));
+                  }
+                }}
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.05)',
+                  color: '#f4f4f5',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 12,
+                  padding: 10,
+                  fontSize: 16,
+                  width: '100%',
+                }}
+              />
+            ) : Platform.OS === 'ios' ? (
               <DateTimePicker
                 value={editDateOfBirth || new Date(2000, 0, 1)}
                 mode="date"
@@ -1154,7 +1252,7 @@ const removeAvatarFromServer = async () => {
                   }
                 }}
                 textColor="#FFF"
-                style={{ backgroundColor: '#1E1E1E' }}
+                style={{ backgroundColor: '#141417' }}
               />
             ) : (
               <>
@@ -1165,7 +1263,7 @@ const removeAvatarFromServer = async () => {
                   <Text style={styles.datePickerButtonText}>
                     {editDateOfBirth ? formatDateWithDots(editDateOfBirth) : 'Выберите дату'}
                   </Text>
-                  <Ionicons name="calendar-outline" size={20} color="#8B5CF6" />
+                  <Ionicons name="calendar-outline" size={20} color="#FF8D32" />
                 </TouchableOpacity>
                 {showDatePicker && (
                   <DateTimePicker
@@ -1200,7 +1298,7 @@ const removeAvatarFromServer = async () => {
                 onPress={handleUpdateDateOfBirth}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#FFF" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1239,7 +1337,7 @@ const removeAvatarFromServer = async () => {
                 onPress={handleUpdateCity}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#FFF" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1280,7 +1378,7 @@ const removeAvatarFromServer = async () => {
                 onPress={handleUpdateBio}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#FFF" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1381,7 +1479,7 @@ const removeAvatarFromServer = async () => {
                 style={[styles.avatarPreview, avatarUploading && { opacity: 0.6 }]}
               />
               {avatarUploading && (
-                <ActivityIndicator style={styles.avatarUploadSpinner} color="#FFF" />
+                <ActivityIndicator style={styles.avatarUploadSpinner} color="#f4f4f5" />
               )}
             </View>
             
@@ -1412,372 +1510,4 @@ const removeAvatarFromServer = async () => {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#121212',
-  },
-  centered: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  loginPromptTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 12,
-  },
-  loginPromptText: {
-    fontSize: 16,
-    color: '#BBBBCC',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  loginButton: {
-    backgroundColor: '#8B5CF6',
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 12,
-  },
-  loginButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 60,
-    paddingHorizontal: 20,
-    paddingBottom: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E1E1E',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFF',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 40,
-  },
-  section: {
-    marginTop: 20,
-    paddingHorizontal: 20,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  sectionIcon: {
-    fontSize: 20,
-    marginRight: 10,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FFF',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  subsectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#999',
-    marginTop: 10,
-    marginBottom: 10,
-    marginLeft: 30,
-  },
-  settingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E1E1E',
-  },
-  settingLabel: {
-    fontSize: 16,
-    color: '#FFF',
-    flex: 1,
-  },
-  settingValue: {
-    fontSize: 14,
-    color: '#999',
-    marginRight: 10,
-  },
-  accountsCard: {
-    backgroundColor: '#1B1B1B',
-    borderRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-  },
-  accountRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#242424',
-  },
-  accountRowActive: {
-    borderBottomColor: '#2F2F2F',
-  },
-  accountInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  accountAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    marginRight: 12,
-    backgroundColor: '#2E2E2E',
-  },
-  accountAvatarPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  accountTextColumn: {
-    flex: 1,
-  },
-  accountName: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  accountMeta: {
-    color: '#9A9A9A',
-    fontSize: 13,
-    marginTop: 2,
-  },
-  accountBadge: {
-    marginTop: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: '#2E2E3F',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  accountBadgeText: {
-    color: '#B9B9FF',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  accountActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginLeft: 12,
-  },
-  accountActionButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  accountActionPrimary: {
-    backgroundColor: '#8B5CF6',
-  },
-  accountActionSecondary: {
-    backgroundColor: '#2E2E2E',
-  },
-  accountActionPrimaryText: {
-    color: '#FFF',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  accountActionSecondaryText: {
-    color: '#BBB',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  accountAddButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 18,
-  },
-  accountAddButtonText: {
-    color: '#8B5CF6',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  accountHint: {
-    marginTop: 6,
-    color: '#777',
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  dangerItem: {
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E1E1E',
-  },
-  dangerText: {
-    fontSize: 16,
-    color: '#FF3B30',
-    fontWeight: '500',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  modalContent: {
-    backgroundColor: '#1E1E1E',
-    borderRadius: 12,
-    padding: 20,
-    width: '100%',
-    maxWidth: 400,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFF',
-    marginBottom: 20,
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: '#999',
-    marginBottom: 15,
-  },
-  modalInput: {
-    backgroundColor: '#333',
-    color: '#FFF',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 15,
-    fontSize: 16,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 10,
-    gap: 10,
-  },
-  modalButtonsColumn: {
-    gap: 10,
-    marginTop: 10,
-  },
-  modalButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-    minWidth: 100,
-    alignItems: 'center',
-  },
-  modalButtonFull: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    backgroundColor: '#8B5CF6',
-  },
-  modalButtonCancel: {
-    backgroundColor: '#333',
-  },
-  modalButtonConfirm: {
-    backgroundColor: '#8B5CF6',
-  },
-  modalButtonSecondary: {
-    backgroundColor: '#333',
-  },
-  modalButtonDisabled: {
-    opacity: 0.7,
-  },
-  modalButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  accountModeTabs: {
-    flexDirection: 'row',
-    backgroundColor: '#262626',
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 16,
-  },
-  accountModeButton: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  accountModeButtonActive: {
-    backgroundColor: '#8B5CF6',
-  },
-  accountModeButtonText: {
-    color: '#AAA',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  accountModeButtonTextActive: {
-    color: '#FFF',
-  },
-  accountErrorText: {
-    color: '#FF6B6B',
-    fontSize: 13,
-    marginBottom: 10,
-  },
-  accountStatusText: {
-    color: '#8B5CF6',
-    fontSize: 13,
-    marginBottom: 10,
-  },
-  avatarPreviewContainer: {
-    alignItems: 'center',
-    marginVertical: 20,
-  },
-  avatarPreview: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: '#333',
-  },
-  avatarUploadSpinner: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    marginLeft: -12,
-    marginTop: -12,
-  },
-  datePickerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#333',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 15,
-  },
-  datePickerButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-  },
-  genderOption: {
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-    backgroundColor: '#2A2A2A',
-  },
-  genderOptionSelected: {
-    backgroundColor: '#8B5CF6',
-  },
-  genderOptionText: {
-    color: '#FFF',
-    fontSize: 16,
-  },
-  genderOptionTextSelected: {
-    color: '#FFF',
-    fontWeight: 'bold',
-  },
-});
 

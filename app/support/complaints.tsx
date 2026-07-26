@@ -13,6 +13,8 @@ import {
 import { useRouter } from 'expo-router';
 import { apiRequest } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { AppIcon } from '../../components/ui/AppIcon';
+import { Palette } from '../../constants/DesignSystem';
 import { createLogger } from '../../utils/logger';
 
 const logger = createLogger('SupportComplaintsScreen');
@@ -48,7 +50,7 @@ interface Complaint {
 
 const STATUS_COLORS: Record<ComplaintStatus, string> = {
   PENDING: '#FFA500',
-  REVIEWED: '#007AFF',
+  REVIEWED: '#FF8D32',
   RESOLVED: '#34C759',
   REJECTED: '#FF3B30',
 };
@@ -229,9 +231,12 @@ export default function SupportComplaintsScreen() {
             >
               <View style={styles.complaintHeader}>
                 <View style={styles.complaintType}>
-                  <Text style={styles.complaintTypeText}>
-                    {complaint.type === 'EVENT' ? '📅 Событие' : '👤 Пользователь'}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <AppIcon name={complaint.type === 'EVENT' ? 'calendar' : 'user'} size={13} color={Palette.textDim} />
+                    <Text style={styles.complaintTypeText}>
+                      {complaint.type === 'EVENT' ? 'Событие' : 'Пользователь'}
+                    </Text>
+                  </View>
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: STATUS_COLORS[complaint.status] }]}>
                   <Text style={styles.statusText}>{STATUS_LABELS[complaint.status]}</Text>
@@ -430,7 +435,7 @@ export default function SupportComplaintsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   header: {
     flexDirection: 'row',
@@ -439,16 +444,16 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingBottom: 15,
     paddingHorizontal: 20,
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#141417',
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   backButton: {
-    color: '#007AFF',
+    color: '#FF8D32',
     fontSize: 16,
   },
   title: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: 'bold',
   },
@@ -457,9 +462,9 @@ const styles = StyleSheet.create({
   },
   filtersContainer: {
     maxHeight: 60,
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#141417',
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   filtersContent: {
     paddingHorizontal: 15,
@@ -470,31 +475,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: '#2A2A2A',
+    backgroundColor: '#1c1c20',
     marginRight: 8,
   },
   filterButtonActive: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FF8D32',
   },
   filterText: {
     color: '#DDD',
     fontSize: 14,
   },
   filterTextActive: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontWeight: '600',
   },
   list: {
     flex: 1,
   },
   complaintCard: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#141417',
     padding: 15,
     marginHorizontal: 15,
     marginTop: 15,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: 'rgba(255,255,255,0.07)',
   },
   complaintHeader: {
     flexDirection: 'row',
@@ -503,13 +508,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   complaintType: {
-    backgroundColor: '#2A2A2A',
+    backgroundColor: '#1c1c20',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
   },
   complaintTypeText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: '600',
   },
@@ -519,18 +524,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   statusText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: '600',
   },
   reasonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 8,
   },
   descriptionText: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     marginBottom: 10,
   },
@@ -541,18 +546,18 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: '#333',
+    borderTopColor: 'rgba(255,255,255,0.07)',
   },
   reporterText: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 12,
   },
   dateText: {
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     fontSize: 12,
   },
   emptyText: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 16,
     textAlign: 'center',
     marginTop: 50,
@@ -564,7 +569,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#141417',
     borderRadius: 16,
     width: '90%',
     maxHeight: '80%',
@@ -577,12 +582,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalTitle: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 20,
     fontWeight: 'bold',
   },
   modalClose: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 24,
     fontWeight: 'bold',
   },
@@ -593,17 +598,17 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   detailLabel: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     marginBottom: 5,
   },
   detailValue: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
   },
   responseInput: {
-    backgroundColor: '#2A2A2A',
-    color: '#FFF',
+    backgroundColor: '#1c1c20',
+    color: '#f4f4f5',
     padding: 15,
     borderRadius: 12,
     fontSize: 16,
@@ -624,18 +629,18 @@ const styles = StyleSheet.create({
     minWidth: 80,
   },
   cancelButton: {
-    backgroundColor: '#2A2A2A',
+    backgroundColor: '#1c1c20',
   },
   cancelButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 14,
     fontWeight: '600',
   },
   responseButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FF8D32',
   },
   responseButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -643,7 +648,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#34C759',
   },
   resolveButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -651,16 +656,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF3B30',
   },
   rejectButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 14,
     fontWeight: '600',
   },
   sendButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FF8D32',
     flex: 1,
   },
   sendButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: '600',
   },

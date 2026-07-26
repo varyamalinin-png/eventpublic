@@ -225,9 +225,6 @@ export const useUserFolders = ({
       setUserFolders(prev => prev.filter(folder => folder.id !== folderId));
       return;
     }
-
-    const actualToken = currentAccessTokenRef.current;
-    if (!actualToken) return;
     
     try {
       await apiRequest(

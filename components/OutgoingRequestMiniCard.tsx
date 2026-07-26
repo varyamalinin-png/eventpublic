@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
 import { createLogger } from '../utils/logger';
+import { AppIcon } from './ui/AppIcon';
 
 const logger = createLogger('OutgoingRequestMiniCard');
 
@@ -129,11 +130,11 @@ export default function OutgoingRequestMiniCard({
       {/* Статус запроса - показываем только для pending и accepted */}
       {status === 'pending' ? (
         <View style={[styles.statusContainer, { backgroundColor: '#FF9500' }]}>
-          <Text style={styles.statusIcon}>⏱</Text>
+          <AppIcon name="clock" size={12} color="#1a0d00" />
         </View>
       ) : status === 'accepted' ? (
         <View style={[styles.statusContainer, { backgroundColor: '#34C759' }]}>
-          <Text style={styles.statusIcon}>✓</Text>
+          <AppIcon name="check" size={12} color="#062b13" />
         </View>
       ) : null}
     </TouchableOpacity>
@@ -187,7 +188,7 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: '#FFF',
+    borderColor: 'rgba(255,255,255,0.15)',
   },
   miniatureInfo: {
     position: 'absolute',
@@ -198,7 +199,7 @@ const styles = StyleSheet.create({
   miniatureTitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginBottom: 2,
     lineHeight: 14,
   },
@@ -223,7 +224,7 @@ const styles = StyleSheet.create({
     minHeight: 28,
   },
   statusIcon: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 14,
     fontWeight: 'bold',
   },

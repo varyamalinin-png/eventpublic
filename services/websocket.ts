@@ -6,7 +6,7 @@ const logger = createLogger('WebSocket');
 
 let socket: Socket | null = null;
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 3;
+const MAX_RECONNECT_ATTEMPTS = 5;
 
 // Функция для декодирования JWT токена без проверки подписи (только для проверки exp)
 function decodeJWT(token: string): { exp?: number; [key: string]: any } | null {
@@ -141,16 +141,22 @@ export function createSocketConnection(token: string, refreshTokenCallback?: () 
       }).join(' ');
       
       // Проверяем на различные варианты ошибок WebSocket
-      const isWebSocketError = 
-        errorString.includes('WebSocket connection error') || 
+      const isSilentError =
+        errorString.includes('WebSocket connection error') ||
         errorString.includes('websocket error') ||
         errorString.includes('TransportError') ||
         errorString.includes('engine.io-client') ||
-        errorString.includes('_construct') && errorString.includes('construct.js') ||
+        errorString.includes('AbortError') ||
+        errorString.includes('Aborted') ||
+        errorString.includes('Network timeout') ||
+        errorString.includes('No connection') ||
+        errorString.includes('auth/refresh') ||
+        errorString.includes('Network request failed') ||
+        errorString.includes('Failed to fetch') ||
+        (errorString.includes('_construct') && errorString.includes('construct.js')) ||
         (args[0] && typeof args[0] === 'object' && args[0]?.message?.includes('websocket'));
-      
-      if (isWebSocketError) {
-        // Не выводим эти ошибки в консоль - они не критичны, socket.io автоматически переподключается
+
+      if (isSilentError) {
         return;
       }
       // Все остальные ошибки выводим как обычно

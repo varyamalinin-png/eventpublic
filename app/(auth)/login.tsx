@@ -13,6 +13,12 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
 import { createLogger } from '../../utils/logger';
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
+import * as AppleAuthentication from 'expo-apple-authentication';
+
+// Завершаем сессию OAuth для правильной работы на веб
+WebBrowser.maybeCompleteAuthSession();
 
 const logger = createLogger('Auth');
 
@@ -27,6 +33,7 @@ export default function AuthScreen() {
   const {
     login,
     register,
+    loginWithGoogle,
     loading,
     isAuthenticated,
     user,
@@ -65,6 +72,77 @@ export default function AuthScreen() {
   const [registerUsername, setRegisterUsername] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerName, setRegisterName] = useState('');
+
+  const WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '1095670285353-5u0ap40ms4ccqmc8hbfh32pmudi54f1v.apps.googleusercontent.com';
+  const googleClientId = WEB_CLIENT_ID;
+
+  // Для веба используем прямой подход через Google OAuth API
+  // Для мобильных приложений используем expo-auth-session
+  const mobileRedirectUri = AuthSession.makeRedirectUri({ scheme: 'iwent', path: 'auth', preferLocalhost: false });
+  const webRedirectUri = Platform.OS === 'web' && typeof window !== 'undefined' && window.location ? `${window.location.origin}/auth` : 'https://iwent.ru/auth';
+
+  const [request, response, promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: googleClientId,
+      scopes: ['openid', 'profile', 'email'],
+      responseType: AuthSession.ResponseType.IdToken,
+      redirectUri: Platform.OS === 'web' ? webRedirectUri : mobileRedirectUri,
+    },
+    { authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth' }
+  );
+
+  // Обработка ответа от Google OAuth (только для мобильных приложений)
+  useEffect(() => {
+    if (Platform.OS !== 'web' && response?.type === 'success' && response.params?.id_token) {
+      handleGoogleSignIn(response.params.id_token);
+    } else if (Platform.OS !== 'web' && response?.type === 'error') {
+      logger.error('Google OAuth error:', response.error);
+      setErrorMessage('Не удалось войти через Google');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [response]);
+
+  // Функция для прямого запуска Google OAuth на вебе
+  const handleGoogleSignInWeb = () => {
+    if (Platform.OS !== 'web' || !googleClientId) {
+      setErrorMessage('Google OAuth не настроен');
+      return;
+    }
+
+    const redirectUri = typeof window !== 'undefined' 
+      ? `${window.location.origin}/auth`
+      : 'https://iwent.ru/auth';
+    
+    // Генерируем state для защиты от CSRF
+    const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    sessionStorage.setItem('google_oauth_state', state);
+
+    // Формируем URL для Google OAuth
+    const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    authUrl.searchParams.set('client_id', googleClientId);
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('response_type', 'id_token');
+    authUrl.searchParams.set('scope', 'openid profile email');
+    authUrl.searchParams.set('state', state);
+    authUrl.searchParams.set('nonce', Math.random().toString(36).substring(2, 15));
+
+    // Перенаправляем на Google OAuth
+    if (typeof window !== 'undefined') {
+      window.location.href = authUrl.toString();
+    }
+  };
+
+  const handleGoogleSignIn = async (idToken: string) => {
+    setErrorMessage(null);
+    try {
+      await loginWithGoogle(idToken);
+      // После успешного логина useEffect выше обработает переход
+    } catch (error: any) {
+      logger.error('Google sign in failed', error);
+      const errorMsg = error?.body?.message || error?.message || 'Не удалось войти через Google';
+      setErrorMessage(errorMsg);
+    }
+  };
 
   const handleLogin = async () => {
     setErrorMessage(null);
@@ -177,7 +255,7 @@ export default function AuthScreen() {
             <TextInput
               style={styles.input}
               placeholder="Email"
-              placeholderTextColor="#777"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               keyboardType="email-address"
               autoCapitalize="none"
               value={loginEmail}
@@ -187,7 +265,7 @@ export default function AuthScreen() {
             <TextInput
               style={styles.input}
               placeholder="Пароль"
-              placeholderTextColor="#777"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               secureTextEntry
               value={loginPassword}
               onChangeText={setLoginPassword}
@@ -199,11 +277,50 @@ export default function AuthScreen() {
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#FFF" />
+                <ActivityIndicator color="#f4f4f5" />
               ) : (
                 <Text style={styles.primaryButtonText}>Войти</Text>
               )}
             </TouchableOpacity>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>или</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.googleButton, loading && styles.disabledButton]}
+              onPress={Platform.OS === 'web' ? handleGoogleSignInWeb : () => promptAsync()}
+              disabled={loading || !googleClientId}
+            >
+              <Text style={styles.googleButtonText}>Продолжить с Google</Text>
+            </TouchableOpacity>
+
+            {Platform.OS === 'ios' && (
+              <TouchableOpacity
+                style={[styles.googleButton, { backgroundColor: '#000', marginTop: 10 }]}
+                onPress={async () => {
+                  try {
+                    const credential = await AppleAuthentication.signInAsync({
+                      requestedScopes: [
+                        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+                        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+                      ],
+                    });
+                    if (credential.identityToken) {
+                      await loginWithGoogle(credential.identityToken);
+                    }
+                  } catch (e: any) {
+                    if (e.code !== 'ERR_REQUEST_CANCELED') {
+                      setErrorMessage('Не удалось войти через Apple');
+                    }
+                  }
+                }}
+              >
+                <Text style={[styles.googleButtonText, { color: '#fff' }]}> Продолжить с Apple</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -213,7 +330,7 @@ export default function AuthScreen() {
             <TextInput
               style={styles.input}
               placeholder="Email"
-              placeholderTextColor="#777"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               keyboardType="email-address"
               autoCapitalize="none"
               value={registerEmail}
@@ -223,7 +340,7 @@ export default function AuthScreen() {
             <TextInput
               style={styles.input}
               placeholder="Имя пользователя"
-              placeholderTextColor="#777"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               autoCapitalize="none"
               value={registerUsername}
               onChangeText={setRegisterUsername}
@@ -232,7 +349,7 @@ export default function AuthScreen() {
             <TextInput
               style={styles.input}
               placeholder="Имя (необязательно)"
-              placeholderTextColor="#777"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               value={registerName}
               onChangeText={setRegisterName}
               editable={!loading}
@@ -240,7 +357,7 @@ export default function AuthScreen() {
             <TextInput
               style={styles.input}
               placeholder="Пароль"
-              placeholderTextColor="#777"
+              placeholderTextColor="rgba(244,244,245,0.35)"
               secureTextEntry
               value={registerPassword}
               onChangeText={setRegisterPassword}
@@ -252,11 +369,50 @@ export default function AuthScreen() {
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#FFF" />
+                <ActivityIndicator color="#f4f4f5" />
               ) : (
                 <Text style={styles.primaryButtonText}>Зарегистрироваться</Text>
               )}
             </TouchableOpacity>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>или</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.googleButton, loading && styles.disabledButton]}
+              onPress={Platform.OS === 'web' ? handleGoogleSignInWeb : () => promptAsync()}
+              disabled={loading || !googleClientId}
+            >
+              <Text style={styles.googleButtonText}>Регистрация через Google</Text>
+            </TouchableOpacity>
+
+            {Platform.OS === 'ios' && (
+              <TouchableOpacity
+                style={[styles.googleButton, { backgroundColor: '#000', marginTop: 10 }]}
+                onPress={async () => {
+                  try {
+                    const credential = await AppleAuthentication.signInAsync({
+                      requestedScopes: [
+                        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+                        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+                      ],
+                    });
+                    if (credential.identityToken) {
+                      await loginWithGoogle(credential.identityToken);
+                    }
+                  } catch (e: any) {
+                    if (e.code !== 'ERR_REQUEST_CANCELED') {
+                      setErrorMessage('Не удалось войти через Apple');
+                    }
+                  }
+                }}
+              >
+                <Text style={[styles.googleButtonText, { color: '#fff' }]}> Регистрация через Apple</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </ScrollView>
@@ -268,19 +424,19 @@ const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     padding: 24,
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#0a0a0c',
     justifyContent: 'center',
   },
   title: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#FFF',
+    color: '#f4f4f5',
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
     marginBottom: 24,
     textAlign: 'center',
   },
@@ -288,7 +444,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginBottom: 24,
     borderRadius: 20,
-    backgroundColor: '#1f1f1f',
+    backgroundColor: '#141417',
     padding: 4,
   },
   tabButton: {
@@ -298,23 +454,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tabButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
   },
   tabButtonText: {
-    color: '#AAA',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
     fontWeight: '500',
   },
   tabButtonTextActive: {
-    color: '#FFF',
+    color: '#0A0A0A',
     fontWeight: '600',
   },
   formBlock: {
     gap: 12,
   },
   input: {
-    backgroundColor: '#1f1f1f',
-    color: '#FFF',
+    backgroundColor: '#141417',
+    color: '#f4f4f5',
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 12,
@@ -323,14 +479,14 @@ const styles = StyleSheet.create({
     borderColor: '#2a2a2a',
   },
   primaryButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 8,
   },
   primaryButtonText: {
-    color: '#FFF',
+    color: '#0A0A0A',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -346,5 +502,33 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#FF6B6B',
     fontSize: 14,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#1c1c20',
+  },
+  dividerText: {
+    color: 'rgba(244,244,245,0.55)',
+    fontSize: 14,
+    marginHorizontal: 12,
+  },
+  googleButton: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  googleButtonText: {
+    color: '#f4f4f5',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

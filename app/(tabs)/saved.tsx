@@ -1,11 +1,21 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, Dimensions, TouchableOpacity, Image } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  RefreshControl,
+  Dimensions,
+  TouchableOpacity,
+  Image,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import TopBar from '../../components/TopBar';
 import EventCard from '../../components/EventCard';
 import { useEvents, Event } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
+import { AppIcon } from '../../components/ui/AppIcon';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -18,202 +28,179 @@ export default function SavedScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'events' | 'memories'>('events');
 
-  // Функция поиска для сохраненных событий
-  const handleSavedSearch = (query: string) => {
-    setSearchQuery(query);
-  };
+  const handleSavedSearch = (query: string) => setSearchQuery(query);
 
-  // Получаем сохраненные события
-  const savedEvents = useMemo(() => {
-    return getSavedEvents();
-  }, [getSavedEvents]);
+  const savedEvents = useMemo(() => getSavedEvents(), [getSavedEvents]);
 
-  // Получаем сохраненные меморис посты
-  const savedMemoryPosts = useMemo(() => {
-    return getSavedMemoryPosts(eventProfiles);
-  }, [getSavedMemoryPosts, eventProfiles]);
+  const savedMemoryPosts = useMemo(
+    () => getSavedMemoryPosts(eventProfiles),
+    [getSavedMemoryPosts, eventProfiles],
+  );
 
-  // Фильтруем события по поисковому запросу
   const filteredEvents = useMemo(() => {
     if (!searchQuery.trim()) return savedEvents;
-    
-    const lowerQuery = searchQuery.toLowerCase();
+    const q = searchQuery.toLowerCase();
     return savedEvents.filter(event => {
-      // Поиск по названию события
-      if (event.title.toLowerCase().includes(lowerQuery)) return true;
-      
-      // Поиск по описанию
-      if (event.description?.toLowerCase().includes(lowerQuery)) return true;
-      
-      // Поиск по локации
-      if (event.location?.toLowerCase().includes(lowerQuery)) return true;
-      
-      // Поиск по дате
-      if (event.displayDate?.toLowerCase().includes(lowerQuery)) return true;
-      
-      // Поиск по времени
-      if (event.time?.toLowerCase().includes(lowerQuery)) return true;
-      
-      // Поиск по организатору
-      const organizer = getUserData(event.organizerId);
-      if (organizer.name.toLowerCase().includes(lowerQuery) || 
-          organizer.username.toLowerCase().includes(lowerQuery)) {
-        return true;
-      }
-      
-      return false;
+      if (event.title.toLowerCase().includes(q)) return true;
+      if (event.description?.toLowerCase().includes(q)) return true;
+      if (event.location?.toLowerCase().includes(q)) return true;
+      if (event.displayDate?.toLowerCase().includes(q)) return true;
+      if (event.time?.toLowerCase().includes(q)) return true;
+      const org = getUserData(event.organizerId);
+      return org.name.toLowerCase().includes(q) || org.username.toLowerCase().includes(q);
     });
   }, [savedEvents, searchQuery, getUserData]);
 
+  // ⚠️  ВАЖНО: этот useMemo должен быть ДО любых conditional return!
+  const filteredMemoryPosts = useMemo(() => {
+    if (!searchQuery.trim()) return savedMemoryPosts;
+    const q = searchQuery.toLowerCase();
+    return savedMemoryPosts.filter(({ post }) => {
+      if (post.caption?.toLowerCase().includes(q)) return true;
+      const author = getUserData(post.authorId);
+      return (
+        author.name.toLowerCase().includes(q) ||
+        author.username.toLowerCase().includes(q)
+      );
+    });
+  }, [savedMemoryPosts, searchQuery, getUserData]);
+
   const onRefresh = () => {
     setRefreshing(true);
-    // Симуляция обновления данных
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    setTimeout(() => setRefreshing(false), 1000);
   };
 
   if (!authUser) {
     return (
       <View style={styles.container}>
-        <TopBar 
-          searchPlaceholder="Поиск сохраненных событий..."
+        <TopBar
+          searchPlaceholder="Поиск сохраненных..."
           onSearchChange={handleSavedSearch}
           searchQuery={searchQuery}
         />
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>Авторизуйтесь, чтобы просматривать сохраненные события</Text>
+          <AppIcon name="lock" size={60} color="rgba(244,244,245,0.25)" />
+          <Text style={styles.emptyTitle}>Войдите в аккаунт</Text>
+          <Text style={styles.emptyText}>
+            Авторизуйтесь, чтобы просматривать сохранённые события
+          </Text>
         </View>
       </View>
     );
   }
 
-  // Фильтруем меморис посты по поисковому запросу
-  const filteredMemoryPosts = useMemo(() => {
-    if (!searchQuery.trim()) return savedMemoryPosts;
-    
-    const lowerQuery = searchQuery.toLowerCase();
-    return savedMemoryPosts.filter(({ post, eventId }) => {
-      // Поиск по описанию поста
-      if (post.caption?.toLowerCase().includes(lowerQuery)) return true;
-      
-      // Поиск по автору
-      const author = getUserData(post.authorId);
-      if (author.name.toLowerCase().includes(lowerQuery) || 
-          author.username.toLowerCase().includes(lowerQuery)) {
-        return true;
-      }
-      
-      return false;
-    });
-  }, [savedMemoryPosts, searchQuery, getUserData]);
+  // Grid column math
+  const GRID_H_PAD = 16;
+  const GRID_GAP = 2;
+  const gridAvailable = SCREEN_WIDTH - GRID_H_PAD * 2;
+  const cellSize = (gridAvailable - GRID_GAP * 2) / 3;
 
   return (
     <View style={styles.container}>
-      <TopBar 
-        searchPlaceholder="Поиск сохраненных событий..."
+      <TopBar
+        searchPlaceholder="Поиск сохраненных..."
         onSearchChange={handleSavedSearch}
         searchQuery={searchQuery}
       />
-      
-      {/* Табы для переключения между событиями и меморис */}
-      <View style={styles.tabsContainer}>
+
+      {/* Таб-переключатель */}
+      <View style={styles.tabsRow}>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'events' && styles.tabActive]}
           onPress={() => setActiveTab('events')}
+          activeOpacity={0.75}
         >
           <Text style={[styles.tabText, activeTab === 'events' && styles.tabTextActive]}>
-            {t.settings.saved.savedEvents || 'Сохраненные события'}
+            {t.settings?.saved?.savedEvents || 'События'}
           </Text>
+          {filteredEvents.length > 0 && (
+            <View style={[styles.badge, activeTab === 'events' && styles.badgeActive]}>
+              <Text style={[styles.badgeText, activeTab === 'events' && styles.badgeTextActive]}>
+                {filteredEvents.length}
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.tab, activeTab === 'memories' && styles.tabActive]}
           onPress={() => setActiveTab('memories')}
+          activeOpacity={0.75}
         >
           <Text style={[styles.tabText, activeTab === 'memories' && styles.tabTextActive]}>
-            {t.settings.saved.savedMemories || 'Сохраненные меморис'}
+            {t.settings?.saved?.savedMemories || 'Меморис'}
           </Text>
+          {filteredMemoryPosts.length > 0 && (
+            <View style={[styles.badge, activeTab === 'memories' && styles.badgeActive]}>
+              <Text style={[styles.badgeText, activeTab === 'memories' && styles.badgeTextActive]}>
+                {filteredMemoryPosts.length}
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 
       <ScrollView
-        style={styles.scrollView}
+        style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#FF8D32"
+            colors={['#FF8D32']}
+          />
         }
+        showsVerticalScrollIndicator={false}
       >
         {activeTab === 'events' ? (
           filteredEvents.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>
-                {searchQuery ? 'Ничего не найдено' : 'Нет сохраненных событий'}
-              </Text>
-            </View>
+            <EmptyState
+              iconName="bookmark"
+              title={searchQuery ? 'Ничего не найдено' : 'Нет сохранённых событий'}
+              subtitle={searchQuery ? 'Попробуйте другой запрос' : 'Нажмите ♡ на событии чтобы сохранить'}
+            />
           ) : (
-            <View style={styles.eventsContainer}>
-              {filteredEvents.map((event, index) => {
-                // Рассчитываем ширину карточки для трех колонок
-                const containerPadding = 40; // 20px с каждой стороны
-                const gap = 15; // Отступ между карточками
-                const availableWidth = SCREEN_WIDTH - containerPadding;
-                const cardWidth = (availableWidth - gap * 2) / 3; // 3 колонки с 2 промежутками
-                const isLastInRow = (index + 1) % 3 === 0;
-                
-                return (
-                  <View
-                    key={event.id}
-                    style={[
-                      { width: cardWidth },
-                      !isLastInRow && { marginRight: gap }
-                    ]}
-                  >
-                    <EventCard
-                      id={event.id}
-                      title={event.title}
-                      description={event.description || ''}
-                      date={event.date}
-                      time={event.time}
-                      displayDate={event.displayDate}
-                      location={event.location || ''}
-                      price={event.price || 'Бесплатно'}
-                      participants={event.participants || 0}
-                      maxParticipants={event.maxParticipants || 10}
-                      organizerAvatar={getUserData(event.organizerId)?.avatar || ''}
-                      organizerId={event.organizerId}
-                      variant="miniature_1"
-                      showSwipeAction={false}
-                      mediaUrl={event.mediaUrl}
-                      mediaType={event.mediaType}
-                      mediaAspectRatio={event.mediaAspectRatio}
-                      participantsList={event.participantsList}
-                      participantsData={event.participantsData}
-                      onMiniaturePress={() => router.push(`/event-profile/${event.id}`)}
-                    />
-                  </View>
-                );
-              })}
+            <View style={styles.eventsList}>
+              {filteredEvents.map(event => (
+                <View key={event.id} style={styles.eventCardWrapper}>
+                  <EventCard
+                    id={event.id}
+                    title={event.title}
+                    description={event.description || ''}
+                    date={event.date}
+                    time={event.time}
+                    displayDate={event.displayDate}
+                    location={event.location || ''}
+                    price={event.price || 'Бесплатно'}
+                    participants={event.participants || 0}
+                    maxParticipants={event.maxParticipants || 10}
+                    organizerAvatar={getUserData(event.organizerId)?.avatar || ''}
+                    organizerId={event.organizerId}
+                    variant="default"
+                    showSwipeAction={false}
+                    mediaUrl={event.mediaUrl}
+                    mediaType={event.mediaType}
+                    mediaAspectRatio={event.mediaAspectRatio}
+                    participantsList={event.participantsList}
+                    participantsData={event.participantsData}
+                    context="other_profile"
+                  />
+                </View>
+              ))}
             </View>
           )
         ) : (
           filteredMemoryPosts.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>
-                {searchQuery ? 'Ничего не найдено' : 'Нет сохраненных меморис постов'}
-              </Text>
-            </View>
+            <EmptyState
+              iconName="image"
+              title={searchQuery ? 'Ничего не найдено' : 'Нет сохранённых воспоминаний'}
+              subtitle={searchQuery ? 'Попробуйте другой запрос' : 'Сохраняйте фото и видео из меморис'}
+            />
           ) : (
-            <View style={styles.memoriesGrid}>
+            <View style={styles.memoryGrid}>
               {filteredMemoryPosts.map(({ post, eventId }, index) => {
-                // Сетка 3 колонки с тонкими полосками между
-                const containerPadding = 20;
-                const gap = 1; // Тонкая полоска между постами
-                const availableWidth = SCREEN_WIDTH - containerPadding * 2;
-                const cardWidth = (availableWidth - gap * 2) / 3;
-                const cardHeight = cardWidth; // Квадратные карточки
                 const isLastInRow = (index + 1) % 3 === 0;
-                
-                // Определяем тип контента
                 const effectiveType: 'photo' | 'video' | 'music' | 'text' = (() => {
                   if (post.photoUrl) return 'photo';
                   if (typeof post.content === 'string' && /\.(mp4|mov|m4v)$/i.test(post.content)) return 'video';
@@ -224,50 +211,43 @@ export default function SavedScreen() {
                   <TouchableOpacity
                     key={`${eventId}-${post.id}`}
                     style={[
-                      styles.memoryPostCard,
-                      { 
-                        width: cardWidth, 
-                        height: cardHeight,
-                        marginRight: isLastInRow ? 0 : gap,
-                        marginBottom: gap,
-                      }
+                      styles.memoryCell,
+                      {
+                        width: cellSize,
+                        height: cellSize,
+                        marginRight: isLastInRow ? 0 : GRID_GAP,
+                        marginBottom: GRID_GAP,
+                      },
                     ]}
                     onPress={() => router.push(`/event-profile/${eventId}`)}
+                    activeOpacity={0.85}
                   >
-                    {effectiveType === 'photo' && (
-                      <Image 
-                        source={{ uri: post.photoUrl || post.content }} 
-                        style={styles.memoryPostImage}
-                        resizeMode="cover"
-                      />
-                    )}
-                    {effectiveType === 'video' && (
-                      <View style={styles.memoryPostContainer}>
-                        <Image 
-                          source={{ uri: post.photoUrl || post.content }} 
-                          style={styles.memoryPostImage}
+                    {(effectiveType === 'photo' || effectiveType === 'video' || effectiveType === 'music') ? (
+                      <>
+                        <Image
+                          source={{
+                            uri:
+                              effectiveType === 'music'
+                                ? (post as any).artwork_url || post.photoUrl || post.content
+                                : post.photoUrl || post.content,
+                          }}
+                          style={styles.memoryCellImage}
                           resizeMode="cover"
                         />
-                        <View style={styles.memoryPostPlayButton}>
-                          <Text style={styles.memoryPostPlayIcon}>▶</Text>
-                        </View>
-                      </View>
-                    )}
-                    {effectiveType === 'music' && (
-                      <View style={styles.memoryPostContainer}>
-                        <Image 
-                          source={{ uri: post.artwork_url || post.photoUrl || post.content }} 
-                          style={styles.memoryPostImage}
-                          resizeMode="cover"
-                        />
-                        <View style={styles.memoryPostPlayButton}>
-                          <Text style={styles.memoryPostPlayIcon}>♪</Text>
-                        </View>
-                      </View>
-                    )}
-                    {effectiveType === 'text' && (
-                      <View style={styles.memoryPostTextContainer}>
-                        <Text style={styles.memoryPostText} numberOfLines={4}>
+                        {effectiveType === 'video' && (
+                          <View style={styles.playBadge}>
+                            <Text style={styles.playBadgeIcon}>▶</Text>
+                          </View>
+                        )}
+                        {effectiveType === 'music' && (
+                          <View style={styles.playBadge}>
+                            <Text style={styles.playBadgeIcon}>♪</Text>
+                          </View>
+                        )}
+                      </>
+                    ) : (
+                      <View style={styles.memoryCellText}>
+                        <Text style={styles.memoryCellTextContent} numberOfLines={4}>
                           {post.content}
                         </Text>
                       </View>
@@ -283,111 +263,169 @@ export default function SavedScreen() {
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+function EmptyState({
+  iconName,
+  title,
+  subtitle,
+}: {
+  iconName: 'bookmark' | 'image' | 'heart' | 'camera' | 'search';
+  title: string;
+  subtitle?: string;
+}) {
+  return (
+    <View style={styles.emptyContainer}>
+      <AppIcon name={iconName} size={60} color="rgba(244,244,245,0.25)" />
+      <Text style={styles.emptyTitle}>{title}</Text>
+      {subtitle ? <Text style={styles.emptyText}>{subtitle}</Text> : null}
+    </View>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
-  tabsContainer: {
+
+  // ── Tabs ──────────────────────────────────────────────────────────────────
+  tabsRow: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E1E1E',
+    paddingTop: 14,
+    paddingBottom: 0,
+    gap: 8,
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
+    flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
   },
   tabActive: {
-    borderBottomColor: '#8B5CF6',
+    backgroundColor: 'rgba(255,141,50,0.12)',
+    borderColor: '#FF8D32',
   },
   tabText: {
-    fontSize: 16,
-    color: '#999',
+    fontSize: 14,
     fontWeight: '500',
+    color: 'rgba(244,244,245,0.5)',
   },
   tabTextActive: {
-    color: '#FFF',
+    color: '#FF8D32',
     fontWeight: '600',
   },
-  scrollView: {
+  badge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  badgeActive: {
+    backgroundColor: 'rgba(255,141,50,0.25)',
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: 'rgba(244,244,245,0.5)',
+  },
+  badgeTextActive: {
+    color: '#FF8D32',
+  },
+
+  // ── Scroll ────────────────────────────────────────────────────────────────
+  scroll: {
     flex: 1,
   },
   scrollContent: {
+    paddingTop: 16,
     paddingBottom: 40,
   },
-  eventsContainer: {
+
+  // ── Events list ───────────────────────────────────────────────────────────
+  eventsList: {
+    paddingHorizontal: 0,
+  },
+  eventCardWrapper: {
+    marginBottom: 0,
+  },
+
+  // ── Memories grid ─────────────────────────────────────────────────────────
+  memoryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingHorizontal: 16,
   },
-  memoriesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-  },
-  memoryPostCard: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 0,
+  memoryCell: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 4,
     overflow: 'hidden',
   },
-  memoryPostContainer: {
+  memoryCellImage: {
     width: '100%',
     height: '100%',
-    position: 'relative',
   },
-  memoryPostImage: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#2A2A2A',
-  },
-  memoryPostTextContainer: {
-    width: '100%',
-    height: '100%',
-    padding: 8,
-    backgroundColor: '#2A2A2A',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  memoryPostText: {
-    fontSize: 12,
-    color: '#FFFFFF',
-    textAlign: 'center',
-  },
-  memoryPostPlayButton: {
+  playBadge: {
     position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -15 }, { translateY: -15 }],
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    bottom: 6,
+    right: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  memoryPostPlayIcon: {
-    color: '#000000',
-    fontSize: 12,
+  playBadgeIcon: {
+    color: '#f4f4f5',
+    fontSize: 10,
     fontWeight: 'bold',
   },
-  emptyContainer: {
+  memoryCellText: {
     flex: 1,
+    padding: 8,
+    backgroundColor: '#1c1c20',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
+  },
+  memoryCellTextContent: {
+    fontSize: 11,
+    color: 'rgba(244,244,245,0.7)',
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+
+  // ── Empty ─────────────────────────────────────────────────────────────────
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+    paddingHorizontal: 40,
+  },
+  emptyTitle: {
+    marginTop: 16,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#f4f4f5',
+    marginBottom: 8,
+    textAlign: 'center',
+    letterSpacing: -0.3,
   },
   emptyText: {
-    fontSize: 16,
-    color: '#999',
+    fontSize: 14,
+    color: 'rgba(244,244,245,0.45)',
     textAlign: 'center',
+    lineHeight: 20,
   },
 });
-

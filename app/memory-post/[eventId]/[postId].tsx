@@ -1,17 +1,23 @@
 import React from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useSafeRouter } from '../../../utils/safeRouter';
 import { useEvents } from '../../../context/EventsContext';
 import MemoryPost from '../../../components/MemoryPost';
 import TopBar from '../../../components/TopBar';
 
 export default function MemoryPostScreen() {
   const { eventId, postId } = useLocalSearchParams<{ eventId: string; postId: string }>();
-  const router = useRouter();
+  const router = useSafeRouter();
   const { getEventProfile } = useEvents();
 
   const eventProfile = eventId ? getEventProfile(eventId) : null;
   const post = eventProfile?.posts.find(p => p.id === postId);
+
+  // Функция навигации для передачи в MemoryPost
+  const handleNavigate = (path: string) => {
+    router.push(path);
+  };
 
   if (!post || !eventId) {
     return (
@@ -36,7 +42,7 @@ export default function MemoryPostScreen() {
         searchQuery=""
       />
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        <MemoryPost post={post} />
+        <MemoryPost post={post} onNavigate={handleNavigate} />
       </ScrollView>
     </View>
   );
@@ -45,7 +51,7 @@ export default function MemoryPostScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   scrollView: {
     flex: 1,

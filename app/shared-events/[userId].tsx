@@ -11,7 +11,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export default function SharedEventsScreen() {
   const { userId } = useLocalSearchParams();
   const router = useRouter();
-  const { events, getUserData, isUserEventMember } = useEvents();
+  const { events, eventProfiles, getUserData, isUserEventMember, isEventPast } = useEvents();
   const { user: authUser } = useAuth();
   const { t } = useLanguage();
   const [showEventFeed, setShowEventFeed] = useState(false);
@@ -21,14 +21,24 @@ export default function SharedEventsScreen() {
   const targetUserId = Array.isArray(userId) ? userId[0] : userId || 'organizer-1';
   const currentUserId = authUser?.id ?? null;
   const userData = getUserData(targetUserId);
-  
-  // События где и я и он члены события (текущие и прошлые)
+
+  // Член события: для прошедших — организатор или profile.participants (единый принцип)
+  const isMember = useMemo(() => {
+    return (event: Event, uid: string) => {
+      if (!isEventPast(event)) return isUserEventMember(event, uid);
+      if (event.organizerId === uid) return true;
+      const profile = eventProfiles.find(p => p.eventId === event.id);
+      return profile ? profile.participants.includes(uid) : false;
+    };
+  }, [eventProfiles, isEventPast, isUserEventMember]);
+
+  // События где и я и он члены (текущие и прошлые)
   const sharedEvents = useMemo(
     () =>
       currentUserId
-        ? events.filter(event => isUserEventMember(event, currentUserId) && isUserEventMember(event, targetUserId))
+        ? events.filter(event => isMember(event, currentUserId) && isMember(event, targetUserId))
         : [],
-    [events, currentUserId, targetUserId, isUserEventMember],
+    [events, currentUserId, targetUserId, isMember],
   );
 
   const handleEventPress = (event: Event) => {
@@ -180,13 +190,13 @@ export default function SharedEventsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   header: {
     paddingTop: 60,
     paddingBottom: 15,
     paddingHorizontal: 20,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -194,13 +204,13 @@ const styles = StyleSheet.create({
     marginRight: 15,
   },
   backText: {
-    color: '#007AFF',
+    color: '#FF8D32',
     fontSize: 16,
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: '#f4f4f5',
     flex: 1,
   },
   scrollView: {
@@ -217,7 +227,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: 'rgba(244,244,245,0.35)',
     textAlign: 'center',
     marginTop: 20,
     width: '100%',

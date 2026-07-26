@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, Image, TouchableOpacity, Dimensions, Modal, Alert } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useSafeRouter } from '../../utils/safeRouter';
 import * as ImagePicker from 'expo-image-picker';
 import EventCard from '../../components/EventCard';
 import { useEvents } from '../../context/EventsContext';
@@ -8,14 +9,26 @@ import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import type { EventFolder } from '../../types/EventFolder';
 import { formatUsername } from '../../utils/username';
+import { AppIcon } from '../../components/ui/AppIcon';
+import { Palette } from '../../constants/DesignSystem';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function EventFolderScreen() {
-  const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const expoRouter = useRouter();
+  const router = useSafeRouter();
+  const params = useLocalSearchParams<{ id: string }>();
+  
+  // На вебе параметры могут не передаваться через expo-router, получаем из URL напрямую
+  let id = Array.isArray(params.id) ? params.id[0] : params.id;
+  if (!id && typeof window !== 'undefined') {
+    const pathMatch = window.location.pathname.match(/\/event-folder\/([^\/]+)/);
+    if (pathMatch) {
+      id = pathMatch[1];
+    }
+  }
   const { getEventFolderById, eventFolders, isEventPast, updateEventFolder, deleteEventFolder, removeEventFromFolder } = useEvents();
-  const { user: authUser } = useAuth();
+  const { user: authUser, accessToken, initializing: authInitializing } = useAuth();
   const { t } = useLanguage();
   const [folder, setFolder] = useState<EventFolder | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,7 +42,33 @@ export default function EventFolderScreen() {
 
   useEffect(() => {
     const loadFolder = async () => {
-      if (!id) return;
+      
+      if (!id) {
+        console.warn('[EventFolderScreen] No id provided');
+        setLoading(false);
+        return;
+      }
+      
+      // Ждем завершения инициализации авторизации
+      if (authInitializing) {
+        // Не устанавливаем loading в false - продолжаем показывать загрузку
+        return;
+      }
+      
+      // Проверяем наличие токена - без него запрос не пройдет
+      // Но даем небольшую задержку после завершения инициализации, чтобы токен успел установиться
+      if (!accessToken || !authUser) {
+        console.warn('[EventFolderScreen] Not authenticated after initialization - cannot load folder', { 
+          hasAccessToken: !!accessToken, 
+          hasAuthUser: !!authUser,
+          authInitializing,
+          // Проверяем localStorage напрямую на вебе
+          localStorageToken: typeof window !== 'undefined' ? !!localStorage.getItem('accessToken') : false
+        });
+        setLoading(false);
+        setFolder(null);
+        return;
+      }
       
       try {
         // Сначала проверяем в кэше
@@ -44,31 +83,63 @@ export default function EventFolderScreen() {
         const folderData = await getEventFolderById(id);
         if (folderData) {
           setFolder(folderData);
+        } else {
+          console.error('[EventFolderScreen] Folder not found - API returned null', { folderId: id });
         }
-      } catch (error) {
-        console.error('Failed to load folder:', error);
+      } catch (error: any) {
+        console.error('[EventFolderScreen] Failed to load folder:', { 
+          error: error?.message || error,
+          status: error?.status,
+          statusCode: error?.statusCode,
+          folderId: id,
+          stack: error?.stack
+        });
+        // Не устанавливаем folder в null при ошибке - может быть временная проблема
+        // setFolder(null);
       } finally {
         setLoading(false);
       }
     };
 
     loadFolder();
-  }, [id, getEventFolderById, eventFolders]);
+  }, [id, getEventFolderById, eventFolders, accessToken, authUser, authInitializing]);
 
   if (loading) {
     return (
       <View style={styles.container}>
         <Text style={styles.loadingText}>Загрузка...</Text>
+        <Text style={styles.loadingText}>ID: {id || 'не указан'}</Text>
       </View>
     );
   }
 
-  if (!folder) {
+  if (!folder && !loading) {
     return (
       <View style={styles.container}>
-        <Text style={styles.errorText}>Папка не найдена</Text>
+        <TouchableOpacity 
+          style={styles.backButtonFixed}
+          onPress={() => {
+            if (router && typeof router.back === 'function') {
+              router.back();
+            } else if (expoRouter && typeof expoRouter.back === 'function') {
+              expoRouter.back();
+            } else if (typeof window !== 'undefined') {
+              window.history.back();
+            }
+          }}
+        >
+          <Text style={styles.backText}>←</Text>
+        </TouchableOpacity>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Text style={styles.errorText}>Папка не найдена</Text>
+          <Text style={[styles.errorText, { fontSize: 12, marginTop: 10, color: 'rgba(244,244,245,0.55)' }]}>ID: {id || 'не указан'}</Text>
+        </View>
       </View>
     );
+  }
+  
+  if (!folder) {
+    return null; // Пока загружается
   }
 
   // Форматируем продолжительность в формате дд.мм.гг - дд.мм.гг
@@ -312,7 +383,15 @@ export default function EventFolderScreen() {
       {/* Кнопка назад - зафиксирована с полупрозрачным фоном */}
       <TouchableOpacity 
         style={styles.backButtonFixed}
-        onPress={() => router.back()}
+        onPress={() => {
+          if (router && typeof router.back === 'function') {
+            router.back();
+          } else if (expoRouter && typeof expoRouter.back === 'function') {
+            expoRouter.back();
+          } else {
+            window.history.back();
+          }
+        }}
       >
         <Text style={styles.backText}>←</Text>
       </TouchableOpacity>
@@ -343,7 +422,7 @@ export default function EventFolderScreen() {
                   style={styles.menuButtonOverlay}
                   onPress={() => setShowMenu(true)}
                 >
-                  <Text style={styles.menuButtonText}>⋯</Text>
+                  <AppIcon name="more" size={18} color={Palette.text} />
                 </TouchableOpacity>
               )}
             </View>
@@ -533,8 +612,9 @@ export default function EventFolderScreen() {
       <Modal
         visible={showMenu}
         transparent={true}
-        animationType="fade"
+        animationType="slide"
         onRequestClose={() => setShowMenu(false)}
+        statusBarTranslucent
       >
         <TouchableOpacity
           style={styles.menuOverlay}
@@ -542,6 +622,7 @@ export default function EventFolderScreen() {
           onPress={() => setShowMenu(false)}
         >
           <View style={styles.menuContent}>
+            <View style={styles.menuHandle} />
             <TouchableOpacity style={styles.menuItem} onPress={handleChangeCoverPhoto}>
               <Text style={styles.menuItemText}>Изменить фото</Text>
             </TouchableOpacity>
@@ -582,13 +663,13 @@ export default function EventFolderScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   scrollView: {
     flex: 1,
   },
   loadingText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 16,
     textAlign: 'center',
     marginTop: 50,
@@ -612,7 +693,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   backText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: 'bold',
   },
@@ -653,7 +734,7 @@ const styles = StyleSheet.create({
   folderName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#f4f4f5',
   },
   folderEventCount: {
     fontSize: 11,
@@ -669,7 +750,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   menuButtonText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 20,
     fontWeight: 'bold',
   },
@@ -681,7 +762,7 @@ const styles = StyleSheet.create({
   },
   durationOverlay: {
     fontSize: 14,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     flex: 1,
   },
   participantsOverlay: {
@@ -693,7 +774,7 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     borderWidth: 0.5,
-    borderColor: '#FFFFFF',
+    borderColor: 'rgba(255,255,255,0.15)',
   },
   participantMoreOverlay: {
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -701,7 +782,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   participantMoreText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 10,
     fontWeight: 'bold',
   },
@@ -712,7 +793,7 @@ const styles = StyleSheet.create({
   },
   descriptionText: {
     fontSize: 16,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     lineHeight: 24,
   },
   eventsContainer: {
@@ -745,48 +826,61 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: 'rgba(255,255,255,0.15)',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     zIndex: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },
   checkboxChecked: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
+    backgroundColor: '#FF8D32',
+    borderColor: '#FF8D32',
   },
   checkmark: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 16,
     fontWeight: 'bold',
   },
   menuOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
   },
   menuContent: {
-    backgroundColor: '#2A2A2A',
-    borderRadius: 12,
-    padding: 8,
-    minWidth: 200,
+    backgroundColor: '#18181e',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingBottom: 36,
+    paddingTop: 4,
+  },
+  menuHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignSelf: 'center',
+    marginTop: 12,
+    marginBottom: 8,
   },
   menuItem: {
-    padding: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 22,
     borderBottomWidth: 1,
-    borderBottomColor: '#333333',
+    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   menuItemDanger: {
     borderBottomWidth: 0,
   },
   menuItemText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    textAlign: 'center',
+    color: '#f4f4f5',
+    fontSize: 15.5,
+    fontWeight: '500',
   },
   menuItemTextDanger: {
-    color: '#FF6B6B',
+    color: '#FF453A',
   },
   actionBar: {
     position: 'absolute',
@@ -794,38 +888,41 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     flexDirection: 'row',
-    backgroundColor: '#1A1A1A',
+    backgroundColor: 'rgba(18,18,18,0.95)',
     padding: 16,
+    paddingBottom: 28,
     borderTopWidth: 1,
-    borderTopColor: '#333333',
-    gap: 12,
+    borderTopColor: 'rgba(255,255,255,0.07)',
+    gap: 10,
   },
   cancelButton: {
     flex: 1,
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#2A2A2A',
+    paddingVertical: 13,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
     alignItems: 'center',
   },
   cancelButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
+    color: 'rgba(244,244,245,0.7)',
+    fontSize: 15,
+    fontWeight: '600',
   },
   actionButton: {
     flex: 2,
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#FF6B6B',
+    paddingVertical: 13,
+    borderRadius: 15,
+    backgroundColor: '#FF453A',
     alignItems: 'center',
   },
   actionButtonDisabled: {
-    backgroundColor: '#2A2A2A',
-    opacity: 0.5,
+    opacity: 0.4,
   },
   actionButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: '#f4f4f5',
+    fontSize: 15,
+    fontWeight: '700',
   },
   eventsFeedScroll: {
     flex: 1,

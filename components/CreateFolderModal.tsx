@@ -1,19 +1,41 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, TextInput, Alert, Platform, Modal } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { AppIcon } from './ui/AppIcon';
+import { Palette } from '../constants/DesignSystem';
 
 interface CreateFolderModalProps {
+  visible?: boolean;
   onClose: () => void;
   onSubmit: (name: string, description?: string, coverPhoto?: { uri: string; type: string; name: string }) => void;
 }
 
-export default function CreateFolderModal({ onClose, onSubmit }: CreateFolderModalProps) {
+export default function CreateFolderModal({ visible = true, onClose, onSubmit }: CreateFolderModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [coverPhoto, setCoverPhoto] = useState<{ uri: string; type: string; name: string } | null>(null);
 
   const handlePickImage = async () => {
     try {
+      if (Platform.OS === 'web') {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = (e: any) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            setCoverPhoto({
+              uri: URL.createObjectURL(file),
+              type: file.type || 'image/jpeg',
+              name: file.name || 'cover.jpg',
+              file: file,
+            } as any);
+          }
+        };
+        input.click();
+        return;
+      }
+
       const hasPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (hasPermission.status !== 'granted') {
         Alert.alert('Ошибка', 'Нет доступа к галерее');
@@ -39,168 +61,302 @@ export default function CreateFolderModal({ onClose, onSubmit }: CreateFolderMod
     }
   };
 
-  return (
-    <View style={styles.overlay}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Создать папку</Text>
-        
-        {/* Выбор фото */}
-        <TouchableOpacity style={styles.coverPhotoSelector} onPress={handlePickImage}>
+  const handleSubmit = () => {
+    onSubmit(name, description, coverPhoto || undefined);
+  };
+
+  const inner = (
+    <View style={styles.sheet}>
+      {/* Handle */}
+      <View style={styles.handle} />
+
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Создать папку</Text>
+        <TouchableOpacity
+          style={styles.closeBtn}
+          onPress={onClose}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <AppIcon name="close" size={16} color={Palette.textDim} />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.body}>
+        {/* Cover photo */}
+        <TouchableOpacity style={styles.coverSelector} onPress={handlePickImage} activeOpacity={0.8}>
           {coverPhoto ? (
-            <Image source={{ uri: coverPhoto.uri }} style={styles.coverPhotoPreview} resizeMode="cover" />
+            <Image source={{ uri: coverPhoto.uri }} style={styles.coverPreview} resizeMode="cover" />
           ) : (
-            <View style={styles.coverPhotoPlaceholder}>
-              <Text style={styles.coverPhotoPlaceholderText}>+ Добавить фото</Text>
+            <View style={styles.coverPlaceholder}>
+              <View style={styles.coverPlaceholderIcon}>
+                <AppIcon name="image" size={22} color={Palette.textDim} />
+              </View>
+              <Text style={styles.coverPlaceholderText}>Добавить обложку</Text>
+              <Text style={styles.coverPlaceholderSub}>JPG, PNG, WEBP</Text>
             </View>
           )}
         </TouchableOpacity>
+
         {coverPhoto && (
-          <TouchableOpacity style={styles.removePhotoButton} onPress={() => setCoverPhoto(null)}>
-            <Text style={styles.removePhotoButtonText}>Удалить фото</Text>
+          <TouchableOpacity
+            style={styles.removePhotoBtn}
+            onPress={() => setCoverPhoto(null)}
+            activeOpacity={0.7}
+          >
+            <AppIcon name="close" size={13} color="rgba(255,59,48,0.8)" />
+            <Text style={styles.removePhotoBtnText}>Удалить фото</Text>
           </TouchableOpacity>
         )}
 
-        <TextInput
-          style={styles.input}
-          placeholder="Название папки"
-          placeholderTextColor="#999"
-          value={name}
-          onChangeText={setName}
-          autoFocus
-        />
-        <TextInput
-          style={styles.textArea}
-          placeholder="Описание (необязательно)"
-          placeholderTextColor="#999"
-          value={description}
-          onChangeText={setDescription}
-          multiline
-        />
-        <View style={styles.buttonRow}>
-          <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
-            <Text style={styles.cancelButtonText}>Отмена</Text>
+        {/* Name field */}
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Название</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Введите название папки"
+            placeholderTextColor={Palette.textFaint}
+            value={name}
+            onChangeText={setName}
+            autoFocus
+            returnKeyType="next"
+          />
+        </View>
+
+        {/* Description field */}
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Описание <Text style={styles.fieldOptional}>(необязательно)</Text></Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="Добавьте описание..."
+            placeholderTextColor={Palette.textFaint}
+            value={description}
+            onChangeText={setDescription}
+            multiline
+            numberOfLines={3}
+            textAlignVertical="top"
+          />
+        </View>
+
+        {/* Buttons */}
+        <View style={styles.actions}>
+          <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
+            <Text style={styles.cancelBtnText}>Отмена</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.submitButton, !name.trim() && styles.buttonDisabled]}
-            onPress={() => onSubmit(name, description, coverPhoto || undefined)}
+            style={[styles.submitBtn, !name.trim() && styles.submitBtnDisabled]}
+            onPress={handleSubmit}
             disabled={!name.trim()}
+            activeOpacity={0.8}
           >
-            <Text style={styles.submitButtonText}>Создать</Text>
+            <Text style={styles.submitBtnText}>Создать</Text>
           </TouchableOpacity>
         </View>
       </View>
+    </View>
+  );
+
+  if (visible !== undefined) {
+    return (
+      <Modal
+        visible={visible}
+        transparent
+        animationType="slide"
+        onRequestClose={onClose}
+        statusBarTranslucent
+      >
+        <View style={styles.overlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+          {inner}
+        </View>
+      </Modal>
+    );
+  }
+
+  return (
+    <View style={styles.overlayAbsolute}>
+      <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+      {inner}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+  },
+  overlayAbsolute: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
     zIndex: 1000,
   },
-  content: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 16,
-    width: '90%',
-    maxHeight: '80%',
-    padding: 20,
+  sheet: {
+    backgroundColor: '#18181e',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingBottom: 32,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 16,
+  handle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignSelf: 'center',
+    marginTop: 12,
+    marginBottom: 4,
   },
-  coverPhotoSelector: {
-    width: '100%',
-    height: 150,
-    borderRadius: 12,
-    marginBottom: 12,
-    overflow: 'hidden',
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
-  coverPhotoPreview: {
-    width: '100%',
-    height: '100%',
+  headerTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Palette.text,
+    letterSpacing: -0.2,
   },
-  coverPhotoPlaceholder: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#2A2A2A',
+  closeBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.07)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#4A4A4A',
+  },
+  body: {
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    gap: 14,
+  },
+  coverSelector: {
+    width: '100%',
+    height: 130,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.09)',
     borderStyle: 'dashed',
   },
-  coverPhotoPlaceholderText: {
-    fontSize: 16,
-    color: '#AAAAAA',
+  coverPreview: {
+    width: '100%',
+    height: '100%',
   },
-  removePhotoButton: {
-    alignSelf: 'flex-end',
-    padding: 8,
-    marginBottom: 12,
+  coverPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
   },
-  removePhotoButtonText: {
-    color: '#FF4444',
+  coverPlaceholderIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  coverPlaceholderText: {
     fontSize: 14,
+    fontWeight: '600',
+    color: Palette.textDim,
+  },
+  coverPlaceholderSub: {
+    fontSize: 11,
+    color: Palette.textFaint,
+  },
+  removePhotoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 5,
+    paddingVertical: 4,
+    marginTop: -8,
+  },
+  removePhotoBtnText: {
+    fontSize: 13,
+    color: 'rgba(255,59,48,0.8)',
+    fontWeight: '500',
+  },
+  field: {
+    gap: 6,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Palette.textDim,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  fieldOptional: {
+    fontWeight: '400',
+    textTransform: 'none',
+    letterSpacing: 0,
+    color: Palette.textFaint,
+    fontSize: 12,
   },
   input: {
-    backgroundColor: '#2A2A2A',
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 16,
-    color: '#FFFFFF',
-    marginBottom: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 15,
+    color: Palette.text,
   },
   textArea: {
-    backgroundColor: '#2A2A2A',
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 16,
-    color: '#FFFFFF',
-    minHeight: 100,
-    textAlignVertical: 'top',
-    marginBottom: 16,
+    minHeight: 88,
+    paddingTop: 13,
   },
-  buttonRow: {
+  actions: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
+    gap: 10,
+    marginTop: 6,
   },
-  cancelButton: {
+  cancelBtn: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    backgroundColor: '#333',
+    paddingVertical: 14,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.07)',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
   },
-  cancelButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-  },
-  submitButton: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    backgroundColor: '#8B5CF6',
-    alignItems: 'center',
-  },
-  submitButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
+  cancelBtnText: {
+    fontSize: 15,
     fontWeight: '600',
+    color: 'rgba(244,244,245,0.7)',
   },
-  buttonDisabled: {
-    opacity: 0.5,
+  submitBtn: {
+    flex: 1.4,
+    paddingVertical: 14,
+    borderRadius: 15,
+    backgroundColor: Palette.accent,
+    alignItems: 'center',
+  },
+  submitBtnDisabled: {
+    opacity: 0.4,
+  },
+  submitBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#f4f4f5',
   },
 });

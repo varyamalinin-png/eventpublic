@@ -1,5 +1,5 @@
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, KeyboardAvoidingView, Platform, Dimensions, ActivityIndicator } from 'react-native';
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, KeyboardAvoidingView, Platform, Dimensions, ActivityIndicator, Alert, Modal } from 'react-native';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEvents } from '../../../context/EventsContext';
 import { useLanguage } from '../../../context/LanguageContext';
@@ -8,6 +8,10 @@ import EventCard from '../../../components/EventCard';
 import MemoryMiniCard from '../../../components/MemoryMiniCard';
 import { useAuth } from '../../../context/AuthContext';
 import { createLogger } from '../../../utils/logger';
+import { AppIcon } from '../../../components/ui/AppIcon';
+import { Palette } from '../../../constants/DesignSystem';
+import { apiRequest } from '../../../services/api';
+import type { MessageReaction } from '../../../types/Chat';
 
 const logger = createLogger('ChatScreen');
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -15,7 +19,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export default function ChatScreen() {
   const { chatId } = useLocalSearchParams();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, accessToken } = useAuth();
   const { t } = useLanguage();
   const {
     getChat,
@@ -24,11 +28,48 @@ export default function ChatScreen() {
     chatMessages,
     events,
     getEventProfile,
+    fetchMessagesForChat,
+    markChatAsRead,
   } = useEvents();
   const [inputText, setInputText] = useState('');
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [reactionMessageId, setReactionMessageId] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const QUICK_REACTIONS = ['\u{1F44D}', '\u{2764}\u{FE0F}', '\u{1F602}', '\u{1F62E}', '\u{1F622}', '\u{1F525}'];
+
+  const handleAddReaction = useCallback(async (messageId: string, emoji: string) => {
+    if (!chatId || !accessToken) return;
+    try {
+      await apiRequest(
+        `/chats/${chatId}/messages/${messageId}/reactions`,
+        { method: 'POST', body: JSON.stringify({ emoji }) },
+        accessToken,
+      );
+      // Refetch messages to get updated reactions
+      fetchMessagesForChat(chatId as string, true);
+    } catch (error) {
+      logger.error('Failed to add reaction', error);
+    }
+    setReactionMessageId(null);
+  }, [chatId, accessToken, fetchMessagesForChat]);
+
+  const handleRemoveReaction = useCallback(async (messageId: string, emoji: string) => {
+    if (!chatId || !accessToken) return;
+    try {
+      await apiRequest(
+        `/chats/${chatId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`,
+        { method: 'DELETE' },
+        accessToken,
+      );
+      fetchMessagesForChat(chatId as string, true);
+    } catch (error) {
+      logger.error('Failed to remove reaction', error);
+    }
+  }, [chatId, accessToken, fetchMessagesForChat]);
 
   const chat = chatId ? getChat(chatId as string) : null;
   const currentUserId = useMemo(() => user?.id ?? null, [user]);
@@ -42,21 +83,52 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!chatId) return;
-    
-    // Подключаемся к комнате чата через WebSocket для получения сообщений в реальном времени
+    fetchMessagesForChat(chatId as string, true);
+  }, [chatId, fetchMessagesForChat]);
+
+  useEffect(() => {
+    if (!chatId) return;
+    markChatAsRead(chatId as string);
+  }, [chatId, messages.length, markChatAsRead]);
+
+  useEffect(() => {
+    if (!chatId) return;
+
     const socket = require('../../../services/websocket').getSocket();
     if (socket && socket.connected) {
-      // Используем событие chat:join из namespace /ws/chats
-      // Или просто отправляем в общий namespace
       socket.emit('chat:join', { chatId });
-      logger.info('Подключились к комнате чата', { chatId });
+
+      const onTypingStart = (data: { chatId: string; userId: string }) => {
+        if (data.chatId === chatId && data.userId !== currentUserId) {
+          setTypingUsers(prev => prev.includes(data.userId) ? prev : [...prev, data.userId]);
+        }
+      };
+      const onTypingStop = (data: { chatId: string; userId: string }) => {
+        if (data.chatId === chatId) {
+          setTypingUsers(prev => prev.filter(id => id !== data.userId));
+        }
+      };
+      const onReaction = (data: { chatId: string; messageId: string }) => {
+        if (data.chatId === chatId) {
+          fetchMessagesForChat(chatId as string, true);
+        }
+      };
+      socket.on('typing:start', onTypingStart);
+      socket.on('typing:stop', onTypingStop);
+      socket.on('message:reaction', onReaction);
+
+      return () => {
+        socket.off('typing:start', onTypingStart);
+        socket.off('typing:stop', onTypingStop);
+        socket.off('message:reaction', onReaction);
+      };
     }
 
     const timer = setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: false });
     }, 100);
     return () => clearTimeout(timer);
-  }, [chatId, messages.length]);
+  }, [chatId, messages.length, currentUserId]);
 
   const handleSend = async () => {
     if (!inputText.trim() || !chatId) return;
@@ -80,6 +152,66 @@ export default function ChatScreen() {
     }
   };
 
+  // Group reactions by emoji and count them
+  const getGroupedReactions = (reactions: MessageReaction[] | undefined) => {
+    if (!reactions || reactions.length === 0) return [];
+    const grouped: Record<string, { emoji: string; count: number; userIds: string[] }> = {};
+    reactions.forEach(r => {
+      if (!grouped[r.emoji]) {
+        grouped[r.emoji] = { emoji: r.emoji, count: 0, userIds: [] };
+      }
+      grouped[r.emoji].count++;
+      grouped[r.emoji].userIds.push(r.userId);
+    });
+    return Object.values(grouped);
+  };
+
+  const renderReactionPills = (message: any, isOwn: boolean) => {
+    const grouped = getGroupedReactions(message.reactions);
+    if (grouped.length === 0) return null;
+
+    return (
+      <View style={[reactionStyles.pillsContainer, isOwn ? reactionStyles.pillsOwn : reactionStyles.pillsOther]}>
+        {grouped.map((group) => {
+          const isMine = currentUserId ? group.userIds.includes(currentUserId) : false;
+          return (
+            <TouchableOpacity
+              key={group.emoji}
+              style={[reactionStyles.pill, isMine && reactionStyles.pillActive]}
+              onPress={() => {
+                if (isMine) {
+                  handleRemoveReaction(message.id, group.emoji);
+                } else {
+                  handleAddReaction(message.id, group.emoji);
+                }
+              }}
+            >
+              <Text style={reactionStyles.pillEmoji}>{group.emoji}</Text>
+              <Text style={[reactionStyles.pillCount, isMine && reactionStyles.pillCountActive]}>{group.count}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    );
+  };
+
+  const renderReactionBar = (messageId: string) => {
+    if (reactionMessageId !== messageId) return null;
+    return (
+      <View style={reactionStyles.bar}>
+        {QUICK_REACTIONS.map((emoji) => (
+          <TouchableOpacity
+            key={emoji}
+            style={reactionStyles.barEmoji}
+            onPress={() => handleAddReaction(messageId, emoji)}
+          >
+            <Text style={{ fontSize: 24 }}>{emoji}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  };
+
   const renderMessage = (message: any, index: number) => {
     const isOwn = currentUserId ? message.fromUserId === currentUserId : false;
     const sender = getUserData(message.fromUserId);
@@ -100,7 +232,7 @@ export default function ChatScreen() {
           >
             {!isOwn && (
               <Image
-                source={{ uri: sender?.avatar || 'https://randomuser.me/api/portraits/women/22.jpg' }}
+                source={{ uri: sender?.avatar || '' }}
                 style={styles.avatar}
                 onError={() => {}}
               />
@@ -134,8 +266,7 @@ export default function ChatScreen() {
       const event = events.find(e => e.id === message.eventId);
       
       if (!event) {
-        logger.warn('Event not found for eventId', { eventId: message.eventId, availableEvents: events.map(e => e.id) });
-        // Если событие не найдено, показываем заглушку
+        logger.warn('Event not found for eventId', { eventId: message.eventId });
         return (
           <View
             key={index}
@@ -146,20 +277,23 @@ export default function ChatScreen() {
           >
             {!isOwn && (
               <Image
-                source={{ uri: sender?.avatar || 'https://randomuser.me/api/portraits/women/22.jpg' }}
+                source={{ uri: sender?.avatar || '' }}
                 style={styles.avatar}
                 onError={() => {}}
               />
             )}
-            <View
+            <TouchableOpacity
               style={[
                 styles.eventMessageContainer,
                 isOwn ? styles.ownEventMessage : styles.otherEventMessage
               ]}
+              onPress={() => router.push(`/event-profile/${message.eventId}`)}
+              activeOpacity={0.7}
             >
               <View style={styles.eventPlaceholder}>
-                <Text style={styles.eventPlaceholderText}>Событие не найдено</Text>
-                <Text style={styles.eventPlaceholderSubtext}>ID: {message.eventId}</Text>
+                <Text style={{ fontSize: 28, marginBottom: 6 }}>📅</Text>
+                <Text style={styles.eventPlaceholderText}>Событие</Text>
+                <Text style={styles.eventPlaceholderSubtext}>Нажмите, чтобы открыть</Text>
               </View>
               <Text style={styles.messageTime}>
                 {message.createdAt.toLocaleTimeString('ru-RU', {
@@ -167,7 +301,7 @@ export default function ChatScreen() {
                   minute: '2-digit'
                 })}
               </Text>
-            </View>
+            </TouchableOpacity>
           </View>
         );
       }
@@ -184,7 +318,7 @@ export default function ChatScreen() {
           >
             {!isOwn && (
               <Image
-                source={{ uri: sender?.avatar || 'https://randomuser.me/api/portraits/women/22.jpg' }}
+                source={{ uri: sender?.avatar || '' }}
                 style={styles.avatar}
                 onError={() => {}}
               />
@@ -234,33 +368,49 @@ export default function ChatScreen() {
     
     // Обычное текстовое сообщение
     return (
-      <View
-        key={index}
-        style={[
-          styles.messageWrapper,
-          isOwn ? styles.ownMessageWrapper : styles.otherMessageWrapper
-        ]}
-      >
-        {!isOwn && (
-          <Image
-            source={{ uri: sender?.avatar || 'https://randomuser.me/api/portraits/women/22.jpg' }}
-            style={styles.avatar}
-            onError={() => {}}
-          />
-        )}
+      <View key={index}>
+        {renderReactionBar(message.id)}
         <View
           style={[
-            styles.message,
-            isOwn ? styles.ownMessage : styles.otherMessage
+            styles.messageWrapper,
+            isOwn ? styles.ownMessageWrapper : styles.otherMessageWrapper
           ]}
         >
-          <Text style={styles.messageText}>{message.text}</Text>
-          <Text style={styles.messageTime}>
-            {message.createdAt.toLocaleTimeString('ru-RU', {
-              hour: '2-digit',
-              minute: '2-digit'
-            })}
-          </Text>
+          {!isOwn && (
+            <Image
+              source={{ uri: sender?.avatar || '' }}
+              style={styles.avatar}
+              onError={() => {}}
+            />
+          )}
+          <View style={{ maxWidth: '72%' }}>
+            <TouchableOpacity
+              style={[
+                styles.message,
+                isOwn ? styles.ownMessage : styles.otherMessage
+              ]}
+              onLongPress={() => {
+                setReactionMessageId(reactionMessageId === message.id ? null : message.id);
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.messageText}>{message.text}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 4 }}>
+                <Text style={styles.messageTime}>
+                  {message.createdAt.toLocaleTimeString('ru-RU', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </Text>
+                {isOwn && (
+                  <Text style={{ fontSize: 12, color: message.readBy && message.readBy.length > 0 ? '#FF8D32' : 'rgba(244,244,245,0.4)' }}>
+                    {message.readBy && message.readBy.length > 0 ? '✓✓' : '✓'}
+                  </Text>
+                )}
+              </View>
+            </TouchableOpacity>
+            {renderReactionPills(message, isOwn)}
+          </View>
         </View>
       </View>
     );
@@ -289,7 +439,7 @@ export default function ChatScreen() {
             style={styles.backButton}
             onPress={handleBackPress}
           >
-            <Text style={styles.backButtonText}>←</Text>
+            <AppIcon name="chevronLeft" size={22} color={Palette.text} />
           </TouchableOpacity>
           {chat.type === 'event' && chat.eventId ? (
             <TouchableOpacity 
@@ -319,7 +469,7 @@ export default function ChatScreen() {
                 return (
                   <Image
                     key={participantId}
-                    source={{ uri: participant?.avatar || 'https://randomuser.me/api/portraits/men/1.jpg' }}
+                    source={{ uri: participant?.avatar || '' }}
                     style={styles.smallAvatar}
                   />
                 );
@@ -336,11 +486,15 @@ export default function ChatScreen() {
     );
   };
 
+  const isIOS = Platform.OS === 'ios';
+  const isAndroid = Platform.OS === 'android';
+
   return (
     <KeyboardAvoidingView 
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      // На вебе не двигаем layout из-за клавиатуры, чтобы высота экрана была стабильной
+      behavior={isIOS ? 'padding' : isAndroid ? 'height' : undefined}
+      keyboardVerticalOffset={isIOS ? 90 : 0}
     >
       {/* Header */}
       {renderChatHeader()}
@@ -362,30 +516,75 @@ export default function ChatScreen() {
         )}
       </ScrollView>
 
+      {/* Typing indicator */}
+      {typingUsers.length > 0 && (
+        <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}>
+          <Text style={{ fontSize: 13, color: 'rgba(244,244,245,0.5)', fontStyle: 'italic' }}>
+            {typingUsers.map(id => getUserData(id)?.name || 'User').join(', ')} печатает...
+          </Text>
+        </View>
+      )}
+
       {/* Input */}
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
           value={inputText}
-          onChangeText={setInputText}
+          onChangeText={(text) => {
+            setInputText(text);
+            if (chatId && text.length > 0) {
+              const socket = require('../../../services/websocket').getSocket();
+              if (socket?.connected) {
+                socket.emit('typing:start', { chatId });
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                typingTimeoutRef.current = setTimeout(() => {
+                  socket.emit('typing:stop', { chatId });
+                }, 2000);
+              }
+            }
+          }}
           placeholder="Написать сообщение..."
-          placeholderTextColor="#666"
+          placeholderTextColor="rgba(244,244,245,0.35)"
           multiline
+          editable={true}
+          onSubmitEditing={Platform.OS === 'web' ? undefined : handleSend}
+          blurOnSubmit={false}
+          returnKeyType="send"
+          // Для веб-версии добавляем обработчик Enter
+          onKeyPress={Platform.OS === 'web' ? (e: any) => {
+            if (e.nativeEvent.key === 'Enter' && !e.nativeEvent.shiftKey) {
+              e.preventDefault?.();
+              handleSend();
+            }
+          } : undefined}
         />
-        <TouchableOpacity
-          style={[
-            styles.sendButton,
-            (!inputText.trim() || isSending) && styles.sendButtonDisabled,
-          ]}
-          onPress={handleSend}
-          disabled={!inputText.trim() || isSending}
-        >
-          {isSending ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <Text style={styles.sendButtonText}>➤</Text>
-          )}
-        </TouchableOpacity>
+        {inputText.trim() ? (
+          <TouchableOpacity
+            style={[styles.sendButton, isSending && styles.sendButtonDisabled]}
+            onPress={handleSend}
+            disabled={isSending}
+          >
+            {isSending ? (
+              <ActivityIndicator color="#1a0d00" />
+            ) : (
+              <AppIcon name="send" size={17} color="#1a0d00" />
+            )}
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[styles.sendButton, { backgroundColor: 'rgba(255,255,255,0.08)' }]}
+            onPress={async () => {
+              try {
+                const { Audio } = require('expo-av');
+                const { status } = await Audio.requestPermissionsAsync();
+                if (status !== 'granted') { Alert.alert('Нет доступа к микрофону'); return; }
+                Alert.alert('Скоро', 'Голосовые сообщения появятся в следующем обновлении');
+              } catch { Alert.alert('Скоро', 'Голосовые сообщения появятся в следующем обновлении'); }
+            }}
+          >
+            <AppIcon name="mic" size={17} color="rgba(244,244,245,0.6)" />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Унифицированный модал участников события (только для событийных чатов) */}
@@ -403,16 +602,19 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
-    paddingBottom: 80, // Место для панели ввода + таб-бар
+    backgroundColor: '#0a0a0c',
+    // На мобильных (native) оставляем отступ под таб-бар,
+    // на вебе дополнительно учитываем высоту фиксированного WebTabBar
+    paddingBottom: Platform.OS === 'web' ? 84 : 80,
   },
   chatHeader: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: 'rgba(20,20,23,0.85)',
     paddingTop: 60,
-    paddingBottom: 15,
+    paddingBottom: 16,
     paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(255,255,255,0.07)',
+    ...(({ backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' } as unknown) as object),
   },
   headerTopRow: {
     flexDirection: 'row',
@@ -420,23 +622,26 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#2a2a2a',
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
   backButtonText: {
-    color: '#FFF',
-    fontSize: 20,
+    color: '#f4f4f5',
+    fontSize: 18,
     fontWeight: '600',
   },
   chatName: {
-    color: '#FFF',
-    fontSize: 18,
-    fontWeight: '600',
+    color: '#f4f4f5',
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: -0.3,
     flex: 1,
   },
   chatNameContainer: {
@@ -449,7 +654,7 @@ const styles = StyleSheet.create({
   },
   participantsLabel: {
     fontSize: 14,
-    color: '#999999',
+    color: 'rgba(244,244,245,0.55)',
   },
   participantsAvatars: {
     flexDirection: 'row',
@@ -461,17 +666,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginLeft: -8,
     borderWidth: 1,
-    borderColor: '#1A1A1A',
+    borderColor: '#141417',
   },
   moreParticipantsBadge: {
-    backgroundColor: '#2A2A2A',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: -8,
   },
   moreParticipantsText: {
     fontSize: 10,
-    color: '#999999',
+    color: 'rgba(244,244,245,0.55)',
     fontWeight: '600',
   },
   messagesContainer: {
@@ -479,7 +684,8 @@ const styles = StyleSheet.create({
   },
   messagesContent: {
     paddingVertical: 20,
-    paddingBottom: 100, // Отступ снизу для панели ввода
+    // На вебе увеличиваем отступ, чтобы последние сообщения гарантированно были видны над полем ввода
+    paddingBottom: Platform.OS === 'web' ? 140 : 100,
   },
   messageWrapper: {
     flexDirection: 'row',
@@ -500,25 +706,31 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   message: {
-    maxWidth: '70%',
-    padding: 12,
-    borderRadius: 16,
+    maxWidth: '72%',
+    paddingHorizontal: 15,
+    paddingVertical: 11,
+    borderRadius: 20,
   },
   ownMessage: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#FF8D32',
+    borderBottomRightRadius: 6,
   },
   otherMessage: {
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#1c1c20',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    borderBottomLeftRadius: 6,
   },
   messageText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 15,
+    lineHeight: 20,
     marginBottom: 4,
   },
   messageTime: {
     color: 'rgba(255,255,255,0.6)',
-    fontSize: 11,
-    marginTop: 4,
+    fontSize: 10.5,
+    marginTop: 2,
     alignSelf: 'flex-end',
   },
   eventMessageContainer: {
@@ -533,7 +745,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   eventPlaceholder: {
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#1c1c20',
     borderRadius: 12,
     padding: 16,
     minHeight: 100,
@@ -541,74 +753,93 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   eventPlaceholderText: {
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 4,
   },
   eventPlaceholderSubtext: {
-    color: '#999999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 12,
   },
   emptyState: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 60,
   },
   emptyText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 8,
   },
   emptySubtext: {
-    color: '#999',
+    color: 'rgba(244,244,245,0.55)',
     fontSize: 14,
   },
   inputContainer: {
-    position: 'absolute',
-    bottom: 50, // Над таб-баром
-    left: 0,
-    right: 0,
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#1a1a1a',
+    paddingVertical: 10,
+    backgroundColor: 'rgba(20,20,23,0.85)',
     borderTopWidth: 1,
-    borderTopColor: '#333',
+    borderTopColor: 'rgba(255,255,255,0.07)',
+    ...(({ backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' } as unknown) as object),
+    // На native размещаем инпут поверх таб-бара,
+    // на вебе оставляем в естественном потоке, а отступ снизу даёт paddingBottom контейнера
+    ...(Platform.OS !== 'web' && {
+      position: 'absolute',
+      bottom: 50,
+      left: 0,
+      right: 0,
+    }),
   },
   input: {
     flex: 1,
-    backgroundColor: '#2a2a2a',
-    borderRadius: 20,
-    paddingHorizontal: 15,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 999,
+    paddingHorizontal: 16,
     paddingVertical: 10,
-    color: '#FFF',
-    fontSize: 15,
+    color: '#f4f4f5',
+    fontSize: 14.5,
     maxHeight: 100,
     marginRight: 10,
+    // Стили для веб-версии
+    ...(Platform.OS === 'web' && {
+      outline: 'none',
+      border: 'none',
+      resize: 'none',
+      WebkitAppearance: 'none',
+      MozAppearance: 'none',
+      appearance: 'none',
+    }),
   },
   sendButton: {
-    backgroundColor: '#8B5CF6',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    backgroundColor: '#FF8D32',
+    width: 42,
+    height: 42,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 10,
+    shadowColor: '#FF8D32',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
   },
   sendButtonDisabled: {
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   sendButtonText: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 18,
   },
   participantsModal: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0a0a0c',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -618,16 +849,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#333333',
+    borderBottomColor: 'rgba(255,255,255,0.08)',
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#f4f4f5',
   },
   closeButton: {
     fontSize: 24,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     padding: 4,
   },
   participantItem: {
@@ -635,7 +866,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#333333',
+    borderBottomColor: 'rgba(255,255,255,0.08)',
   },
   participantAvatar: {
     width: 50,
@@ -648,22 +879,77 @@ const styles = StyleSheet.create({
   },
   participantName: {
     fontSize: 16,
-    color: '#FFFFFF',
+    color: '#f4f4f5',
     fontWeight: '600',
     marginBottom: 2,
   },
   participantUsername: {
     fontSize: 14,
-    color: '#999999',
+    color: 'rgba(244,244,245,0.55)',
   },
   organizerBadge: {
     fontSize: 12,
-    color: '#8B5CF6',
-    backgroundColor: '#2A2A2A',
+    color: '#FF8D32',
+    backgroundColor: '#1c1c20',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
     fontWeight: '600',
+  },
+});
+
+const reactionStyles = StyleSheet.create({
+  bar: {
+    flexDirection: 'row',
+    backgroundColor: '#1c1c20',
+    borderRadius: 24,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginBottom: 6,
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  barEmoji: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  pillsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 4,
+    gap: 4,
+  },
+  pillsOwn: {
+    justifyContent: 'flex-end',
+  },
+  pillsOther: {
+    justifyContent: 'flex-start',
+  },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    gap: 3,
+  },
+  pillActive: {
+    backgroundColor: 'rgba(255,141,50,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,141,50,0.4)',
+  },
+  pillEmoji: {
+    fontSize: 14,
+  },
+  pillCount: {
+    fontSize: 12,
+    color: 'rgba(244,244,245,0.6)',
+    fontWeight: '600',
+  },
+  pillCountActive: {
+    color: '#FF8D32',
   },
 });
 

@@ -7,21 +7,15 @@ const apiUrlFromConstants =
   Constants.manifest?.extra?.apiUrl || 
   Constants.expoConfig?.extra?.apiUrl;
 
-const DEFAULT_API_URL = 
-  apiUrlFromConstants || 
-  process.env.EXPO_PUBLIC_API_URL || 
-  'http://localhost:4000';
+const DEFAULT_API_URL =
+  apiUrlFromConstants ||
+  process.env.EXPO_PUBLIC_API_URL ||
+  'https://iwent.ru/api';
 
-// Детальное логирование для отладки (только в development)
-if (typeof __DEV__ !== 'undefined' && __DEV__) {
-  console.log('[API] ==========================================');
+// Детальное логирование API URL отключено (включить при отладке через EXPO_DEBUG_API=1)
+const LOG_API_VERBOSE = typeof process !== 'undefined' && process.env?.EXPO_DEBUG_API === '1';
+if (typeof __DEV__ !== 'undefined' && __DEV__ && LOG_API_VERBOSE) {
   console.log('[API] Using API URL:', DEFAULT_API_URL);
-  console.log('[API] From Constants.manifest?.extra?.apiUrl:', Constants.manifest?.extra?.apiUrl);
-  console.log('[API] From Constants.expoConfig?.extra?.apiUrl:', Constants.expoConfig?.extra?.apiUrl);
-  console.log('[API] From process.env.EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
-  console.log('[API] Constants.manifest?.extra:', JSON.stringify(Constants.manifest?.extra, null, 2));
-  console.log('[API] Constants.expoConfig?.extra:', JSON.stringify(Constants.expoConfig?.extra, null, 2));
-  console.log('[API] ==========================================');
 }
 
 export const API_BASE_URL = DEFAULT_API_URL.replace(/\/$/, '');
@@ -39,15 +33,10 @@ export class ApiError extends Error {
 
 async function parseResponse(response: Response) {
   const text = await response.text();
-  if (!text) {
-    console.log(`[API] Empty response body for ${response.url}`);
-    return null;
-  }
+  if (!text) return null;
   try {
-    const parsed = JSON.parse(text);
-    return parsed;
-  } catch (e) {
-    console.log(`[API] Failed to parse JSON response:`, e, text);
+    return JSON.parse(text);
+  } catch {
     return text;
   }
 }
@@ -87,66 +76,65 @@ export async function apiRequest(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  // Увеличиваем таймаут для сетевых запросов
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => {
-    console.warn(`[API] Request timeout: ${API_BASE_URL}${path}`);
-    controller.abort();
-  }, 30000); // 30 секунд
+  // Таймаут: для auth/refresh на мобильных даём больше времени (слабый сигнал/переключение сетей)
+  const timeoutMs = path === '/auth/refresh' ? 60000 : 30000;
 
-  try {
-    console.log(`[API] Making request to: ${API_BASE_URL}${path}`);
-    if (isFormData) {
-      console.log(`[API] Request body is FormData, Content-Type will be set automatically`);
-    }
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
-      headers,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    console.log(`[API] Response status: ${response.status} for ${path}`);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      console.warn(`[API] Request timeout: ${API_BASE_URL}${path}`);
+      controller.abort();
+    }, timeoutMs);
 
-    const body = await parseResponse(response);
-
-    if (!response.ok) {
-      const message = typeof body === 'string' ? body : body?.message || 'API error';
-      throw new ApiError(message, response.status, body);
-    }
-
-    // Логируем ответ для отладки
-    if (path.includes('/profile/posts') && response.status === 201) {
-      console.log(`[API] Response body for POST /profile/posts:`, {
-        hasBody: !!body,
-        bodyType: typeof body,
-        bodyKeys: body && typeof body === 'object' ? Object.keys(body) : null,
-        bodyId: body?.id,
-        bodyPhotoUrls: body?.photoUrls,
-        bodyPhotoUrlsType: typeof body?.photoUrls,
-        bodyPhotoUrlsIsArray: Array.isArray(body?.photoUrls),
+    try {
+      const response = await fetch(`${API_BASE_URL}${path}`, {
+        ...options,
+        headers,
+        signal: controller.signal,
       });
-    }
+      clearTimeout(timeoutId);
 
-    return body;
-  } catch (error: any) {
-    clearTimeout(timeoutId);
-    // Ожидаемые ошибки (400, 401, 403, 404) не логируем как ERROR
-    if (error instanceof ApiError) {
-      const isExpectedError = error.status === 400 || error.status === 401 || error.status === 403 || error.status === 404;
-      if (isExpectedError) {
-        // Не логируем ожидаемые ошибки, они обрабатываются в вызывающем коде
+      // Retry once on server errors (5xx)
+      if (response.status >= 500 && attempt === 0) {
+        await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
+
+      const body = await parseResponse(response);
+
+      if (!response.ok) {
+        const message = typeof body === 'string' ? body : body?.message || 'API error';
+        throw new ApiError(message, response.status, body);
+      }
+
+      return body;
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+
+      // Retry once on network errors (TypeError from fetch)
+      if (attempt === 0 && error instanceof TypeError) {
+        await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
+
+      // Ожидаемые ошибки (400, 401, 403, 404) не логируем как ERROR
+      if (error instanceof ApiError) {
+        const isExpectedError = error.status === 400 || error.status === 401 || error.status === 403 || error.status === 404;
+        if (isExpectedError) {
+          // Не логируем ожидаемые ошибки, они обрабатываются в вызывающем коде
+          throw error;
+        }
+        console.warn(`[API] Request failed: ${API_BASE_URL}${path}`, error.status);
         throw error;
       }
-      console.error(`[API] Request failed: ${API_BASE_URL}${path}`, error);
+      if (error.name === 'AbortError' || error.message?.includes('timeout') || error.message?.includes('Aborted')) {
+        // Silent — network timeouts are expected on poor connections
+        throw new ApiError('Network timeout', 0, null);
+      }
+      if (error.message?.includes('Network request failed') || error.message?.includes('Failed to fetch')) {
+        throw new ApiError('No connection', 0, null);
+      }
       throw error;
     }
-    console.error(`[API] Request failed: ${API_BASE_URL}${path}`, error);
-    if (error.name === 'AbortError' || error.message?.includes('timeout')) {
-      throw new Error('Network request timed out');
-    }
-    if (error.message?.includes('Network request failed') || error.message?.includes('Failed to fetch')) {
-      throw new Error(`Cannot connect to server at ${API_BASE_URL}. Please check your network connection.`);
-    }
-    throw error;
   }
 }

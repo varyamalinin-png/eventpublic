@@ -64,12 +64,12 @@ const styles = StyleSheet.create({
     minWidth: 120,
   },
   swipeButtonIcon: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 20,
     marginBottom: 5,
   },
   swipeButtonLabel: {
-    color: '#FFF',
+    color: '#f4f4f5',
     fontSize: 12,
     fontWeight: '600',
   },

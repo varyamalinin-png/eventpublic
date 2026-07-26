@@ -10,6 +10,8 @@ import {
   Alert,
 } from 'react-native';
 import { apiRequest } from '../services/api';
+import { AppIcon } from './ui/AppIcon';
+import { Palette } from '../constants/DesignSystem';
 import { useAuth } from '../context/AuthContext';
 import { createLogger } from '../utils/logger';
 
@@ -57,6 +59,13 @@ export default function ComplaintForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const reasons = COMPLAINT_REASONS[type];
+  const title = type === 'EVENT' ? 'Жалоба на событие' : 'Жалоба на пользователя';
+
+  const handleClose = () => {
+    setSelectedReason('');
+    setDescription('');
+    onClose();
+  };
 
   const handleSubmit = async () => {
     if (!selectedReason) {
@@ -82,7 +91,7 @@ export default function ComplaintForm({
         }),
       }, accessToken);
 
-      Alert.alert('Успешно', 'Жалоба отправлена. Мы рассмотрим её в ближайшее время.');
+      Alert.alert('Жалоба отправлена', 'Мы рассмотрим её в ближайшее время.');
       setSelectedReason('');
       setDescription('');
       onSuccess?.();
@@ -100,44 +109,45 @@ export default function ComplaintForm({
       visible={visible}
       transparent={true}
       animationType="slide"
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
     >
-      <View style={styles.overlay}>
-        <View style={styles.container}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Пожаловаться</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Text style={styles.closeButton}>✕</Text>
+      <View style={s.overlay}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
+        <View style={s.sheet}>
+          <View style={s.handle} />
+
+          <View style={s.header}>
+            <Text style={s.title}>{title}</Text>
+            <TouchableOpacity onPress={handleClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <View style={s.closeBtn}>
+                <AppIcon name="close" size={16} color="rgba(244,244,245,0.5)" />
+              </View>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.content}>
-            <Text style={styles.label}>Причина жалобы</Text>
+          <ScrollView style={s.scroll} bounces={false} showsVerticalScrollIndicator={false}>
+            <Text style={s.sectionLabel}>Причина жалобы</Text>
             {reasons.map((reason) => (
               <TouchableOpacity
                 key={reason}
-                style={[
-                  styles.reasonButton,
-                  selectedReason === reason && styles.reasonButtonSelected,
-                ]}
+                style={[s.reasonRow, selectedReason === reason && s.reasonRowSelected]}
                 onPress={() => setSelectedReason(reason)}
+                activeOpacity={0.7}
               >
-                <Text
-                  style={[
-                    styles.reasonText,
-                    selectedReason === reason && styles.reasonTextSelected,
-                  ]}
-                >
+                <View style={[s.radio, selectedReason === reason && s.radioSelected]}>
+                  {selectedReason === reason && <View style={s.radioDot} />}
+                </View>
+                <Text style={[s.reasonText, selectedReason === reason && s.reasonTextSelected]}>
                   {reason}
                 </Text>
               </TouchableOpacity>
             ))}
 
-            <Text style={styles.label}>Дополнительная информация (необязательно)</Text>
+            <Text style={s.sectionLabel}>Дополнительно (необязательно)</Text>
             <TextInput
-              style={styles.textInput}
+              style={s.textInput}
               placeholder="Опишите проблему подробнее..."
-              placeholderTextColor="#999"
+              placeholderTextColor="rgba(244,244,245,0.28)"
               value={description}
               onChangeText={setDescription}
               multiline
@@ -146,25 +156,17 @@ export default function ComplaintForm({
             />
           </ScrollView>
 
-          <View style={styles.footer}>
-            <TouchableOpacity
-              style={[styles.cancelButton, isSubmitting && styles.buttonDisabled]}
-              onPress={onClose}
-              disabled={isSubmitting}
-            >
-              <Text style={styles.cancelButtonText}>Отмена</Text>
+          <View style={s.footer}>
+            <TouchableOpacity style={s.cancelBtn} onPress={handleClose} disabled={isSubmitting} activeOpacity={0.7}>
+              <Text style={s.cancelBtnText}>Отмена</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[
-                styles.submitButton,
-                (!selectedReason || isSubmitting) && styles.buttonDisabled,
-              ]}
+              style={[s.submitBtn, (!selectedReason || isSubmitting) && s.submitBtnDisabled]}
               onPress={handleSubmit}
               disabled={!selectedReason || isSubmitting}
+              activeOpacity={0.8}
             >
-              <Text style={styles.submitButtonText}>
-                {isSubmitting ? 'Отправка...' : 'Отправить'}
-              </Text>
+              <Text style={s.submitBtnText}>{isSubmitting ? 'Отправка...' : 'Отправить'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -173,107 +175,155 @@ export default function ComplaintForm({
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
   },
-  container: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 16,
-    width: '90%',
-    maxHeight: '80%',
-    padding: 20,
+  sheet: {
+    backgroundColor: '#18181e',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingBottom: 32,
+    maxHeight: '85%',
+  },
+  handle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignSelf: 'center',
+    marginTop: 12,
+    marginBottom: 4,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    justifyContent: 'space-between',
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   title: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  closeButton: {
-    color: '#999',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  content: {
-    maxHeight: 400,
-  },
-  label: {
-    color: '#FFF',
     fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-    marginTop: 8,
+    fontWeight: '700',
+    color: Palette.text,
+    letterSpacing: -0.2,
   },
-  reasonButton: {
-    backgroundColor: '#2A2A2A',
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 8,
-    borderWidth: 2,
+  closeBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scroll: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Palette.textDim,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 12,
+    marginBottom: 10,
+  },
+  reasonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    marginBottom: 6,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
     borderColor: 'transparent',
   },
-  reasonButtonSelected: {
-    borderColor: '#007AFF',
-    backgroundColor: '#2A3A4A',
+  reasonRowSelected: {
+    backgroundColor: 'rgba(255,141,50,0.08)',
+    borderColor: 'rgba(255,141,50,0.3)',
+  },
+  radio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  radioSelected: {
+    borderColor: Palette.accent,
+  },
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Palette.accent,
   },
   reasonText: {
-    color: '#DDD',
-    fontSize: 16,
+    fontSize: 15,
+    color: Palette.textDim,
+    flex: 1,
   },
   reasonTextSelected: {
-    color: '#FFF',
+    color: Palette.text,
     fontWeight: '600',
   },
   textInput: {
-    backgroundColor: '#2A2A2A',
-    color: '#FFF',
-    padding: 15,
-    borderRadius: 12,
-    fontSize: 16,
-    minHeight: 100,
-    marginTop: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    color: Palette.text,
+    padding: 14,
+    borderRadius: 14,
+    fontSize: 15,
+    minHeight: 90,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   footer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 20,
-    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    gap: 10,
   },
-  cancelButton: {
+  cancelBtn: {
     flex: 1,
-    padding: 15,
-    borderRadius: 12,
-    backgroundColor: '#2A2A2A',
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
+  },
+  cancelBtnText: {
+    fontSize: 15.5,
+    fontWeight: '600',
+    color: 'rgba(244,244,245,0.7)',
+  },
+  submitBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: '#FF453A',
     alignItems: 'center',
   },
-  cancelButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
+  submitBtnDisabled: {
+    opacity: 0.4,
   },
-  submitButton: {
-    flex: 1,
-    padding: 15,
-    borderRadius: 12,
-    backgroundColor: '#007AFF',
-    alignItems: 'center',
-  },
-  submitButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  buttonDisabled: {
-    opacity: 0.5,
+  submitBtnText: {
+    fontSize: 15.5,
+    fontWeight: '700',
+    color: '#fff',
   },
 });
-
