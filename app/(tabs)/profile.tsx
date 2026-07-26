@@ -1006,7 +1006,9 @@ export default function ProfileScreen() {
               Папки живут только в Memories; в папку можно класть
               только прошедшие события, поэтому чекбокс есть лишь у них. */}
           {(() => {
-            const GAP = 4;
+            // Те же значения, что в профиле другого пользователя:
+            // gap 8 и боковые отступы 20 — раскладка одна на оба экрана
+            const GAP = 8;
             const PADDING = 20;
             const containerW = SCREEN_WIDTH - PADDING * 2;
             const CARD_W = Math.floor((containerW - GAP * 2) / 3);
