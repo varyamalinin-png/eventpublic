@@ -1,4 +1,5 @@
 import { StyleSheet } from 'react-native';
+import { Palette, Radius } from '../../constants/DesignSystem';
 
 export const eventCardStyles = StyleSheet.create({
   swipeContainer: {
@@ -10,39 +11,46 @@ export const eventCardStyles = StyleSheet.create({
     position: 'absolute',
     right: 16,
     top: '50%',
-    transform: [{ translateY: -30 }],
+    transform: [{ translateY: -19 }], // половина высоты капсулы
     zIndex: 1,
-    alignItems: 'center',
+    alignItems: 'flex-end',
   },
   swipeButtonContainerWithSecondary: {
-    transform: [{ translateY: -60 }], // Смещаем вверх, если две кнопки
+    transform: [{ translateY: -42 }], // две капсулы + отступ между ними
   },
+  // Капсулы вместо жёстких кругов: форма и тени согласованы с остальным UI,
+  // цвет задаётся снаружи из палитры, подпись читаемая и не лезет за края
   swipeButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    minWidth: 92,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: Radius.pill,
     justifyContent: 'center',
     alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-    marginBottom: 10, // Отступ между кнопками
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    elevation: 6,
+    marginBottom: 8,
   },
   swipeButtonSecondary: {
-    marginBottom: 0, // Для нижней кнопки отступ не нужен
+    marginBottom: 0,
   },
   swipeButtonIcon: {
-    color: '#f4f4f5',
-    fontSize: 20,
-    fontWeight: 'bold',
+    color: Palette.text,
+    fontSize: 16,
+    fontWeight: '700',
   },
   swipeButtonLabel: {
-    color: '#f4f4f5',
-    fontSize: 10,
+    color: Palette.text,
+    fontSize: 13,
     fontWeight: '600',
-    marginTop: 2,
+    letterSpacing: -0.1,
     textAlign: 'center',
   },
   goButtonContainer: {

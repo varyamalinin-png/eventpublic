@@ -396,7 +396,7 @@ function EventCard({
         primary: {
           type: 'remove_from_folder',
           label: 'Удалить из папки',
-          color: '#FF3B30',
+          color: Palette.danger,
           icon: '🗑️'
         },
         secondary: null
@@ -412,13 +412,13 @@ function EventCard({
         primary: {
           type: 'accept_invite',
           label: t.events.acceptInvitation,
-          color: '#34C759',
+          color: Palette.success,
           icon: '✓'
         },
         secondary: {
           type: 'cancel_invite',
           label: t.events.cancelInvitation,
-          color: '#FF3B30',
+          color: Palette.danger,
           icon: '✕'
         }
       };
@@ -433,7 +433,7 @@ function EventCard({
             primary: {
               type: 'cancel_event',
               label: t.events.cancelEvent,
-              color: '#FF3B30',
+              color: Palette.danger,
               icon: '✕'
             },
             secondary: null
@@ -444,7 +444,7 @@ function EventCard({
             primary: {
               type: 'cancel_event',
               label: t.events.cancelEvent,
-              color: '#FF3B30',
+              color: Palette.danger,
               icon: '✕'
             },
             secondary: null
@@ -458,7 +458,7 @@ function EventCard({
         const primaryButton = {
               type: 'cancel_event',
               label: t.events.cancelEvent,
-              color: '#FF3B30',
+              color: Palette.danger,
               icon: '✕'
             };
         
@@ -467,7 +467,7 @@ function EventCard({
           secondary: {
               type: 'remove_participant',
             label: t.events.removeParticipant,
-            color: '#FF3B30',
+            color: Palette.danger,
             icon: '✕'
           }
         };
@@ -478,7 +478,7 @@ function EventCard({
             primary: {
               type: 'cancel_event',
               label: t.events.cancelEvent,
-              color: '#FF3B30',
+              color: Palette.danger,
               icon: '✕'
             },
             secondary: null
@@ -489,7 +489,7 @@ function EventCard({
             primary: {
               type: 'cancel_event',
               label: t.events.cancelEvent,
-              color: '#FF3B30',
+              color: Palette.danger,
               icon: '✕'
             },
             secondary: null
@@ -510,7 +510,7 @@ function EventCard({
         secondary: {
           type: 'cancel_request',
           label: 'Отменить запрос',
-          color: '#FF3B30',
+          color: Palette.danger,
           icon: '✕'
         }
       };
@@ -526,7 +526,7 @@ function EventCard({
           primary: {
             type: 'cancel_participation',
             label: 'Отменить участие',
-            color: '#FF3B30',
+            color: Palette.danger,
             icon: '✕'
           },
           secondary: null
@@ -537,13 +537,13 @@ function EventCard({
           primary: {
             type: 'accepted',
             label: 'Вы уже участвуете',
-            color: '#34C759',
+            color: Palette.success,
             icon: '✓'
           },
           secondary: {
             type: 'cancel_participation',
             label: 'Отменить участие',
-            color: '#FF3B30',
+            color: Palette.danger,
             icon: '✕'
           }
         };
