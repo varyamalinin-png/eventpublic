@@ -1839,7 +1839,12 @@ function EventCard({
               onGestureEvent={onGestureEvent}
               onHandlerStateChange={onHandlerStateChange}
               shouldCancelWhenOutside={true}
-              activeOffsetX={[-10, 10]}
+              // Карточка забирает только свайп влево (кнопки действий).
+              // Свайп вправо раньше тоже перехватывался, но ничего не делал —
+              // карточка просто уезжала и возвращалась, а жест не доходил до
+              // ленты организаторов. Теперь правое направление уходит наверх.
+              activeOffsetX={-10}
+              failOffsetX={10}
             >
               <Animated.View 
                 style={[
