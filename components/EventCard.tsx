@@ -27,6 +27,9 @@ const SWIPE_ICON_MAP: Record<string, AppIconName> = {
   '✓': 'check',
   '✕': 'close',
   '🗑️': 'trash',
+  // Эмодзи часов выглядело инородно среди line-иконок — берём Feather clock
+  '⏱': 'clock',
+  '⏳': 'clock',
 };
 
 function renderCheckbox(checked: boolean | string | null | undefined) {
@@ -42,8 +45,8 @@ function renderCheckbox(checked: boolean | string | null | undefined) {
 function renderSwipeIcon(glyph: string | undefined, color: string = '#f4f4f5') {
   if (!glyph) return null;
   const name = SWIPE_ICON_MAP[glyph];
-  if (name) return <AppIcon name={name} size={18} color={color} />;
-  return <Text style={{ fontSize: 18, color }}>{glyph}</Text>;
+  if (name) return <AppIcon name={name} size={22} color={color} />;
+  return <Text style={{ fontSize: 20, color }}>{glyph}</Text>;
 }
 
 function organizerAvatarUri(uri: string | undefined): string | null {

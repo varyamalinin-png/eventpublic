@@ -741,7 +741,9 @@ export default function ProfileScreen() {
                   organizerId={event.organizerId}
                   variant="default"
                   showSwipeAction={true}
-                  context="explore"
+                  // Это лента своего профиля: при context="explore" для участника
+                  // кнопок нет вовсе, поэтому «Отменить участие» не появлялась
+                  context="own_profile"
                   mediaUrl={event.mediaUrl}
                   mediaType={event.mediaType}
                   mediaAspectRatio={event.mediaAspectRatio}
