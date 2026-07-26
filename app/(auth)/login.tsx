@@ -22,6 +22,10 @@ WebBrowser.maybeCompleteAuthSession();
 
 const logger = createLogger('Auth');
 
+/** Вход и регистрация через Google временно скрыты.
+ *  Вся логика (OAuth, loginWithGoogle) сохранена — вернуть можно флагом. */
+const SHOW_GOOGLE_AUTH = false;
+
 type Mode = 'login' | 'register';
 
 export default function AuthScreen() {
@@ -283,19 +287,23 @@ export default function AuthScreen() {
               )}
             </TouchableOpacity>
 
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>или</Text>
-              <View style={styles.dividerLine} />
-            </View>
+            {(SHOW_GOOGLE_AUTH || Platform.OS === 'ios') && (
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>или</Text>
+                <View style={styles.dividerLine} />
+              </View>
+            )}
 
-            <TouchableOpacity
-              style={[styles.googleButton, loading && styles.disabledButton]}
-              onPress={Platform.OS === 'web' ? handleGoogleSignInWeb : () => promptAsync()}
-              disabled={loading || !googleClientId}
-            >
-              <Text style={styles.googleButtonText}>Продолжить с Google</Text>
-            </TouchableOpacity>
+            {SHOW_GOOGLE_AUTH && (
+              <TouchableOpacity
+                style={[styles.googleButton, loading && styles.disabledButton]}
+                onPress={Platform.OS === 'web' ? handleGoogleSignInWeb : () => promptAsync()}
+                disabled={loading || !googleClientId}
+              >
+                <Text style={styles.googleButtonText}>Продолжить с Google</Text>
+              </TouchableOpacity>
+            )}
 
             {Platform.OS === 'ios' && (
               <TouchableOpacity
