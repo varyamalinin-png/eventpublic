@@ -156,15 +156,17 @@ function OrganizerCard({
           {/* Имя и возраст */}
           <Text style={styles.nameAndAge}>{name}, {age}</Text>
 
-          {/* О себе — длинный текст сворачиваем, чтобы не ломать карточку */}
+          {/* О себе — длинный текст в одну строку, «Ещё» сразу справа от него */}
           {bio && (
             isBioLong ? (
-              <TouchableOpacity onPress={() => setBioExpanded(true)} activeOpacity={0.7}>
-                <Text style={styles.bio} numberOfLines={2}>{bio}</Text>
-                <Text style={styles.bioMore}>{t.common.showMore}</Text>
-              </TouchableOpacity>
+              <View style={styles.bioRow}>
+                <Text style={[styles.bio, styles.bioInline]} numberOfLines={1}>{bio}</Text>
+                <TouchableOpacity onPress={() => setBioExpanded(true)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 6, right: 8 }}>
+                  <Text style={styles.bioMore}>{t.common.showMore}</Text>
+                </TouchableOpacity>
+              </View>
             ) : (
-              <Text style={styles.bio}>{bio}</Text>
+              <Text style={styles.bio} numberOfLines={2}>{bio}</Text>
             )
           )}
           
@@ -230,7 +232,7 @@ function OrganizerCard({
               >
                 <Text style={styles.bioFull}>{bio}</Text>
               </ScrollView>
-              <Text style={styles.bioMore}>{t.common.showLess}</Text>
+              <Text style={styles.bioLess}>{t.common.showLess}</Text>
             </LinearGradient>
           </TouchableOpacity>
         )}
@@ -258,14 +260,16 @@ const styles = StyleSheet.create({
   // Инфо-блок идёт сразу под фото, без растяжки на остаток карточки
   userProfileContainerWithHeight: {
     justifyContent: 'flex-start',
-    paddingTop: 12,
+    paddingTop: 0,
   },
-  // Информация о пользователе - в точности как в профиле
+  // Информация о пользователе — подтянута вверх на растушёвку фото,
+  // чтобы параметры помещались в карточку
   userProfileContainer: {
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 20,
+    paddingHorizontal: 16,
+    paddingTop: 0,
+    paddingBottom: 4,
+    marginTop: -40,
   },
   // Фото сверху карточки в пропорции 3:4
   avatarContainer: {
@@ -299,22 +303,36 @@ const styles = StyleSheet.create({
     borderColor: '#141417',
   },
   username: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '600',
     color: '#f4f4f5',
-    marginBottom: 5,
+    marginBottom: 2,
   },
   nameAndAge: {
-    fontSize: 16,
+    fontSize: 14,
     color: 'rgba(244,244,245,0.55)',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   bio: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#CCC',
     textAlign: 'center',
     marginBottom: 6,
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
+  },
+  // Строка «о себе» + кнопка «Ещё» справа от текста
+  bioRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    marginBottom: 6,
+  },
+  bioInline: {
+    flexShrink: 1,
+    marginBottom: 0,
+    paddingHorizontal: 0,
+    textAlign: 'left',
   },
   // Растушёвка низа фото в цвет карточки
   avatarFade: {
@@ -328,8 +346,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: Palette.accent,
+    marginLeft: 6,
+  },
+  bioLess: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Palette.accent,
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   // Панель полного описания: раскрывается вверх, перекрывая фото
   bioOverlay: {
@@ -366,13 +390,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     width: '100%',
-    marginBottom: 10,
-    paddingHorizontal: 20,
+    marginBottom: 2,
+    paddingHorizontal: 12,
   },
   statItem: {
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
     flex: 1,
   },
   statNumber: {
