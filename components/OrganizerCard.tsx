@@ -28,8 +28,6 @@ type OrganizerCardProps = {
   correspondingEventId?: string;
   eventHeight?: number;
   currentUserId?: string | null;
-  /** Когда это наша карточка — показываем 6-й блок Verified как в шапке профиля */
-  verified?: boolean;
   /** Показывать зелёный пульсирующий индикатор «онлайн» рядом с аватаркой */
   isOnline?: boolean;
 };
@@ -46,7 +44,6 @@ function OrganizerCard({
   correspondingEventId,
   eventHeight,
   currentUserId,
-  verified = false,
   isOnline = false,
 }: OrganizerCardProps) {
   const router = useRouter();
@@ -188,13 +185,6 @@ function OrganizerCard({
                 </TouchableOpacity>
               )}
               
-              {/* 6-й параметр Verified — только для нашей карточки, как в шапке профиля */}
-              {isOwnProfile && (
-                <TouchableOpacity style={styles.statItem} onPress={() => router.push('/passport-verification')}>
-                  <Text style={styles.statNumber}>{verified ? '✓' : '—'}</Text>
-                  <Text style={styles.statLabel}>{t.profile.statsVerified}</Text>
-                </TouchableOpacity>
-              )}
             </View>
           </View>
         </View>

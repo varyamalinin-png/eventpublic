@@ -1314,7 +1314,24 @@ export default function CalendarScreen() {
           {(calendarMode === 'week' || calendarMode === 'preview') ? renderWeekView() : renderMonthView()}
         </Animated.View>
       </PinchGestureHandler>
-      
+
+      {/* Возврат на предыдущий экран — поверх обоих режимов календаря */}
+      <TouchableOpacity
+        style={styles.backButton}
+        onPress={() => {
+          try {
+            router.back();
+          } catch (error) {
+            logger.error('Failed to go back from calendar:', error);
+          }
+        }}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        accessibilityRole="button"
+        accessibilityLabel={t.common.back}
+      >
+        <AppIcon name="chevronLeft" size={24} color="#f4f4f5" />
+      </TouchableOpacity>
+
       {/* Модалка списка событий дня */}
       <Modal
         visible={showDayEventsModal}
@@ -1355,6 +1372,19 @@ export default function CalendarScreen() {
 }
 
 const styles = StyleSheet.create({
+  // Кнопка возврата поверх календаря (оба режима — месяц и неделя)
+  backButton: {
+    position: 'absolute',
+    top: Platform.OS === 'web' ? 16 : 56,
+    left: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(20,20,24,0.72)',
+    zIndex: 20,
+  },
   container: {
     flex: 1,
     backgroundColor: '#0a0a0c',

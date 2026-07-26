@@ -983,9 +983,9 @@ export default function ExploreScreen() {
               />
             ))
           ) : (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Нет событий с друзьями</Text>
-              <Text style={styles.emptySubtext}>Пригласите друзей на события!</Text>
+            <View style={[styles.emptyState, { width: SCREEN_W, paddingHorizontal: 20 }]}>
+              <Text style={styles.emptyText}>{t.empty.noFriendsEvents}</Text>
+              <Text style={styles.emptySubtext}>{t.empty.noFriendsEventsSubtext}</Text>
             </View>
           )
         )}

@@ -21,6 +21,10 @@ import CreateFolderModal from '../../components/CreateFolderModal';
 
 const logger = createLogger('Profile');
 
+/** Счётчики Organized/Participated в шапке профиля временно скрыты.
+ *  Вернуть их можно, переключив этот флаг в true — разметка сохранена. */
+const SHOW_ORG_PART = false;
+
 const getContainerWidth = () => {
   try {
     const screenWidth = Dimensions.get('window').width;
@@ -909,35 +913,33 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
           
-          {/* Второй ряд - всегда видимый */}
-          <View style={styles.statsRow}>
-            <TouchableOpacity style={styles.statItem} onPress={() => {
-              try {
-                expoRouter.push(`/organized-events/${currentUserId}`);
-              } catch (error) {
-                logger.error('Failed to navigate to organized-events:', error);
-              }
-            }}>
-              <Text style={styles.statNumber}>{allOrganizedEvents.length}</Text>
-              <Text style={styles.statLabel}>{t.profile.statsOrganized}</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.statItem} onPress={() => {
-              try {
-                expoRouter.push(`/participated-events/${currentUserId}`);
-              } catch (error) {
-                logger.error('Failed to navigate to participated-events:', error);
-              }
-            }}>
-              <Text style={styles.statNumber}>{allParticipatedEvents.length}</Text>
-              <Text style={styles.statLabel}>{t.profile.statsParticipated}</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.statItem} onPress={() => router.push('/passport-verification')}>
-              <AppIcon name="check" size={18} color={Palette.accent} />
-              <Text style={styles.statLabel}>{t.profile.statsVerified}</Text>
-            </TouchableOpacity>
-          </View>
+          {/* Второй ряд скрыт: счётчики Organized/Participated временно не показываем.
+              Код сохранён — при необходимости достаточно вернуть SHOW_ORG_PART в true. */}
+          {SHOW_ORG_PART && (
+            <View style={styles.statsRow}>
+              <TouchableOpacity style={styles.statItem} onPress={() => {
+                try {
+                  expoRouter.push(`/organized-events/${currentUserId}`);
+                } catch (error) {
+                  logger.error('Failed to navigate to organized-events:', error);
+                }
+              }}>
+                <Text style={styles.statNumber}>{allOrganizedEvents.length}</Text>
+                <Text style={styles.statLabel}>{t.profile.statsOrganized}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.statItem} onPress={() => {
+                try {
+                  expoRouter.push(`/participated-events/${currentUserId}`);
+                } catch (error) {
+                  logger.error('Failed to navigate to participated-events:', error);
+                }
+              }}>
+                <Text style={styles.statNumber}>{allParticipatedEvents.length}</Text>
+                <Text style={styles.statLabel}>{t.profile.statsParticipated}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </View>
 
@@ -1305,11 +1307,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   profileAvatar: {
-    width: 108,
-    height: 108,
-    borderRadius: 32,
-    borderWidth: 3,
-    borderColor: 'rgba(255,141,50,0.55)',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
   },
   settingsButtonWeb: {
     position: 'absolute',
@@ -1382,30 +1382,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 8,
   },
+  // Без подложки и рамки — шапка своего профиля выглядит так же, как чужого
   statItem: {
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.045)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
-    borderRadius: 18,
   },
   statNumber: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: 'bold',
     color: '#f4f4f5',
-    letterSpacing: -0.2,
   },
   statLabel: {
-    fontSize: 10.5,
-    color: 'rgba(244,244,245,0.48)',
-    marginTop: 3,
+    fontSize: 10,
+    color: 'rgba(244,244,245,0.55)',
+    marginTop: 2,
     textAlign: 'center',
-    fontWeight: '500',
-    letterSpacing: 0.2,
-    textTransform: 'uppercase',
   },
   // Результаты поиска
   searchResults: {
