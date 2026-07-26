@@ -122,7 +122,7 @@ function OrganizerCard({
       <View style={[styles.card, eventHeight ? { height: eventHeight } : null]}>
         {/* Аватарка занимает верхнюю половину карточки: во всю ширину,
             с мягкими верхними углами по радиусу самой карточки */}
-        <View style={[styles.avatarContainer, eventHeight ? { height: Math.round(eventHeight / 2) } : null]}>
+        <View style={styles.avatarContainer}>
           <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.9} style={styles.avatarTouch}>
             <Image
               source={{ uri: avatar }}
@@ -210,10 +210,9 @@ const styles = StyleSheet.create({
     padding: 0,
     overflow: 'hidden',
   },
-  // Аватарка забирает верхнюю половину — инфо-блок занимает остаток без растяжки
+  // Инфо-блок идёт сразу под фото, без растяжки на остаток карточки
   userProfileContainerWithHeight: {
-    flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     paddingTop: 12,
   },
   // Информация о пользователе - в точности как в профиле
@@ -223,11 +222,11 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 20,
   },
-  // Верхняя половина карточки целиком под аватарку
+  // Фото сверху карточки в пропорции 3:4
   avatarContainer: {
     position: 'relative',
     width: '100%',
-    height: 170,
+    aspectRatio: 3 / 4,
   },
   avatarTouch: {
     width: '100%',
