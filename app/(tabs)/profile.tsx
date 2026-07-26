@@ -1001,7 +1001,9 @@ export default function ProfileScreen() {
         </View>
       ) : (
         <>
-          {/* Единая сплошная сетка — ручная раскладка по рядам */}
+          {/* Сетка разбита на секции как в чужом профиле.
+              Папки живут только в Memories; в папку можно класть
+              только прошедшие события, поэтому чекбокс есть лишь у них. */}
           {(() => {
             const GAP = 4;
             const PADDING = 20;
@@ -1009,102 +1011,138 @@ export default function ProfileScreen() {
             const CARD_W = Math.floor((containerW - GAP * 2) / 3);
             const FOLDER_W = CARD_W * 2 + GAP;
 
-            const allGridItems: Array<{ type: 'event' | 'folder'; data: Event | EventFolder }> = [];
-            organizedEvents.forEach(e => allGridItems.push({ type: 'event', data: e }));
-            participatedEvents.forEach(e => {
-              if (!allGridItems.find(i => i.type === 'event' && (i.data as Event).id === e.id))
-                allGridItems.push({ type: 'event', data: e });
-            });
-            if (eventFolders?.length > 0) {
-              eventFolders.forEach((f: EventFolder) => allGridItems.push({ type: 'folder', data: f }));
-            }
-            pastEvents.forEach(e => {
-              if (!allGridItems.find(i => i.type === 'event' && (i.data as Event).id === e.id))
-                allGridItems.push({ type: 'event', data: e });
-            });
+            type GridItem = { type: 'event' | 'folder'; data: any };
 
-            // Раскладываем по рядам: каждый ряд = 3 слота. Папка = 2 слота.
-            const rows: Array<Array<{ type: 'event' | 'folder'; data: any }>> = [];
-            let currentRow: typeof rows[0] = [];
-            let slotsUsed = 0;
+            // Раскладка по рядам: 3 слота в ряду, папка занимает 2
+            const buildRows = (items: GridItem[]) => {
+              const rows: GridItem[][] = [];
+              let currentRow: GridItem[] = [];
+              let slotsUsed = 0;
+              items.forEach(item => {
+                const slots = item.type === 'folder' ? 2 : 1;
+                if (slotsUsed + slots > 3) {
+                  rows.push(currentRow);
+                  currentRow = [];
+                  slotsUsed = 0;
+                }
+                currentRow.push(item);
+                slotsUsed += slots;
+                if (slotsUsed >= 3) {
+                  rows.push(currentRow);
+                  currentRow = [];
+                  slotsUsed = 0;
+                }
+              });
+              if (currentRow.length > 0) rows.push(currentRow);
+              return rows;
+            };
 
-            allGridItems.forEach(item => {
-              const slots = item.type === 'folder' ? 2 : 1;
-              if (slotsUsed + slots > 3) {
-                rows.push(currentRow);
-                currentRow = [];
-                slotsUsed = 0;
+            // Только прошедшее событие можно добавить в папку
+            const pastEventIds = new Set(pastEvents.map((e: Event) => e.id));
+
+            const renderGrid = (items: GridItem[]) => {
+              if (items.length === 0) {
+                return <Text style={styles.emptyText}>{t.empty.noEvents}</Text>;
               }
-              currentRow.push(item);
-              slotsUsed += slots;
-              if (slotsUsed >= 3) {
-                rows.push(currentRow);
-                currentRow = [];
-                slotsUsed = 0;
-              }
-            });
-            if (currentRow.length > 0) rows.push(currentRow);
+              return (
+                <View style={{ paddingHorizontal: PADDING }}>
+                  {buildRows(items).map((row, rowIdx) => (
+                    <View key={rowIdx} style={{ flexDirection: 'row', marginBottom: GAP }}>
+                      {row.map((item, colIdx) => {
+                        const isFolder = item.type === 'folder';
+                        const w = isFolder ? FOLDER_W : CARD_W;
+                        const ml = colIdx > 0 ? GAP : 0;
 
-            return (
-              <View style={{ paddingHorizontal: PADDING }}>
-                {rows.map((row, rowIdx) => (
-                  <View key={rowIdx} style={{ flexDirection: 'row', marginBottom: GAP }}>
-                    {row.map((item, colIdx) => {
-                      const isFolder = item.type === 'folder';
-                      const w = isFolder ? FOLDER_W : CARD_W;
-                      const ml = colIdx > 0 ? GAP : 0;
+                        if (isFolder) {
+                          const folder = item.data as EventFolder;
+                          return (
+                            <View key={`f-${folder.id}`} style={{ width: w, height: CARD_W, marginLeft: ml, borderRadius: 14, overflow: 'hidden' }} pointerEvents="box-none">
+                              <FolderCard folder={folder} onPress={() => router.push(`/event-folder/${folder.id}`)} variant="profile" />
+                            </View>
+                          );
+                        }
 
-                      if (isFolder) {
-                        const folder = item.data as EventFolder;
+                        const event = item.data as Event;
+                        const isSelected = selectedEventIds.has(event.id);
+                        const selectable = pastEventIds.has(event.id);
+
                         return (
-                          <View key={`f-${folder.id}`} style={{ width: w, height: CARD_W, marginLeft: ml, borderRadius: 14, overflow: 'hidden' }} pointerEvents="box-none">
-                            <FolderCard folder={folder} onPress={() => router.push(`/event-folder/${folder.id}`)} variant="profile" />
+                          <View key={event.id} style={{ width: w, height: CARD_W, marginLeft: ml, borderRadius: 14, overflow: 'hidden' }}>
+                            <EventCard
+                              id={event.id} title={event.title} description={event.description}
+                              date={event.date} time={event.time} location={event.location}
+                              price={event.price} participants={event.participants}
+                              maxParticipants={event.maxParticipants}
+                              organizerAvatar={event.organizerAvatar} organizerId={event.organizerId}
+                              variant="miniature_1" showSwipeAction={false} showOrganizerAvatar={false}
+                              mediaUrl={event.mediaUrl} mediaType={event.mediaType}
+                              mediaAspectRatio={event.mediaAspectRatio}
+                              participantsList={event.participantsList}
+                              participantsData={event.participantsData}
+                              onMiniaturePress={() => {
+                                if (selectMode) {
+                                  // Текущие и будущие события в папку не добавляются
+                                  if (!selectable) return;
+                                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                  setSelectedEventIds(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(event.id)) next.delete(event.id);
+                                    else next.add(event.id);
+                                    return next;
+                                  });
+                                } else {
+                                  handleMiniaturePress(event);
+                                }
+                              }}
+                              onLongPress={() => {
+                                if (!selectable) return;
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                setSelectMode(true);
+                                setSelectedEventIds(new Set([event.id]));
+                              }}
+                            />
+                            {selectMode && selectable && (
+                              <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 14, borderWidth: isSelected ? 3 : 0, borderColor: '#FF8D32', backgroundColor: isSelected ? 'transparent' : 'rgba(0,0,0,0.45)' }} pointerEvents="none">
+                                <View style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: isSelected ? '#FF8D32' : 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', borderWidth: isSelected ? 0 : 1, borderColor: 'rgba(255,255,255,0.4)' }}>
+                                  {isSelected && <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>✓</Text>}
+                                </View>
+                              </View>
+                            )}
+                            {/* Недоступные для выбора — приглушаем, но без чекбокса */}
+                            {selectMode && !selectable && (
+                              <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)' }} pointerEvents="none" />
+                            )}
                           </View>
                         );
-                      }
-                      const event = item.data as Event;
-                      const isSelected = selectedEventIds.has(event.id);
-                      return (
-                        <View key={event.id} style={{ width: w, height: CARD_W, marginLeft: ml, borderRadius: 14, overflow: 'hidden' }}>
-                          <EventCard
-                            id={event.id} title={event.title} description={event.description}
-                            date={event.date} time={event.time} location={event.location}
-                            price={event.price} participants={event.participants}
-                            maxParticipants={event.maxParticipants}
-                            organizerAvatar={event.organizerAvatar} organizerId={event.organizerId}
-                            variant="miniature_1" showSwipeAction={false} showOrganizerAvatar={false}
-                            mediaUrl={event.mediaUrl} mediaType={event.mediaType}
-                            mediaAspectRatio={event.mediaAspectRatio}
-                            participantsList={event.participantsList}
-                            participantsData={event.participantsData}
-                            onMiniaturePress={() => {
-                              if (selectMode) {
-                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                setSelectedEventIds(prev => {
-                                  const next = new Set(prev);
-                                  if (next.has(event.id)) next.delete(event.id);
-                                  else next.add(event.id);
-                                  return next;
-                                });
-                              } else {
-                                handleMiniaturePress(event);
-                              }
-                            }}
-                            onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setSelectMode(true); setSelectedEventIds(new Set([event.id])); }}
-                          />
-                          {selectMode && (
-                            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 14, borderWidth: isSelected ? 3 : 0, borderColor: '#FF8D32', backgroundColor: isSelected ? 'transparent' : 'rgba(0,0,0,0.45)' }} pointerEvents="none">
-                              <View style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: isSelected ? '#FF8D32' : 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', borderWidth: isSelected ? 0 : 1, borderColor: 'rgba(255,255,255,0.4)' }}>
-                                {isSelected && <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>✓</Text>}
-                              </View>
-                            </View>
-                          )}
-                        </View>
-                      );
-                    })}
-                  </View>
-                ))}
-              </View>
+                      })}
+                    </View>
+                  ))}
+                </View>
+              );
+            };
+
+            const organizerItems: GridItem[] = organizedEvents.map((e: Event) => ({ type: 'event', data: e }));
+            const participantItems: GridItem[] = participatedEvents
+              .filter((e: Event) => !organizedEvents.find((o: Event) => o.id === e.id))
+              .map((e: Event) => ({ type: 'event', data: e }));
+            const memoriesItems: GridItem[] = [
+              ...pastEvents.map((e: Event) => ({ type: 'event' as const, data: e })),
+              ...((eventFolders?.length > 0)
+                ? eventFolders.map((f: EventFolder) => ({ type: 'folder' as const, data: f }))
+                : []),
+            ];
+
+            return (
+              <>
+                <Text style={styles.sectionTitle}>{t.profile.sectionTitleOrganizer}</Text>
+                {renderGrid(organizerItems)}
+
+                <Text style={styles.sectionTitle}>{t.profile.sectionTitleParticipant}</Text>
+                {renderGrid(participantItems)}
+
+                <Text style={styles.memoriesTitle}>{t.profile.memories}</Text>
+                {renderGrid(memoriesItems)}
+              </>
             );
           })()}
 
