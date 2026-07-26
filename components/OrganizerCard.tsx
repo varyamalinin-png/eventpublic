@@ -120,21 +120,22 @@ function OrganizerCard({
   return (
     <View style={styles.swipeContainer}>
       <View style={[styles.card, eventHeight ? { height: eventHeight } : null]}>
-        {/* Информация о пользователе - в точности как в профиле */}
+        {/* Аватарка занимает верхнюю половину карточки: во всю ширину,
+            с мягкими верхними углами по радиусу самой карточки */}
+        <View style={[styles.avatarContainer, eventHeight ? { height: Math.round(eventHeight / 2) } : null]}>
+          <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.9} style={styles.avatarTouch}>
+            <Image
+              source={{ uri: avatar }}
+              style={styles.profileAvatar}
+            />
+          </TouchableOpacity>
+          {isOnline && (
+            <Animated.View style={[styles.onlineDot, { transform: [{ scale: pulseAnim }] }]} />
+          )}
+        </View>
+
+        {/* Информация о пользователе */}
         <View style={[styles.userProfileContainer, eventHeight ? styles.userProfileContainerWithHeight : null]}>
-          {/* Аватарка - круг того же размера */}
-          <View style={styles.avatarContainer}>
-            <TouchableOpacity onPress={handleProfilePress}>
-              <Image
-                source={{ uri: avatar }}
-                style={styles.profileAvatar}
-              />
-            </TouchableOpacity>
-            {isOnline && (
-              <Animated.View style={[styles.onlineDot, { transform: [{ scale: pulseAnim }] }]} />
-            )}
-          </View>
-          
           {/* Юзернейм */}
           <Text style={styles.username}>{formatUsername(username)}</Text>
           
@@ -209,32 +210,43 @@ const styles = StyleSheet.create({
     padding: 0,
     overflow: 'hidden',
   },
+  // Аватарка забирает верхнюю половину — инфо-блок занимает остаток без растяжки
   userProfileContainerWithHeight: {
+    flex: 1,
     justifyContent: 'center',
-    minHeight: '100%',
-    paddingTop: 20,
+    paddingTop: 12,
   },
   // Информация о пользователе - в точности как в профиле
   userProfileContainer: {
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: 12,
     paddingBottom: 20,
   },
+  // Верхняя половина карточки целиком под аватарку
   avatarContainer: {
     position: 'relative',
-    alignItems: 'center',
-    marginBottom: 10,
+    width: '100%',
+    height: 170,
+  },
+  avatarTouch: {
+    width: '100%',
+    height: '100%',
   },
   profileAvatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: '100%',
+    height: '100%',
+    // Мягкие только верхние углы — совпадают с borderRadius карточки
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    backgroundColor: '#26262b',
   },
   onlineDot: {
     position: 'absolute',
-    bottom: 4,
-    right: 4,
+    bottom: 10,
+    right: 12,
     width: 16,
     height: 16,
     borderRadius: 8,

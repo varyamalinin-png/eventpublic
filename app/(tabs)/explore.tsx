@@ -327,13 +327,13 @@ export default function ExploreScreen() {
     },
     onPanResponderRelease: (_, gs) => {
       if (gs.dx > 100 && !showOrganizers) {
-        Animated.spring(translateX, { toValue: ORGANIZER_WIDTH, useNativeDriver: true }).start();
+        Animated.spring(translateX, { toValue: ORGANIZER_WIDTH, useNativeDriver: false }).start();
         setShowOrganizers(true);
       } else if (gs.dx < -100 && showOrganizers) {
-        Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
+        Animated.spring(translateX, { toValue: 0, useNativeDriver: false }).start();
         setShowOrganizers(false);
       } else {
-        Animated.spring(translateX, { toValue: showOrganizers ? ORGANIZER_WIDTH : 0, useNativeDriver: true }).start();
+        Animated.spring(translateX, { toValue: showOrganizers ? ORGANIZER_WIDTH : 0, useNativeDriver: false }).start();
       }
     },
   });
