@@ -1520,34 +1520,31 @@ function EventCard({
         ]}>
           {/* Вторая кнопка (нижняя) */}
           {swipeButtons.secondary && (
-            <TouchableOpacity 
-              style={[
-                styles.swipeButton,
-                styles.swipeButtonSecondary,
-                { backgroundColor: swipeButtons.secondary.color }
-              ]} 
-              onPress={handleSecondaryButtonPress}
-            >
-              {renderSwipeIcon(swipeButtons.secondary.icon)}
+            <View style={{ alignItems: 'center', marginBottom: 12 }}>
+              <TouchableOpacity
+                style={[styles.swipeButton, styles.swipeButtonSecondary]}
+                onPress={handleSecondaryButtonPress}
+              >
+                {renderSwipeIcon(swipeButtons.secondary.icon, swipeButtons.secondary.color)}
+              </TouchableOpacity>
               {swipeButtons.secondary.label && (
-                <Text style={styles.swipeButtonLabel}>{swipeButtons.secondary.label}</Text>
+                <Text style={styles.swipeButtonLabel} numberOfLines={2}>{swipeButtons.secondary.label}</Text>
               )}
-            </TouchableOpacity>
+            </View>
           )}
           
           {/* Первая кнопка (верхняя) */}
-          <TouchableOpacity 
-            style={[
-              styles.swipeButton,
-              { backgroundColor: swipeButtons.primary.color }
-            ]} 
-            onPress={handlePrimaryButtonPress}
-          >
-            {renderSwipeIcon(swipeButtons.primary.icon)}
+          <View style={{ alignItems: 'center' }}>
+            <TouchableOpacity
+              style={styles.swipeButton}
+              onPress={handlePrimaryButtonPress}
+            >
+              {renderSwipeIcon(swipeButtons.primary.icon, swipeButtons.primary.color)}
+            </TouchableOpacity>
             {swipeButtons.primary.label && (
-              <Text style={styles.swipeButtonLabel}>{swipeButtons.primary.label}</Text>
+              <Text style={styles.swipeButtonLabel} numberOfLines={2}>{swipeButtons.primary.label}</Text>
             )}
-          </TouchableOpacity>
+          </View>
         </View>
       )}
 

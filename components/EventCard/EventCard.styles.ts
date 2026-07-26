@@ -11,31 +11,24 @@ export const eventCardStyles = StyleSheet.create({
     position: 'absolute',
     right: 16,
     top: '50%',
-    transform: [{ translateY: -19 }], // половина высоты капсулы
+    transform: [{ translateY: -26 }], // половина высоты круга
     zIndex: 1,
-    alignItems: 'flex-end',
+    alignItems: 'center',
   },
   swipeButtonContainerWithSecondary: {
-    transform: [{ translateY: -42 }], // две капсулы + отступ между ними
+    transform: [{ translateY: -56 }], // два круга + отступ между ними
   },
-  // Капсулы вместо жёстких кругов: форма и тени согласованы с остальным UI,
-  // цвет задаётся снаружи из палитры, подпись читаемая и не лезет за края
+  // Круг без заливки цветом — тот же приём, что у иконок карты и календаря:
+  // полупрозрачное стекло поверх фото, чтобы не перекрывать карточку
   swipeButton: {
-    minWidth: 92,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: Radius.pill,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     justifyContent: 'center',
     alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
+    backgroundColor: 'rgba(20,20,23,0.62)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.28,
-    shadowRadius: 14,
-    elevation: 6,
+    borderColor: 'rgba(255,255,255,0.18)',
     marginBottom: 8,
   },
   swipeButtonSecondary: {
@@ -43,15 +36,17 @@ export const eventCardStyles = StyleSheet.create({
   },
   swipeButtonIcon: {
     color: Palette.text,
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
   },
+  // Подпись под кругом, а не внутри — в 52px она не помещалась
   swipeButtonLabel: {
     color: Palette.text,
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '600',
-    letterSpacing: -0.1,
     textAlign: 'center',
+    marginTop: 4,
+    maxWidth: 84,
   },
   goButtonContainer: {
     position: 'absolute',
@@ -60,23 +55,23 @@ export const eventCardStyles = StyleSheet.create({
     transform: [{ translateY: -30 }],
     zIndex: 1,
   },
+  // Go остаётся акцентной, но круглой и в том же стиле выделения,
+  // что и активный раздел в вебе: мягкая подложка + акцентный контур и текст
   goButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#FF8D32',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: Palette.accentSoft,
+    borderWidth: 1.5,
+    borderColor: Palette.accent,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#FF8D32',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
   },
   goButtonText: {
-    color: '#0A0A0A',
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: Palette.accent,
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   card: {
     backgroundColor: '#16161a',
