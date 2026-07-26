@@ -9,6 +9,8 @@ export const ru = {
         next: 'Далее',
         done: 'Готово',
         close: 'Закрыть',
+        showMore: 'Показать ещё',
+        showLess: 'Свернуть',
         search: 'Поиск',
         loading: 'Загрузка...',
         error: 'Ошибка',

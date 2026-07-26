@@ -1,10 +1,12 @@
 import React from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity, Animated } from 'react-native';
+import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, ScrollView } from 'react-native';
 import { useEffect, useState, useRef } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useLanguage } from '../context/LanguageContext';
 import { useEvents } from '../context/EventsContext';
 import { formatUsername } from '../utils/username';
+import { Palette } from '../constants/DesignSystem';
 
 type OrganizerStats = {
   totalEvents: number;
@@ -66,6 +68,11 @@ function OrganizerCard({
   // Это изолирует N+1 API-вызовы внутри карточки и не вызывает ре-рендеры explore.
   const { getOrganizerStats } = useEvents();
   const [stats, setStats] = useState<OrganizerStats>(initialStats);
+
+  // Длинное «о себе» ломало карточку — сворачиваем и раскрываем по кнопке
+  const BIO_PREVIEW_LIMIT = 80;
+  const [bioExpanded, setBioExpanded] = useState(false);
+  const isBioLong = !!bio && bio.length > BIO_PREVIEW_LIMIT;
 
   useEffect(() => {
     if (!getOrganizerStats) return;
@@ -132,19 +139,33 @@ function OrganizerCard({
           {isOnline && (
             <Animated.View style={[styles.onlineDot, { transform: [{ scale: pulseAnim }] }]} />
           )}
+          {/* Плавный переход фото в цвет карточки */}
+          <LinearGradient
+            colors={['rgba(20,20,23,0)', 'rgba(20,20,23,0.75)', '#141417']}
+            locations={[0, 0.55, 1]}
+            style={styles.avatarFade}
+            pointerEvents="none"
+          />
         </View>
 
         {/* Информация о пользователе */}
         <View style={[styles.userProfileContainer, eventHeight ? styles.userProfileContainerWithHeight : null]}>
           {/* Юзернейм */}
           <Text style={styles.username}>{formatUsername(username)}</Text>
-          
+
           {/* Имя и возраст */}
           <Text style={styles.nameAndAge}>{name}, {age}</Text>
-          
-          {/* О себе */}
+
+          {/* О себе — длинный текст сворачиваем, чтобы не ломать карточку */}
           {bio && (
-            <Text style={styles.bio}>{bio}</Text>
+            isBioLong ? (
+              <TouchableOpacity onPress={() => setBioExpanded(true)} activeOpacity={0.7}>
+                <Text style={styles.bio} numberOfLines={2}>{bio}</Text>
+                <Text style={styles.bioMore}>{t.common.showMore}</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.bio}>{bio}</Text>
+            )
           )}
           
           {/* Статистика - все сразу без раскрытия, как в профиле */}
@@ -189,6 +210,30 @@ function OrganizerCard({
             </View>
           </View>
         </View>
+
+        {/* Полное «о себе» — раскрывается вверх поверх карточки */}
+        {bioExpanded && (
+          <TouchableOpacity
+            style={styles.bioOverlay}
+            activeOpacity={1}
+            onPress={() => setBioExpanded(false)}
+          >
+            <LinearGradient
+              colors={['rgba(20,20,23,0)', '#141417']}
+              locations={[0, 0.35]}
+              style={styles.bioOverlayFill}
+            >
+              <ScrollView
+                style={styles.bioScroll}
+                contentContainerStyle={styles.bioScrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                <Text style={styles.bioFull}>{bio}</Text>
+              </ScrollView>
+              <Text style={styles.bioMore}>{t.common.showLess}</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -268,8 +313,50 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#CCC',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 6,
     paddingHorizontal: 20,
+  },
+  // Растушёвка низа фото в цвет карточки
+  avatarFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 64,
+  },
+  bioMore: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Palette.accent,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  // Панель полного описания: раскрывается вверх, перекрывая фото
+  bioOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    top: 0,
+    justifyContent: 'flex-end',
+  },
+  bioOverlayFill: {
+    paddingHorizontal: 20,
+    paddingTop: 40,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
+  bioScroll: {
+    maxHeight: 220,
+  },
+  bioScrollContent: {
+    paddingBottom: 8,
+  },
+  bioFull: {
+    fontSize: 14,
+    color: '#e7e7ea',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   statsContainer: {
     alignItems: 'center',

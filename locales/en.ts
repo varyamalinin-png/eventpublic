@@ -9,6 +9,8 @@ export const en = {
         next: 'Next',
         done: 'Done',
         close: 'Close',
+        showMore: 'Show more',
+        showLess: 'Show less',
         search: 'Search',
         loading: 'Loading...',
         error: 'Error',
