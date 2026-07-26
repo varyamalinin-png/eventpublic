@@ -1450,44 +1450,42 @@ function EventCard({
     mouseDown.current = false;
   }, [shouldShowSwipeButtons, translateX, swipeButtons]);
 
-  const onGestureEvent = Platform.OS === 'web' ? undefined : Animated.event(
-    [{ nativeEvent: { translationX: translateX } }],
-    { 
-      useNativeDriver: true,
-      listener: (event: { nativeEvent: { translationX: number } }) => {
-        // Отслеживаем текущее значение свайпа для обновления видимости кнопки
-        swipeX.current = event.nativeEvent.translationX;
-        // Показываем кнопки если свайпнуто влево более чем на 50px
-        if (event.nativeEvent.translationX < -50 && shouldShowSwipeButtons) {
-          setShowSwipeButtons(true);
-        } else {
-          setShowSwipeButtons(false);
-        }
-      }
-    }
-  );
+  // Текущее «зафиксированное» положение карточки: 0 либо offset открытых кнопок.
+  // Раньше translationX писался в translateX напрямую, без учёта этого сдвига —
+  // поэтому свайп вправо уводил карточку правее нуля, и она ложилась поверх
+  // ленты организаторов вместо того, чтобы закрыть кнопки.
+  const swipeBase = useRef(0);
+
+  const swipeMinOffset = () => (swipeButtons.secondary ? -240 : -120);
+
+  const onGestureEvent = Platform.OS === 'web' ? undefined : (event: { nativeEvent: { translationX: number } }) => {
+    if (!shouldShowSwipeButtons) return;
+    const tx = event.nativeEvent.translationX;
+    // Карточка ходит только влево от нуля и не дальше offset кнопок
+    const next = Math.min(0, Math.max(swipeMinOffset(), swipeBase.current + tx));
+    swipeX.current = next;
+    translateX.setValue(next);
+    setShowSwipeButtons(next < -20);
+  };
 
   const onHandlerStateChange = Platform.OS === 'web' ? undefined : (event: { nativeEvent: { state: number; translationX: number; velocityX: number } }) => {
     if (event.nativeEvent.state === State.END) {
       const { translationX, velocityX } = event.nativeEvent;
       
-      // Если свайп влево на достаточное расстояние
-      if (shouldShowSwipeButtons && (translationX < -100 || (translationX < -50 && velocityX < -500))) {
-        setShowSwipeButtons(true);
-        // Вычисляем смещение в зависимости от количества кнопок
-        const offset = swipeButtons.secondary ? -240 : -120;
-        Animated.spring(translateX, {
-          toValue: offset,
-          useNativeDriver: true,
-        }).start();
-      } else {
-        // Возвращаем карточку в исходное положение
-        setShowSwipeButtons(false);
-        Animated.spring(translateX, {
-          toValue: 0,
-          useNativeDriver: true,
-        }).start();
-      }
+      const offset = swipeMinOffset();
+      const current = Math.min(0, Math.max(offset, swipeBase.current + translationX));
+      // Открываем, если утащили влево дальше половины хода или резким жестом;
+      // во всех остальных случаях — закрываем
+      const shouldOpen = shouldShowSwipeButtons &&
+        (current <= offset / 2 || (translationX < -50 && velocityX < -500));
+      const target = shouldOpen ? offset : 0;
+
+      swipeBase.current = target;
+      setShowSwipeButtons(shouldOpen);
+      Animated.spring(translateX, {
+        toValue: target,
+        useNativeDriver: false,
+      }).start();
     }
   };
 
@@ -1843,8 +1841,12 @@ function EventCard({
               // Свайп вправо раньше тоже перехватывался, но ничего не делал —
               // карточка просто уезжала и возвращалась, а жест не доходил до
               // ленты организаторов. Теперь правое направление уходит наверх.
-              activeOffsetX={-10}
-              failOffsetX={10}
+              // Пока кнопки закрыты — карточка берёт только свайп влево, а правый
+              // отдаёт ленте организаторов. Когда кнопки открыты, правый свайп
+              // должен закрывать их, иначе он уводил в ленту, а карточка
+              // оставалась сдвинутой и накладывалась поверх.
+              activeOffsetX={showSwipeButtons ? [-10, 10] : -10}
+              failOffsetX={showSwipeButtons ? undefined : 10}
             >
               <Animated.View 
                 style={[
