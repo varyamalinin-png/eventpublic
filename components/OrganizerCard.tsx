@@ -8,6 +8,10 @@ import { useEvents } from '../context/EventsContext';
 import { formatUsername } from '../utils/username';
 import { Palette } from '../constants/DesignSystem';
 
+/** Счётчики Organized/Participated временно скрыты — как и в шапке профиля.
+ *  Вернуть их можно, переключив флаг в true: разметка сохранена. */
+const SHOW_ORG_PART = false;
+
 type OrganizerStats = {
   totalEvents: number;
   organizedEvents: number;
@@ -190,18 +194,23 @@ function OrganizerCard({
               </TouchableOpacity>
             </View>
             
-            {/* Второй ряд - всегда видимый */}
+            {/* Второй ряд: Organized/Participated скрыты флагом SHOW_ORG_PART,
+                разметка сохранена — вернуть можно переключением в true */}
             <View style={styles.statsRow}>
-              <TouchableOpacity style={styles.statItem} onPress={handleOrganizedPress}>
-                <Text style={styles.statNumber}>{stats.organizedEvents}</Text>
-                <Text style={styles.statLabel}>{t.profile.statsOrganized}</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.statItem} onPress={handleParticipatedPress}>
-                <Text style={styles.statNumber}>{stats.participatedEvents}</Text>
-                <Text style={styles.statLabel}>{t.profile.statsParticipated}</Text>
-              </TouchableOpacity>
-              
+              {SHOW_ORG_PART && (
+                <TouchableOpacity style={styles.statItem} onPress={handleOrganizedPress}>
+                  <Text style={styles.statNumber}>{stats.organizedEvents}</Text>
+                  <Text style={styles.statLabel}>{t.profile.statsOrganized}</Text>
+                </TouchableOpacity>
+              )}
+
+              {SHOW_ORG_PART && (
+                <TouchableOpacity style={styles.statItem} onPress={handleParticipatedPress}>
+                  <Text style={styles.statNumber}>{stats.participatedEvents}</Text>
+                  <Text style={styles.statLabel}>{t.profile.statsParticipated}</Text>
+                </TouchableOpacity>
+              )}
+
               {currentUserId && currentUserId !== organizerId && stats.sharedEvents !== undefined && (
                 <TouchableOpacity style={styles.statItem} onPress={handleSharedPress}>
                   <Text style={styles.statNumber}>{stats.sharedEvents}</Text>
