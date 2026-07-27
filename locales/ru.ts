@@ -792,6 +792,8 @@ export const ru = {
     filters: 'Фильтры',
     filterLabelParticipants: 'Участники:',
     filterLabelTime: 'Время (часов до события):',
+    filterLabelDate: 'Диапазон дат:',
+    datePlaceholder: 'ДД.ММ.ГГГГ',
     filterLabelPrice: 'Цена (максимум руб.):',
     filterLabelOrganizerAge: 'Возраст организатора:',
     clearFilters: 'Очистить',

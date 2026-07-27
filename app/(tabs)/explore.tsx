@@ -22,6 +22,8 @@ interface FilterOptions {
   organizerAgeMin?: number;
   organizerAgeMax?: number;
   selectedTags?: string[]; // Выбранные метки для фильтрации
+  dateFrom?: string; // как ввёл пользователь, ДД.ММ.ГГГГ
+  dateTo?: string;
 }
 
 interface EventFolder {
@@ -36,6 +38,23 @@ const PAGE_SIZE = 12;
 // Одна ссылка на пустой список меток: `|| []` создавал новый массив
 // на каждый рендер и сбрасывал memo у EventCard
 const EMPTY_TAGS: string[] = [];
+
+// Пользователь вводит дату как ДД.ММ.ГГГГ (или ДД.ММ.ГГ), а event.date хранится
+// в ISO. Возвращаем ISO, чтобы сравнивать строки напрямую; на неполном вводе —
+// undefined, тогда граница диапазона просто не применяется.
+function parseDateInput(text?: string): string | undefined {
+  if (!text) return undefined;
+  const m = text.trim().match(/^(\d{1,2})\D(\d{1,2})\D(\d{2}|\d{4})$/);
+  if (!m) return undefined;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+  if (day < 1 || day > 31 || month < 1 || month > 12) return undefined;
+  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const check = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(check.getTime()) || check.getDate() !== day) return undefined;
+  return iso;
+}
 
 export default function ExploreScreen() {
   const { t } = useLanguage();
@@ -143,6 +162,7 @@ export default function ExploreScreen() {
     if (filters.organizerAgeMin !== undefined && filters.organizerAgeMin > 0) count++;
     if (filters.organizerAgeMax !== undefined && filters.organizerAgeMax > 0) count++;
     if (filters.selectedTags && filters.selectedTags.length > 0) count++;
+    if (filters.dateFrom || filters.dateTo) count++;
     return count;
   };
   
@@ -386,6 +406,14 @@ export default function ExploreScreen() {
         if (hoursUntilEvent > filters.timeHoursMax) return false;
       }
       
+      // Фильтр по диапазону дат (ISO-строки сравнимы лексикографически)
+      if (filters.dateFrom || filters.dateTo) {
+        const from = parseDateInput(filters.dateFrom);
+        const to = parseDateInput(filters.dateTo);
+        if (from && event.date < from) return false;
+        if (to && event.date > to) return false;
+      }
+
       // Фильтр по цене
       if (filters.priceMax) {
         const price = event.price.replace(/[^\d]/g, '');
@@ -540,7 +568,7 @@ export default function ExploreScreen() {
   };
 
   // Функции для удаления отдельных фильтров
-  const removeFilter = (filterType: keyof FilterOptions | 'participantsRange' | 'organizerAgeRange', value?: string) => {
+  const removeFilter = (filterType: keyof FilterOptions | 'participantsRange' | 'organizerAgeRange' | 'dateRange', value?: string) => {
     if (filterType === 'selectedTags' && value) {
       const currentTags = filters.selectedTags || [];
       const newTags = currentTags.filter(t => t !== value);
@@ -548,6 +576,8 @@ export default function ExploreScreen() {
     } else if (filterType === 'participantsRange') {
       // Удаляем оба фильтра участников
       setFilters({ ...filters, participantsMin: undefined, participantsMax: undefined });
+    } else if (filterType === 'dateRange') {
+      setFilters({ ...filters, dateFrom: undefined, dateTo: undefined });
     } else if (filterType === 'organizerAgeRange') {
       // Удаляем оба фильтра возраста организатора
       setFilters({ ...filters, organizerAgeMin: undefined, organizerAgeMax: undefined });
@@ -583,6 +613,12 @@ export default function ExploreScreen() {
     }
     if (filters.priceMax !== undefined && filters.priceMax > 0) {
       applied.push({ type: 'priceMax', label: t.explore.filterLabelPrice || 'Price', value: `≤${filters.priceMax}₽` });
+    }
+    if (filters.dateFrom || filters.dateTo) {
+      const rangeText = filters.dateFrom && filters.dateTo
+        ? `${filters.dateFrom} — ${filters.dateTo}`
+        : filters.dateFrom ? `${t.explore.from} ${filters.dateFrom}` : `${t.createEvent.to} ${filters.dateTo}`;
+      applied.push({ type: 'dateRange' as any, label: t.explore.filterLabelDate, value: rangeText });
     }
     if (filters.selectedTags && filters.selectedTags.length > 0) {
       filters.selectedTags.forEach(tag => {
@@ -863,7 +899,7 @@ export default function ExploreScreen() {
             {getAppliedFilters().map((filter, index) => (
               <View key={`${filter.type}-${index}`} style={styles.appliedFilterTag}>
                 <Text style={styles.appliedFilterText}>
-                  {filter.type === 'selectedTags' ? ({ 'age_18_plus': '18+', 'age_21_plus': '21+', 'women_only': 'women only', 'men_only': 'men only', 'recurring': 'recurring', 'starting_soon': 'starting soon', 'массовое': 'массовое' }[filter.value as string] || filter.value) : `${filter.label}: ${filter.value}`}
+                  {filter.type === 'selectedTags' ? ({ 'age_18_plus': '18+', 'age_21_plus': '21+', 'women_only': 'women only', 'men_only': 'men only', 'recurring': 'recurring', 'starting_soon': 'starting soon', 'массовое': 'массовое' }[filter.value as string] || filter.value) : `${filter.label.replace(/:\s*$/, '')}: ${filter.value}`}
                 </Text>
                 <TouchableOpacity
                   style={styles.removeFilterButton}
@@ -898,6 +934,28 @@ export default function ExploreScreen() {
                 keyboardType="numeric"
                 value={filters.participantsMax?.toString() || ''}
                 onChangeText={(text) => setFilters({...filters, participantsMax: parseInt(text) || undefined})}
+              />
+            </View>
+          </View>
+
+          <View style={styles.filterRow}>
+            <Text style={styles.filterLabel}>{t.explore.filterLabelDate}</Text>
+            <View style={styles.filterInputs}>
+              <TextInput
+                style={styles.filterInput}
+                placeholder={t.explore.datePlaceholder}
+                placeholderTextColor="rgba(244,244,245,0.3)"
+                keyboardType="numbers-and-punctuation"
+                value={filters.dateFrom || ''}
+                onChangeText={(text) => setFilters({ ...filters, dateFrom: text || undefined })}
+              />
+              <TextInput
+                style={styles.filterInput}
+                placeholder={t.explore.datePlaceholder}
+                placeholderTextColor="rgba(244,244,245,0.3)"
+                keyboardType="numbers-and-punctuation"
+                value={filters.dateTo || ''}
+                onChangeText={(text) => setFilters({ ...filters, dateTo: text || undefined })}
               />
             </View>
           </View>

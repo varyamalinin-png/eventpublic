@@ -791,6 +791,8 @@ export const en = {
     filters: 'Filters',
     filterLabelParticipants: 'Participants:',
     filterLabelTime: 'Time (hours until event):',
+    filterLabelDate: 'Date range:',
+    datePlaceholder: 'DD.MM.YYYY',
     filterLabelPrice: 'Price (max rub.):',
     filterLabelOrganizerAge: 'Organizer age:',
     clearFilters: 'Clear',
