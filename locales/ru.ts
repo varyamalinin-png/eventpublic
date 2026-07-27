@@ -1,5 +1,16 @@
 export const ru = {
+  onboarding: {
+    createEventsTitle: 'Создавайте события',
+    createEventsBody: 'Кино, прогулки, поездки - любое событие с кем угодно',
+    inviteFriendsTitle: 'Приглашайте друзей',
+    inviteFriendsBody: 'Делитесь событиями и находите единомышленников рядом',
+    saveMemoriesTitle: 'Сохраняйте воспоминания',
+    saveMemoriesBody: 'Общий альбом, чат и метка на карте для каждого события',
+    next: 'Далее',
+  },
   folder: {
+    enterFolderNamePh: 'Введите название папки',
+    addDescription: 'Добавьте описание...',
     notSpecified: 'не указан',
     deleteFolder: 'Удалить папку',
     deleteFolderConfirm: 'Вы уверены, что хотите удалить эту папку? Это действие нельзя отменить.',
@@ -729,6 +740,11 @@ export const ru = {
 
   // Empty states
   empty: {
+    searchSaved: 'Поиск сохранённых...',
+    nothingFound: 'Ничего не найдено',
+    tryAnotherQuery: 'Попробуйте другой запрос',
+    noSavedMemories: 'Нет сохранённых воспоминаний',
+    saveFromMemories: 'Сохраняйте фото и видео из меморис',
     noMemories: 'Пока нет воспоминаний',
     noPosts: 'Пока нет постов',
     noPostsYouAndFriends: 'Пока нет постов от вас и ваших друзей',

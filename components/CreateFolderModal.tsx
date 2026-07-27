@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLanguage } from '../context/LanguageContext';
 import { View, Text, StyleSheet, Image, TouchableOpacity, TextInput, Alert, Platform, Modal } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { AppIcon } from './ui/AppIcon';
@@ -11,6 +12,8 @@ interface CreateFolderModalProps {
 }
 
 export default function CreateFolderModal({ visible = true, onClose, onSubmit }: CreateFolderModalProps) {
+
+  const { t } = useLanguage();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [coverPhoto, setCoverPhoto] = useState<{ uri: string; type: string; name: string } | null>(null);
@@ -38,7 +41,7 @@ export default function CreateFolderModal({ visible = true, onClose, onSubmit }:
 
       const hasPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (hasPermission.status !== 'granted') {
-        Alert.alert('Ошибка', 'Нет доступа к галерее');
+        Alert.alert(t.common.error, 'Нет доступа к галерее');
         return;
       }
 
@@ -57,7 +60,7 @@ export default function CreateFolderModal({ visible = true, onClose, onSubmit }:
         });
       }
     } catch (error) {
-      Alert.alert('Ошибка', 'Не удалось выбрать фото');
+      Alert.alert(t.common.error, t.eventProfile.photoPickFailed);
     }
   };
 
@@ -114,7 +117,7 @@ export default function CreateFolderModal({ visible = true, onClose, onSubmit }:
           <Text style={styles.fieldLabel}>Название</Text>
           <TextInput
             style={styles.input}
-            placeholder="Введите название папки"
+            placeholder={t.folder.enterFolderNamePh}
             placeholderTextColor={Palette.textFaint}
             value={name}
             onChangeText={setName}
@@ -128,7 +131,7 @@ export default function CreateFolderModal({ visible = true, onClose, onSubmit }:
           <Text style={styles.fieldLabel}>Описание <Text style={styles.fieldOptional}>(необязательно)</Text></Text>
           <TextInput
             style={[styles.input, styles.textArea]}
-            placeholder="Добавьте описание..."
+            placeholder={t.folder.addDescription}
             placeholderTextColor={Palette.textFaint}
             value={description}
             onChangeText={setDescription}

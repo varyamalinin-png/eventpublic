@@ -74,7 +74,7 @@ export default function SavedScreen() {
     return (
       <View style={styles.container}>
         <TopBar
-          searchPlaceholder="Поиск сохраненных..."
+          searchPlaceholder={t.empty.searchSaved}
           onSearchChange={handleSavedSearch}
           searchQuery={searchQuery}
         />
@@ -98,7 +98,7 @@ export default function SavedScreen() {
   return (
     <View style={styles.container}>
       <TopBar
-        searchPlaceholder="Поиск сохраненных..."
+        searchPlaceholder={t.empty.searchSaved}
         onSearchChange={handleSavedSearch}
         searchQuery={searchQuery}
       />
@@ -111,7 +111,7 @@ export default function SavedScreen() {
           activeOpacity={0.75}
         >
           <Text style={[styles.tabText, activeTab === 'events' && styles.tabTextActive]}>
-            {t.settings?.saved?.savedEvents || 'События'}
+            {t.settings?.saved?.savedEvents || t.tabs.explore}
           </Text>
           {filteredEvents.length > 0 && (
             <View style={[styles.badge, activeTab === 'events' && styles.badgeActive]}>
@@ -128,7 +128,7 @@ export default function SavedScreen() {
           activeOpacity={0.75}
         >
           <Text style={[styles.tabText, activeTab === 'memories' && styles.tabTextActive]}>
-            {t.settings?.saved?.savedMemories || 'Меморис'}
+            {t.settings?.saved?.savedMemories || t.tabs.memories}
           </Text>
           {filteredMemoryPosts.length > 0 && (
             <View style={[styles.badge, activeTab === 'memories' && styles.badgeActive]}>
@@ -157,8 +157,8 @@ export default function SavedScreen() {
           filteredEvents.length === 0 ? (
             <EmptyState
               iconName="bookmark"
-              title={searchQuery ? 'Ничего не найдено' : 'Нет сохранённых событий'}
-              subtitle={searchQuery ? 'Попробуйте другой запрос' : 'Нажмите ♡ на событии чтобы сохранить'}
+              title={searchQuery ? t.empty.nothingFound : 'Нет сохранённых событий'}
+              subtitle={searchQuery ? t.empty.tryAnotherQuery : 'Нажмите ♡ на событии чтобы сохранить'}
             />
           ) : (
             <View style={styles.eventsList}>
@@ -172,7 +172,7 @@ export default function SavedScreen() {
                     time={event.time}
                     displayDate={event.displayDate}
                     location={event.location || ''}
-                    price={event.price || 'Бесплатно'}
+                    price={event.price || t.createEvent.free}
                     participants={event.participants || 0}
                     maxParticipants={event.maxParticipants || 10}
                     organizerAvatar={getUserData(event.organizerId)?.avatar || ''}
@@ -194,8 +194,8 @@ export default function SavedScreen() {
           filteredMemoryPosts.length === 0 ? (
             <EmptyState
               iconName="image"
-              title={searchQuery ? 'Ничего не найдено' : 'Нет сохранённых воспоминаний'}
-              subtitle={searchQuery ? 'Попробуйте другой запрос' : 'Сохраняйте фото и видео из меморис'}
+              title={searchQuery ? t.empty.nothingFound : t.empty.noSavedMemories}
+              subtitle={searchQuery ? t.empty.tryAnotherQuery : t.empty.saveFromMemories}
             />
           ) : (
             <View style={styles.memoryGrid}>

@@ -1,5 +1,16 @@
 export const en = {
+  onboarding: {
+    createEventsTitle: 'Create events',
+    createEventsBody: 'Movies, walks, trips - any event with anyone',
+    inviteFriendsTitle: 'Invite friends',
+    inviteFriendsBody: 'Share events and find like-minded people nearby',
+    saveMemoriesTitle: 'Save memories',
+    saveMemoriesBody: 'A shared album, chat and map pin for every event',
+    next: 'Next',
+  },
   folder: {
+    enterFolderNamePh: 'Enter a folder name',
+    addDescription: 'Add a description...',
     notSpecified: 'not specified',
     deleteFolder: 'Delete folder',
     deleteFolderConfirm: 'Are you sure you want to delete this folder? This cannot be undone.',
@@ -728,6 +739,11 @@ export const en = {
 
   // Empty states
   empty: {
+    searchSaved: 'Search saved...',
+    nothingFound: 'Nothing found',
+    tryAnotherQuery: 'Try a different query',
+    noSavedMemories: 'No saved memories',
+    saveFromMemories: 'Save photos and videos from memories',
     noMemories: 'No memories yet',
     noPosts: 'No posts yet',
     noPostsYouAndFriends: 'No posts from you and your friends yet',

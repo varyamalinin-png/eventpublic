@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLanguage } from '../context/LanguageContext';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppIcon } from './ui/AppIcon';
@@ -8,18 +9,18 @@ const { width } = Dimensions.get('window');
 const SLIDES = [
   {
     icon: 'calendar' as const,
-    title: 'Создавайте события',
+    title: t.onboarding.createEventsTitle,
     subtitle: 'Кино, прогулки, поездки — любое событие с кем угодно',
   },
   {
     icon: 'users' as const,
-    title: 'Приглашайте друзей',
-    subtitle: 'Делитесь событиями и находите единомышленников рядом',
+    title: t.onboarding.inviteFriendsTitle,
+    subtitle: t.onboarding.inviteFriendsBody,
   },
   {
     icon: 'image' as const,
-    title: 'Сохраняйте воспоминания',
-    subtitle: 'Общий альбом, чат и метка на карте для каждого события',
+    title: t.onboarding.saveMemoriesTitle,
+    subtitle: t.onboarding.saveMemoriesBody,
   },
 ];
 
@@ -28,6 +29,8 @@ interface Props {
 }
 
 export default function Onboarding({ onDone }: Props) {
+
+  const { t } = useLanguage();
   const [step, setStep] = useState(0);
 
   const handleNext = async () => {
@@ -59,7 +62,7 @@ export default function Onboarding({ onDone }: Props) {
 
       <TouchableOpacity style={styles.button} onPress={handleNext} activeOpacity={0.8}>
         <Text style={styles.buttonText}>
-          {step < SLIDES.length - 1 ? 'Далее' : 'Начать'}
+          {step < SLIDES.length - 1 ? t.onboarding.next : 'Начать'}
         </Text>
       </TouchableOpacity>
 
