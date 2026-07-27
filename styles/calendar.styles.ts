@@ -1,5 +1,4 @@
-import { StyleSheet } from 'react-native';
-import { Palette, Radius } from '../constants/DesignSystem';
+import { Platform, StyleSheet } from 'react-native';
 
 /** Стили вынесены из app/calendar.tsx без изменений. */
 export const calendarStyles = StyleSheet.create({

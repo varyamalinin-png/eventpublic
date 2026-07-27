@@ -99,6 +99,8 @@ export const en = {
     signInToReport: 'You need to sign in to submit a report',
     complaintSent: 'Report sent',
     complaintFailed: 'Could not send the report. Try again later.',
+    complaintReason: 'Reason for complaint',
+    additionalOptional: 'Additional details (optional)',
     describeProblem: 'Describe the problem in more detail...',
     sending: 'Sending...',
   },

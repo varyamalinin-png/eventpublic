@@ -1,5 +1,4 @@
 import { StyleSheet } from 'react-native';
-import { Palette, Radius } from '../constants/DesignSystem';
 
 /** Стили вынесены из components/EventCard.tsx без изменений. */
 export const eventCardInlineStyles = StyleSheet.create({

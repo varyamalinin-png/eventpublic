@@ -31,7 +31,7 @@ export const mapServerChatToClient = (chat: ServerChat): Chat => ({
   id: chat.id,
   type: (chat.type ? String(chat.type).toLowerCase() : 'personal') as Chat['type'],
   eventId: chat.eventId ?? undefined,
-  name: chat.name ?? chat.event?.title ?? t.chat.chatFallback,
+  name: chat.name ?? chat.event?.title ?? '',
   participants: (chat.participants ?? []).map((participant) => participant.userId ?? '').filter(Boolean),
   lastMessage: chat.lastMessage ? mapServerMessageToClient(chat.lastMessage) : undefined,
   lastActivity: chat.updatedAt ? new Date(chat.updatedAt) : new Date(),

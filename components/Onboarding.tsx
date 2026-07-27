@@ -6,23 +6,6 @@ import { AppIcon } from './ui/AppIcon';
 
 const { width } = Dimensions.get('window');
 
-const SLIDES = [
-  {
-    icon: 'calendar' as const,
-    title: t.onboarding.createEventsTitle,
-    subtitle: 'Кино, прогулки, поездки — любое событие с кем угодно',
-  },
-  {
-    icon: 'users' as const,
-    title: t.onboarding.inviteFriendsTitle,
-    subtitle: t.onboarding.inviteFriendsBody,
-  },
-  {
-    icon: 'image' as const,
-    title: t.onboarding.saveMemoriesTitle,
-    subtitle: t.onboarding.saveMemoriesBody,
-  },
-];
 
 interface Props {
   onDone: () => void;
@@ -31,6 +14,25 @@ interface Props {
 export default function Onboarding({ onDone }: Props) {
 
   const { t } = useLanguage();
+
+  // Слайды зависят от языка — считаем внутри компонента
+  const SLIDES = [
+    {
+      icon: 'calendar' as const,
+      title: t.onboarding.createEventsTitle,
+      subtitle: 'Кино, прогулки, поездки — любое событие с кем угодно',
+    },
+    {
+      icon: 'users' as const,
+      title: t.onboarding.inviteFriendsTitle,
+      subtitle: t.onboarding.inviteFriendsBody,
+    },
+    {
+      icon: 'image' as const,
+      title: t.onboarding.saveMemoriesTitle,
+      subtitle: t.onboarding.saveMemoriesBody,
+    },
+  ];
   const [step, setStep] = useState(0);
 
   const handleNext = async () => {
@@ -62,7 +64,7 @@ export default function Onboarding({ onDone }: Props) {
 
       <TouchableOpacity style={styles.button} onPress={handleNext} activeOpacity={0.8}>
         <Text style={styles.buttonText}>
-          {step < SLIDES.length - 1 ? t.onboarding.next : 'Начать'}
+          {step < SLIDES.length - 1 ? t.onboarding.next : t.common.done}
         </Text>
       </TouchableOpacity>
 

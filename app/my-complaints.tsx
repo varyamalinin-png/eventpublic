@@ -46,17 +46,19 @@ const STATUS_COLORS: Record<ComplaintStatus, string> = {
   REJECTED: '#FF3B30',
 };
 
-const STATUS_LABELS: Record<ComplaintStatus, string> = {
-  PENDING: t.support.pendingReview,
-  REVIEWED: t.support.reviewed,
-  RESOLVED: t.support.resolved,
-  REJECTED: t.support.rejectedStatus,
-};
 
 export default function MyComplaintsScreen() {
   const router = useRouter();
   const { accessToken } = useAuth();
   const { t } = useLanguage();
+
+  // Подписи статусов зависят от языка — считаем внутри компонента
+  const STATUS_LABELS: Record<ComplaintStatus, string> = {
+    PENDING: t.support.pendingReview,
+    REVIEWED: t.support.reviewed,
+    RESOLVED: t.support.resolved,
+    REJECTED: t.support.rejectedStatus,
+  };
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);

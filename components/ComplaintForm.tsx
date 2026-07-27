@@ -13,6 +13,7 @@ import { apiRequest } from '../services/api';
 import { AppIcon } from './ui/AppIcon';
 import { Palette } from '../constants/DesignSystem';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('ComplaintForm');
@@ -28,22 +29,6 @@ interface ComplaintFormProps {
   onSuccess?: () => void;
 }
 
-const COMPLAINT_REASONS = {
-  EVENT: [
-    t.complaint.inappropriateContent,
-    t.complaint.spam,
-    t.complaint.fraud,
-    t.complaint.rulesViolation,
-    t.complaint.other,
-  ],
-  USER: [
-    t.complaint.insults,
-    t.complaint.spam,
-    t.complaint.fraud,
-    t.complaint.inappropriateBehavior,
-    t.complaint.other,
-  ],
-};
 
 export default function ComplaintForm({
   visible,
@@ -54,9 +39,28 @@ export default function ComplaintForm({
   onSuccess,
 }: ComplaintFormProps) {
   const { accessToken } = useAuth();
+  const { t } = useLanguage();
   const [selectedReason, setSelectedReason] = useState<string>('');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Причины жалобы зависят от языка — считаем внутри компонента
+  const COMPLAINT_REASONS = {
+    EVENT: [
+      t.complaint.inappropriateContent,
+      t.complaint.spam,
+      t.complaint.fraud,
+      t.complaint.rulesViolation,
+      t.complaint.other,
+    ],
+    USER: [
+      t.complaint.insults,
+      t.complaint.spam,
+      t.complaint.fraud,
+      t.complaint.inappropriateBehavior,
+      t.complaint.other,
+    ],
+  };
 
   const reasons = COMPLAINT_REASONS[type];
   const title = type === 'EVENT' ? t.complaint.complaintAboutEvent : t.complaint.complaintAboutUser;
@@ -126,7 +130,7 @@ export default function ComplaintForm({
           </View>
 
           <ScrollView style={s.scroll} bounces={false} showsVerticalScrollIndicator={false}>
-            <Text style={s.sectionLabel}>Причина жалобы</Text>
+            <Text style={s.sectionLabel}>{t.complaint.complaintReason}</Text>
             {reasons.map((reason) => (
               <TouchableOpacity
                 key={reason}
@@ -143,7 +147,7 @@ export default function ComplaintForm({
               </TouchableOpacity>
             ))}
 
-            <Text style={s.sectionLabel}>Дополнительно (необязательно)</Text>
+            <Text style={s.sectionLabel}>{t.complaint.additionalOptional}</Text>
             <TextInput
               style={s.textInput}
               placeholder={t.complaint.describeProblem}
@@ -158,7 +162,7 @@ export default function ComplaintForm({
 
           <View style={s.footer}>
             <TouchableOpacity style={s.cancelBtn} onPress={handleClose} disabled={isSubmitting} activeOpacity={0.7}>
-              <Text style={s.cancelBtnText}>Отмена</Text>
+              <Text style={s.cancelBtnText}>{t.common.cancel}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[s.submitBtn, (!selectedReason || isSubmitting) && s.submitBtnDisabled]}

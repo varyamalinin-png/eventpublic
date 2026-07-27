@@ -99,6 +99,8 @@ export const ru = {
     signInToReport: 'Необходимо войти в аккаунт для отправки жалобы',
     complaintSent: 'Жалоба отправлена',
     complaintFailed: 'Не удалось отправить жалобу. Попробуйте позже.',
+    complaintReason: 'Причина жалобы',
+    additionalOptional: 'Дополнительно (необязательно)',
     describeProblem: 'Опишите проблему подробнее...',
     sending: 'Отправка...',
   },
