@@ -1,4 +1,5 @@
 import { View, Text, Image, StyleSheet, TouchableOpacity, Animated, Modal, ScrollView, Alert, InteractionManager, TextInput, Platform, useWindowDimensions, StyleProp, ViewStyle } from 'react-native';
+import { eventCardInlineStyles } from './EventCard/EventCard.inline.styles';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useState, useRef, useEffect, useCallback, useMemo, memo, createElement } from 'react';
@@ -2488,129 +2489,6 @@ function EventCard({
 export default memo(EventCard);
 
 // Styles for explore full-bleed card variant (Airbnb Experiences style)
-const exploreStyles = StyleSheet.create({
-  exploreCardContainer: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    width: '100%',
-    maxWidth: 500,
-    alignSelf: 'center' as const,
-    position: 'relative',
-    backgroundColor: '#141417',
-  },
-  exploreImage: {
-    resizeMode: 'cover',
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  exploreGradient: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: '75%',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-  },
-  exploreTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-    marginBottom: 6,
-  },
-  exploreInfoRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    alignItems: 'center',
-  },
-  exploreInfoItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  exploreInfoText: {
-    fontSize: 12.5,
-    color: 'rgba(255,255,255,0.85)',
-    fontWeight: '500',
-    textShadowColor: 'rgba(0,0,0,0.4)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  exploreOrganizerContainer: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    borderRadius: 20,
-    paddingRight: 10,
-    paddingVertical: 3,
-    paddingLeft: 3,
-    zIndex: 10,
-    maxWidth: '60%',
-  },
-  exploreOrganizerAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.3)',
-  },
-  exploreOrganizerName: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
-    marginLeft: 6,
-    textShadowColor: 'rgba(0,0,0,0.4)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-    flexShrink: 1,
-  },
-  exploreTagsContainer: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    zIndex: 10,
-    maxWidth: '35%',
-    justifyContent: 'flex-end',
-  },
-  exploreInvitedLabel: {
-    position: 'absolute',
-    top: 44,
-    left: 10,
-    backgroundColor: '#FF8D32',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    zIndex: 10,
-  },
-  exploreSaveBtn: {
-    position: 'absolute',
-    bottom: 12,
-    right: 12,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-});
 
 // Используем стили из отдельного файла и добавляем стили для модальных окон
 const styles = {
@@ -3151,3 +3029,5 @@ const styles = {
   },
   }),
 };
+
+const exploreStyles = eventCardInlineStyles;
