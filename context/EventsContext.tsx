@@ -835,7 +835,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
   const updateUserData = useCallback((userId: string, updates: UserProfilePatch) => {
     setServerUserData(prev => mergeUserRecord(prev, userId, updates));
     setUserDataUpdates(prev => mergeUserRecord(prev, userId, updates));
-  }, []);
+  }, [mergeUserRecord]);
 
   // Эти функции теперь находятся в useEventActions hook
 
@@ -1072,7 +1072,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
       complaints: complaintsCount,
       friends: friendsCount,
     };
-  }, [events, eventProfilesRef.current, isUserEventMemberWrapper, isUserAttendeeWrapper, isEventUpcomingWrapper, isEventPastWrapper, getUserRequestStatusWrapper, userFriendsMap, accessToken, loadComplaintsCount]);
+  }, [events, isUserAttendeeWrapper, isEventUpcomingWrapper, isEventPastWrapper, getUserRequestStatusWrapper, userFriendsMap, accessToken, loadComplaintsCount]);
 
   const getFriendsList = useCallback((): User[] => {
     if (!currentUserId) {
@@ -1106,7 +1106,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
 
   const isFriend = useCallback((userId: string): boolean => {
     return friends.includes(userId);
-  }, []);
+  }, [friends]);
 
   // Обновленная логика FRIENDS согласно новой системе
   const getFriendsForEvents = useCallback((): Event[] => {
@@ -1743,7 +1743,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     
     // ПРИОРИТЕТ 6: Не член (non_member)
     return 'non_member';
-  }, []);
+  }, [eventRequests, requestBelongsToUser, resolveUserId]);
 
   // Персонализированные фото событий
   // Получить фото события для конкретного пользователя с учетом viewerUserId
@@ -1915,7 +1915,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
   const isUserOrganizer = useCallback((event: Event, userId: string): boolean => {
     const resolvedUserId = resolveUserId(userId);
     return event.organizerId === resolvedUserId;
-  }, []);
+  }, [resolveUserId]);
   
   // Я участник (принятый, но не организатор)
   const isUserAttendee = useCallback((event: Event, userId: string): boolean => {
@@ -1955,7 +1955,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     const resolvedUserId = resolveUserId(userId);
     const friendIds = userFriendsMap[resolvedUserId] ?? [];
     return friendIds.includes(event.organizerId);
-  }, []);
+  }, [resolveUserId, userFriendsMap]);
   
   // Универсальная функция для проверки участия пользователя в событии (для обратной совместимости)
   const isUserParticipant = useCallback((event: Event, userId: string): boolean => {
@@ -2364,7 +2364,7 @@ const isHttpUrl = (value?: string | null): boolean => {
     } finally {
       setIsSyncing(false);
     }
-  }, [accessToken, currentUserId, language, applyServerUserDataToState, handleUnauthorizedError, refreshPendingJoinRequests, events.length, isEventPast]);
+  }, [accessToken, applyServerUserDataToState, currentUserId, handleUnauthorizedError, isEventPast, language, mapServerEventToClient, refreshPendingJoinRequests, setEventRequests]);
 
   // cancelEventRequest и cancelEventParticipation теперь в useEventRequests хуке
   // removeParticipantFromEvent теперь в useEventActions хуке
