@@ -359,7 +359,7 @@ export default function OtherProfileScreen() {
     }, 100);
   };
 
-  const handleMiniaturePress = (event: Event) => {
+  const handleMiniaturePress = useCallback((event: Event) => {
     logger.debug('handleMiniaturePress вызван для события', { eventId: event.id, eventTitle: event.title, showEventFeedBefore: showEventFeed });
     
     // КРИТИЧЕСКИ ВАЖНО: На вебе не используем router.setParams, только локальное состояние
@@ -408,7 +408,7 @@ export default function OtherProfileScreen() {
         scrollViewRef.current.scrollTo({ y: scrollToY, animated: true });
       }
     }, 200);
-  };
+  }, [router, showEventFeed, userEvents]);
 
   const handleFolderToggle = (folderId: string) => {
     setSelectedFolders(prev => 
