@@ -935,6 +935,10 @@ export default function ExploreScreen() {
                       organizerAvatar={event.organizerAvatar}
                       organizerId={event.organizerId}
                       variant="default"
+                      // Пока открыта лента организаторов, свайп карточки выключен:
+                      // иначе она перехватывала жест закрытия панели и наезжала
+                      // на карточку организатора
+                      showSwipeAction={!showOrganizers}
                       mediaUrl={event.mediaUrl}
                       mediaType={event.mediaType}
                       mediaAspectRatio={event.mediaAspectRatio}
@@ -972,6 +976,7 @@ export default function ExploreScreen() {
                 organizerAvatar={event.organizerAvatar}
                 organizerId={event.organizerId}
               variant="default"
+              showSwipeAction={!showOrganizers}
                 mediaUrl={event.mediaUrl}
                 mediaType={event.mediaType}
                 mediaAspectRatio={event.mediaAspectRatio}

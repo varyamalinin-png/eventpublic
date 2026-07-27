@@ -1458,6 +1458,16 @@ function EventCard({
 
   const swipeMinOffset = () => (swipeButtons.secondary ? -240 : -120);
 
+  // Если свайп выключили (например, открылась лента организаторов), карточка
+  // не должна остаться сдвинутой — возвращаем её на место и убираем кнопки
+  useEffect(() => {
+    if (shouldShowSwipeButtons) return;
+    swipeBase.current = 0;
+    swipeX.current = 0;
+    setShowSwipeButtons(false);
+    translateX.setValue(0);
+  }, [shouldShowSwipeButtons, translateX]);
+
   const onGestureEvent = Platform.OS === 'web' ? undefined : (event: { nativeEvent: { translationX: number } }) => {
     if (!shouldShowSwipeButtons) return;
     const tx = event.nativeEvent.translationX;
