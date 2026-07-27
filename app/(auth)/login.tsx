@@ -382,7 +382,7 @@ export default function AuthScreen() {
               {loading ? (
                 <ActivityIndicator color="#f4f4f5" />
               ) : (
-                <Text style={styles.primaryButtonText}>Зарегистрироваться</Text>
+                <Text style={styles.primaryButtonText}>{t.auth.signUpAction}</Text>
               )}
             </TouchableOpacity>
 

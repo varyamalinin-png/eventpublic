@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import EventCard from '../components/EventCard';
 import { useEvents, Event } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 
 function isMemberOfEvent(event: Event, userId: string, eventProfiles: { eventId: string; participants: string[] }[], isUserOrganizer: (e: Event, u: string) => boolean, isUserEventMember: (e: Event, u: string) => boolean, isEventPast: (e: Event) => boolean): boolean {
   if (!isEventPast(event)) return isUserEventMember(event, userId);
@@ -13,6 +14,7 @@ function isMemberOfEvent(event: Event, userId: string, eventProfiles: { eventId:
 }
 
 export default function MyEventsScreen() {
+  const { t } = useLanguage();
   const { eventId } = useLocalSearchParams();
   const { events, eventProfiles, isUserOrganizer, isUserEventMember, isEventPast } = useEvents();
   const { user: authUser } = useAuth();
@@ -24,7 +26,7 @@ export default function MyEventsScreen() {
   if (!currentUserId) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <Text style={styles.loginPromptTitle}>Авторизуйтесь</Text>
+        <Text style={styles.loginPromptTitle}>{t.auth.pleaseSignIn}</Text>
         <Text style={styles.loginPromptText}>
           Войдите, чтобы увидеть ваши события и участие в мероприятиях.
         </Text>
@@ -93,7 +95,7 @@ export default function MyEventsScreen() {
           style={styles.backButton}
           onPress={() => setShowEventFeed(false)}
         >
-          <Text style={styles.backText}>← Назад</Text>
+          <Text style={styles.backText}>← {t.common.back}</Text>
         </TouchableOpacity>
         <ScrollView 
           ref={scrollViewRef} 
@@ -146,8 +148,8 @@ export default function MyEventsScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Мои события</Text>
-      <Text style={styles.subtitle}>Выберите событие для просмотра</Text>
+      <Text style={styles.title}>{t.profile.myEventsTitle}</Text>
+      <Text style={styles.subtitle}>{t.profile.selectEventToView}</Text>
     </View>
   );
 }

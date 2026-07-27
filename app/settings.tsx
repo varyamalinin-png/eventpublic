@@ -829,7 +829,7 @@ const removeAvatarFromServer = async () => {
                         style={[styles.accountActionButton, styles.accountActionSecondary]}
                         onPress={() => confirmRemoveAccount(account.userId)}
                       >
-                        <Text style={styles.accountActionSecondaryText}>Удалить</Text>
+                        <Text style={styles.accountActionSecondaryText}>{t.common.delete}</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -1024,7 +1024,7 @@ const removeAvatarFromServer = async () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Изменить электронную почту</Text>
+            <Text style={styles.modalTitle}>{t.settings.changeEmailTitle}</Text>
             <TextInput
               style={styles.modalInput}
               placeholder={t.settings.accountSecurity.newEmail}
@@ -1051,14 +1051,14 @@ const removeAvatarFromServer = async () => {
                   setEmailPassword('');
                 }}
               >
-                <Text style={styles.modalButtonText}>Отмена</Text>
+                <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonConfirm, updating && styles.modalButtonDisabled]}
                 onPress={handleChangeEmail}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>{t.common.save}</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1074,7 +1074,7 @@ const removeAvatarFromServer = async () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Сменить пароль</Text>
+            <Text style={styles.modalTitle}>{t.settings.changePasswordTitle}</Text>
             <TextInput
               style={styles.modalInput}
               placeholder={t.settings.accountSecurity.currentPassword}
@@ -1109,14 +1109,14 @@ const removeAvatarFromServer = async () => {
                   setConfirmPassword('');
                 }}
               >
-                <Text style={styles.modalButtonText}>Отмена</Text>
+                <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonConfirm, updating && styles.modalButtonDisabled]}
                 onPress={handleChangePassword}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>{t.common.save}</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1132,7 +1132,7 @@ const removeAvatarFromServer = async () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Изменить имя</Text>
+            <Text style={styles.modalTitle}>{t.settings.changeNameTitle}</Text>
             <TextInput
               style={styles.modalInput}
               placeholder={t.settings.profileVisibility.name}
@@ -1148,14 +1148,14 @@ const removeAvatarFromServer = async () => {
                   setEditName('');
                 }}
               >
-                <Text style={styles.modalButtonText}>Отмена</Text>
+                <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonConfirm, updating && styles.modalButtonDisabled]}
                 onPress={handleUpdateName}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>{t.common.save}</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1171,7 +1171,7 @@ const removeAvatarFromServer = async () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Выберите пол</Text>
+            <Text style={styles.modalTitle}>{t.settings.selectGenderTitle}</Text>
             {['male', 'female', 'other', 'prefer_not_to_say'].map((gender) => (
               <TouchableOpacity
                 key={gender}
@@ -1191,14 +1191,14 @@ const removeAvatarFromServer = async () => {
                   setEditGender('');
                 }}
               >
-                <Text style={styles.modalButtonText}>Отмена</Text>
+                <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonConfirm, updating && styles.modalButtonDisabled]}
                 onPress={handleUpdateGender}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>{t.common.save}</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1218,7 +1218,7 @@ const removeAvatarFromServer = async () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Дата рождения</Text>
+            <Text style={styles.modalTitle}>{t.settings.birthDateTitle}</Text>
             
             {Platform.OS === 'web' ? (
               <input
@@ -1291,14 +1291,14 @@ const removeAvatarFromServer = async () => {
                   setShowDatePicker(false);
                 }}
               >
-                <Text style={styles.modalButtonText}>Отмена</Text>
+                <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonConfirm, updating && styles.modalButtonDisabled]}
                 onPress={handleUpdateDateOfBirth}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>{t.common.save}</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1314,7 +1314,7 @@ const removeAvatarFromServer = async () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Изменить город</Text>
+            <Text style={styles.modalTitle}>{t.settings.changeCityTitle}</Text>
             <TextInput
               style={styles.modalInput}
               placeholder={t.settings.profileVisibility.city}
@@ -1330,21 +1330,21 @@ const removeAvatarFromServer = async () => {
                   setEditCity('');
                 }}
               >
-                <Text style={styles.modalButtonText}>Отмена</Text>
+                <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonConfirm, updating && styles.modalButtonDisabled]}
                 onPress={handleUpdateCity}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>{t.common.save}</Text>}
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Модальное окно редактирования "О себе" */}
+      {/* Модальное окно редактирования {t.settings.aboutMeTitle} */}
       <Modal
         visible={showBioModal}
         transparent={true}
@@ -1353,7 +1353,7 @@ const removeAvatarFromServer = async () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>О себе</Text>
+            <Text style={styles.modalTitle}>{t.settings.aboutMeTitle}</Text>
             <TextInput
               style={[styles.modalInput, { minHeight: 100, textAlignVertical: 'top' }]}
               placeholder={t.settings.profileVisibility.bio}
@@ -1371,14 +1371,14 @@ const removeAvatarFromServer = async () => {
                   setEditBio('');
                 }}
               >
-                <Text style={styles.modalButtonText}>Отмена</Text>
+                <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonConfirm, updating && styles.modalButtonDisabled]}
                 onPress={handleUpdateBio}
                 disabled={updating}
               >
-                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>Сохранить</Text>}
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>{t.common.save}</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -1394,8 +1394,8 @@ const removeAvatarFromServer = async () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Напоминания о событиях</Text>
-            <Text style={styles.modalSubtitle}>За сколько часов напоминать о событии?</Text>
+            <Text style={styles.modalTitle}>{t.settings.remindersTitle}</Text>
+            <Text style={styles.modalSubtitle}>{t.settings.remindersQuestion}</Text>
             <TextInput
               style={styles.modalInput}
               placeholder={t.settings.events.hoursCount}
@@ -1409,7 +1409,7 @@ const removeAvatarFromServer = async () => {
                 style={[styles.modalButton, styles.modalButtonCancel]}
                 onPress={() => setShowReminderModal(false)}
               >
-                <Text style={styles.modalButtonText}>Отмена</Text>
+                <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonConfirm]}
@@ -1418,7 +1418,7 @@ const removeAvatarFromServer = async () => {
                   Alert.alert(t.messages.remindersConfigured);
                 }}
               >
-                <Text style={styles.modalButtonText}>Сохранить</Text>
+                <Text style={styles.modalButtonText}>{t.common.save}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1489,7 +1489,7 @@ const removeAvatarFromServer = async () => {
                 onPress={() => setShowAvatarModal(false)}
                 disabled={avatarUploading}
               >
-                <Text style={styles.modalButtonText}>Отмена</Text>
+                <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -1500,7 +1500,7 @@ const removeAvatarFromServer = async () => {
                 onPress={showImageOptions}
                 disabled={avatarUploading}
               >
-                <Text style={styles.modalButtonText}>Изменить</Text>
+                <Text style={styles.modalButtonText}>{t.common.change}</Text>
               </TouchableOpacity>
             </View>
           </View>

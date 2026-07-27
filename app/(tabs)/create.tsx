@@ -2097,7 +2097,7 @@ export default function CreateEventScreen() {
             {/* Раздел таргета для бизнес-аккаунтов */}
             {authUser?.accountType === 'business' && (
               <>
-                <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Таргетинг (платная услуга)</Text>
+                <Text style={[styles.sectionTitle, { marginTop: 24 }]}>{t.createEvent.targetingPaid}</Text>
                 <Text style={styles.label}>
                   Настройте таргетинг для продвижения вашего события
                 </Text>
@@ -2121,7 +2121,7 @@ export default function CreateEventScreen() {
                 
                 {formData.targeting?.enabled && (
                   <View style={styles.targetingContainer}>
-                    <Text style={styles.label}>Необходимый охват (количество показов)</Text>
+                    <Text style={styles.label}>{t.createEvent.requiredReach}</Text>
                     <TextInput
                       style={styles.input}
                       value={formData.targeting?.reach?.toString() || ''}
@@ -2141,7 +2141,7 @@ export default function CreateEventScreen() {
                       keyboardType="numeric"
                     />
                     
-                    <Text style={styles.label}>Необходимое количество откликов</Text>
+                    <Text style={styles.label}>{t.createEvent.requiredResponses}</Text>
                     <TextInput
                       style={styles.input}
                       value={formData.targeting?.responses?.toString() || ''}
@@ -2164,7 +2164,7 @@ export default function CreateEventScreen() {
                     {/* Расчет стоимости таргета */}
                     {formData.targeting?.reach && formData.targeting?.responses && (
                       <View style={styles.targetingPriceContainer}>
-                        <Text style={styles.targetingPriceLabel}>Стоимость таргета:</Text>
+                        <Text style={styles.targetingPriceLabel}>{t.createEvent.targetCost}</Text>
                         <Text style={styles.targetingPrice}>
                           {calculateTargetingPrice(formData.targeting.reach, formData.targeting.responses)} ₽
                         </Text>
@@ -2337,7 +2337,7 @@ export default function CreateEventScreen() {
           
           {currentStep < 3 ? (
             <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
-              <Text style={styles.nextButtonText}>Далее</Text>
+              <Text style={styles.nextButtonText}>{t.common.next}</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity

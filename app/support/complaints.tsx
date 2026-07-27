@@ -179,9 +179,9 @@ export default function SupportComplaintsScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backButton}>← Назад</Text>
+          <Text style={styles.backButton}>← {t.common.back}</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Кабинет поддержки</Text>
+        <Text style={styles.title}>{t.support.office}</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -224,9 +224,9 @@ export default function SupportComplaintsScreen() {
         }
       >
         {loading && complaints.length === 0 ? (
-          <Text style={styles.emptyText}>Загрузка...</Text>
+          <Text style={styles.emptyText}>{t.common.loading}</Text>
         ) : complaints.length === 0 ? (
-          <Text style={styles.emptyText}>Жалоб не найдено</Text>
+          <Text style={styles.emptyText}>{t.support.noComplaints}</Text>
         ) : (
           complaints.map((complaint) => (
             <TouchableOpacity
@@ -277,7 +277,7 @@ export default function SupportComplaintsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Детали жалобы</Text>
+              <Text style={styles.modalTitle}>{t.support.complaintDetails}</Text>
               <TouchableOpacity onPress={() => setShowDetailModal(false)}>
                 <Text style={styles.modalClose}>✕</Text>
               </TouchableOpacity>
@@ -287,26 +287,26 @@ export default function SupportComplaintsScreen() {
               {selectedComplaint && (
                 <>
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Тип</Text>
+                    <Text style={styles.detailLabel}>{t.common.typeLabel}</Text>
                     <Text style={styles.detailValue}>
                       {selectedComplaint.type === 'EVENT' ? t.support.eventWord : t.support.userWord}
                     </Text>
                   </View>
 
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Причина</Text>
+                    <Text style={styles.detailLabel}>{t.common.reasonLabel}</Text>
                     <Text style={styles.detailValue}>{selectedComplaint.reason}</Text>
                   </View>
 
                   {selectedComplaint.description && (
                     <View style={styles.detailSection}>
-                      <Text style={styles.detailLabel}>Описание</Text>
+                      <Text style={styles.detailLabel}>{t.common.descriptionLabel}</Text>
                       <Text style={styles.detailValue}>{selectedComplaint.description}</Text>
                     </View>
                   )}
 
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Жалобу подал</Text>
+                    <Text style={styles.detailLabel}>{t.support.filedBy}</Text>
                     <Text style={styles.detailValue}>
                       {selectedComplaint.reporter.name || selectedComplaint.reporter.username}
                     </Text>
@@ -314,14 +314,14 @@ export default function SupportComplaintsScreen() {
 
                   {selectedComplaint.reportedEvent && (
                     <View style={styles.detailSection}>
-                      <Text style={styles.detailLabel}>Событие</Text>
+                      <Text style={styles.detailLabel}>{t.common.eventLabel}</Text>
                       <Text style={styles.detailValue}>{selectedComplaint.reportedEvent.title}</Text>
                     </View>
                   )}
 
                   {selectedComplaint.reportedUser && (
                     <View style={styles.detailSection}>
-                      <Text style={styles.detailLabel}>Пользователь</Text>
+                      <Text style={styles.detailLabel}>{t.common.userLabel}</Text>
                       <Text style={styles.detailValue}>
                         {selectedComplaint.reportedUser.name || selectedComplaint.reportedUser.username}
                       </Text>
@@ -329,7 +329,7 @@ export default function SupportComplaintsScreen() {
                   )}
 
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Статус</Text>
+                    <Text style={styles.detailLabel}>{t.common.statusLabel}</Text>
                     <View style={[styles.statusBadge, { backgroundColor: STATUS_COLORS[selectedComplaint.status] }]}>
                       <Text style={styles.statusText}>{STATUS_LABELS[selectedComplaint.status]}</Text>
                     </View>
@@ -337,13 +337,13 @@ export default function SupportComplaintsScreen() {
 
                   {selectedComplaint.adminResponse && (
                     <View style={styles.detailSection}>
-                      <Text style={styles.detailLabel}>Ответ</Text>
+                      <Text style={styles.detailLabel}>{t.support.answer}</Text>
                       <Text style={styles.detailValue}>{selectedComplaint.adminResponse}</Text>
                     </View>
                   )}
 
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Дата создания</Text>
+                    <Text style={styles.detailLabel}>{t.common.createdAt}</Text>
                     <Text style={styles.detailValue}>{formatDate(selectedComplaint.createdAt)}</Text>
                   </View>
                 </>
@@ -355,7 +355,7 @@ export default function SupportComplaintsScreen() {
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={() => setShowDetailModal(false)}
               >
-                <Text style={styles.cancelButtonText}>Закрыть</Text>
+                <Text style={styles.cancelButtonText}>{t.common.close}</Text>
               </TouchableOpacity>
               {selectedComplaint?.status === 'PENDING' && (
                 <>
@@ -363,19 +363,19 @@ export default function SupportComplaintsScreen() {
                     style={[styles.modalButton, styles.responseButton]}
                     onPress={() => setShowResponseModal(true)}
                   >
-                    <Text style={styles.responseButtonText}>Ответить</Text>
+                    <Text style={styles.responseButtonText}>{t.support.reply}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.modalButton, styles.resolveButton]}
                     onPress={() => handleResolve('RESOLVED')}
                   >
-                    <Text style={styles.resolveButtonText}>Решить</Text>
+                    <Text style={styles.resolveButtonText}>{t.support.resolve}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.modalButton, styles.rejectButton]}
                     onPress={() => handleResolve('REJECTED')}
                   >
-                    <Text style={styles.rejectButtonText}>Отклонить</Text>
+                    <Text style={styles.rejectButtonText}>{t.support.reject}</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -394,7 +394,7 @@ export default function SupportComplaintsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Ответ на жалобу</Text>
+              <Text style={styles.modalTitle}>{t.support.replyToComplaint}</Text>
               <TouchableOpacity onPress={() => setShowResponseModal(false)}>
                 <Text style={styles.modalClose}>✕</Text>
               </TouchableOpacity>
@@ -402,7 +402,7 @@ export default function SupportComplaintsScreen() {
 
             <ScrollView style={styles.modalScroll}>
               <View style={styles.detailSection}>
-                <Text style={styles.detailLabel}>Ваш ответ</Text>
+                <Text style={styles.detailLabel}>{t.support.yourAnswer}</Text>
                 <TextInput
                   style={styles.responseInput}
                   placeholder={t.support.replyPlaceholder}
@@ -421,13 +421,13 @@ export default function SupportComplaintsScreen() {
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={() => setShowResponseModal(false)}
               >
-                <Text style={styles.cancelButtonText}>Отмена</Text>
+                <Text style={styles.cancelButtonText}>{t.common.cancel}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.sendButton]}
                 onPress={handleSendResponse}
               >
-                <Text style={styles.sendButtonText}>Отправить</Text>
+                <Text style={styles.sendButtonText}>{t.common.send}</Text>
               </TouchableOpacity>
             </View>
           </View>

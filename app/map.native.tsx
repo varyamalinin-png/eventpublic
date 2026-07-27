@@ -353,7 +353,7 @@ export default function MapScreen() {
         {mapError ? (
           <View style={styles.noEventsContainer}>
             <Text style={styles.noEventsText}>⚠️</Text>
-            <Text style={styles.noEventsTitle}>Ошибка загрузки карты</Text>
+            <Text style={styles.noEventsTitle}>{t.map.loadError}</Text>
             <Text style={styles.noEventsSubtitle}>{mapError}</Text>
             <TouchableOpacity 
               style={styles.retryButton}
@@ -362,7 +362,7 @@ export default function MapScreen() {
                 setMapReady(false);
               }}
             >
-              <Text style={styles.retryButtonText}>Попробовать снова</Text>
+              <Text style={styles.retryButtonText}>{t.common.tryAgain}</Text>
             </TouchableOpacity>
           </View>
         ) : eventsToShow.length === 0 ? (

@@ -297,9 +297,9 @@ export default function SelectLocationScreen() {
           style={styles.backButton}
           onPress={() => router.back()}
         >
-          <Text style={styles.backButtonText}>← Назад</Text>
+          <Text style={styles.backButtonText}>← {t.common.back}</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Выберите место на карте</Text>
+        <Text style={styles.headerTitle}>{t.map.selectOnMap}</Text>
       </View>
 
       {/* Поиск */}
@@ -359,7 +359,7 @@ export default function SelectLocationScreen() {
           onPress={handleConfirm}
           disabled={!selectedLocation}
         >
-          <Text style={styles.confirmButtonText}>Подтвердить место</Text>
+          <Text style={styles.confirmButtonText}>{t.map.confirmPlace}</Text>
         </TouchableOpacity>
       </View>
     </View>

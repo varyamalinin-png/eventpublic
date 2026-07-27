@@ -270,8 +270,8 @@ export default function MessagesTab() {
         {filteredChats.length === 0 && (
           <View style={styles.emptyContainer}>
             <AppIcon name="inbox" size={60} color="rgba(244,244,245,0.25)" />
-            <Text style={styles.emptyTitle}>Пока нет сообщений</Text>
-            <Text style={styles.emptyText}>Начните общение через события</Text>
+            <Text style={styles.emptyTitle}>{t.inbox.noMessagesYet}</Text>
+            <Text style={styles.emptyText}>{t.inbox.startViaEvents}</Text>
           </View>
         )}
         {filteredChats.map((chat: Chat) => {
@@ -572,7 +572,7 @@ export default function MessagesTab() {
             </View>
             <ScrollView style={styles.modalScrollView}>
               {availableChatsForModal.length === 0 ? (
-                <Text style={styles.modalEmptyText}>Нет доступных чатов для добавления</Text>
+                <Text style={styles.modalEmptyText}>{t.inbox.noChatsToAdd}</Text>
               ) : (
                 availableChatsForModal.map(chat => (
                   <TouchableOpacity
@@ -608,7 +608,7 @@ export default function MessagesTab() {
               {isAddingChats ? (
                 <ActivityIndicator color="#f4f4f5" />
               ) : (
-                <Text style={styles.modalButtonText}>Добавить</Text>
+                <Text style={styles.modalButtonText}>{t.common.add}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -628,7 +628,7 @@ export default function MessagesTab() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Удалить чат</Text>
+              <Text style={styles.modalTitle}>{t.inbox.deleteChat}</Text>
               <TouchableOpacity
                 onPress={() => {
                   setShowDeleteChatModal(false);
@@ -694,7 +694,7 @@ export default function MessagesTab() {
                         }
                       }}
                     >
-                      <Text style={styles.deleteOptionText}>Удалить чат и выйти из события</Text>
+                      <Text style={styles.deleteOptionText}>{t.inbox.deleteChatAndLeave}</Text>
                     </TouchableOpacity>
                     
                     <TouchableOpacity
@@ -713,7 +713,7 @@ export default function MessagesTab() {
                         }
                       }}
                     >
-                      <Text style={styles.deleteOptionText}>Только покинуть чат</Text>
+                      <Text style={styles.deleteOptionText}>{t.inbox.onlyLeaveChat}</Text>
                     </TouchableOpacity>
                   </View>
                 ) : (
@@ -730,7 +730,7 @@ export default function MessagesTab() {
                       }
                     }}
                   >
-                    <Text style={styles.modalButtonText}>Удалить</Text>
+                    <Text style={styles.modalButtonText}>{t.common.delete}</Text>
                   </TouchableOpacity>
                 )}
               </>
@@ -762,7 +762,7 @@ export default function MessagesTab() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Выберите папку</Text>
+              <Text style={styles.modalTitle}>{t.folder.selectFolder}</Text>
               <TouchableOpacity
                 onPress={() => {
                   setShowFolderSelectModal(false);
@@ -811,7 +811,7 @@ export default function MessagesTab() {
                 })}
               
               {allFolders.filter(folder => folder.type === 'custom').length === 0 && (
-                <Text style={styles.modalEmptyText}>Нет пользовательских папок</Text>
+                <Text style={styles.modalEmptyText}>{t.inbox.noCustomFolders}</Text>
               )}
             </ScrollView>
             
@@ -842,7 +842,7 @@ export default function MessagesTab() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Передать роль организатора</Text>
+              <Text style={styles.modalTitle}>{t.events.transferOrganizer}</Text>
               <TouchableOpacity
                 onPress={() => {
                   setShowTransferOrganizerModal(false);
@@ -949,7 +949,7 @@ export default function MessagesTab() {
               }}
               disabled={!selectedNewOrganizerId}
             >
-              <Text style={styles.modalButtonText}>Передать роль</Text>
+              <Text style={styles.modalButtonText}>{t.inbox.transferRole}</Text>
             </TouchableOpacity>
             
             <TouchableOpacity

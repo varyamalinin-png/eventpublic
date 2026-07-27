@@ -158,7 +158,7 @@ export default function PaymentScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>← Назад</Text>
+          <Text style={styles.backButtonText}>← {t.common.back}</Text>
         </TouchableOpacity>
         <Text style={styles.title}>
           {paymentType === 'event_placement' ? t.createEvent.eventPlacementPayment : 'Оплата участия'}
@@ -169,15 +169,15 @@ export default function PaymentScreen() {
       <View style={styles.eventInfo}>
         {paymentType === 'event_placement' ? (
           <>
-            <Text style={styles.eventTitle}>Оплата размещения события</Text>
+            <Text style={styles.eventTitle}>{t.payment.placementTitle}</Text>
             <View style={styles.priceBreakdown}>
               <Text style={styles.priceRow}>
-                <Text style={styles.priceLabel}>Размещение события:</Text>
+                <Text style={styles.priceLabel}>{t.payment.placement}</Text>
                 <Text style={styles.priceValue}> {placementPrice} ₽</Text>
               </Text>
               {targetingPrice > 0 && (
                 <Text style={styles.priceRow}>
-                  <Text style={styles.priceLabel}>Таргетинг:</Text>
+                  <Text style={styles.priceLabel}>{t.payment.targeting}</Text>
                   <Text style={styles.priceValue}> {targetingPrice} ₽</Text>
                   {targetingData && (
                     <Text style={styles.priceSubtext}>
@@ -187,7 +187,7 @@ export default function PaymentScreen() {
                 </Text>
               )}
               <View style={styles.totalPriceContainer}>
-                <Text style={styles.totalPriceLabel}>Итого:</Text>
+                <Text style={styles.totalPriceLabel}>{t.payment.total}</Text>
                 <Text style={styles.totalPriceValue}> {totalPrice} ₽</Text>
               </View>
             </View>
@@ -202,9 +202,9 @@ export default function PaymentScreen() {
 
       {/* Форма оплаты */}
       <View style={styles.paymentForm}>
-        <Text style={styles.sectionTitle}>Данные карты</Text>
+        <Text style={styles.sectionTitle}>{t.payment.cardData}</Text>
         
-        <Text style={styles.label}>Номер карты</Text>
+        <Text style={styles.label}>{t.payment.cardNumber}</Text>
         <TextInput
           style={styles.input}
           placeholder="1234 5678 9012 3456"
@@ -217,7 +217,7 @@ export default function PaymentScreen() {
 
         <View style={styles.row}>
           <View style={styles.halfWidth}>
-            <Text style={styles.label}>Срок действия</Text>
+            <Text style={styles.label}>{t.payment.expiry}</Text>
             <TextInput
               style={styles.input}
               placeholder="MM/YY"
@@ -243,7 +243,7 @@ export default function PaymentScreen() {
           </View>
         </View>
 
-        <Text style={styles.label}>Имя держателя карты</Text>
+        <Text style={styles.label}>{t.payment.cardHolder}</Text>
         <TextInput
           style={styles.input}
           placeholder={t.payment.cardHolderExample}

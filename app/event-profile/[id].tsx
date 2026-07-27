@@ -250,7 +250,7 @@ export default function EventProfileScreen() {
     return (
       <View style={styles.container}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0a0a0c' }}>
-          <Text style={{ color: '#FF8D32', fontSize: 16 }}>Загрузка события...</Text>
+          <Text style={{ color: '#FF8D32', fontSize: 16 }}>{t.eventProfile.loadingEvent}</Text>
         </View>
       </View>
     );
@@ -1225,7 +1225,7 @@ export default function EventProfileScreen() {
                       !event.coordinates ? (
                         <View style={epHeaderStyles.infoItem}>
                           <AppIcon name="pin" size={12} color="rgba(255,255,255,0.8)" />
-                          <Text style={epHeaderStyles.infoText}>Онлайн</Text>
+                          <Text style={epHeaderStyles.infoText}>{t.eventProfile.online}</Text>
                         </View>
                       ) : (
                         <TouchableOpacity style={epHeaderStyles.infoItem} onPress={() => router.push(`/map?eventId=${eventId}`)}>
@@ -1605,7 +1605,7 @@ export default function EventProfileScreen() {
                       <View style={[styles.checkboxBox, combineIntoOnePost && styles.checkboxBoxChecked]}>
                         {combineIntoOnePost && <Text style={styles.checkboxCheckmark}>✓</Text>}
                       </View>
-                      <Text style={styles.checkboxLabel}>Объединить в один пост</Text>
+                      <Text style={styles.checkboxLabel}>{t.eventProfile.mergeIntoOnePost}</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -1729,10 +1729,10 @@ export default function EventProfileScreen() {
             ) : contentType === 'music' ? (
               <View>
                 {/* Поиск треков */}
-                <Text style={styles.demoLabel}>Демо-версия поиска треков</Text>
+                <Text style={styles.demoLabel}>{t.eventProfile.demoTrackSearch}</Text>
                 <TextInput
                   style={styles.editInput}
-                  placeholder="Введите название трека для демо-поиска..."
+                  placeholder={t.eventProfile.trackSearchPh}
                   placeholderTextColor="#999"
                   value={searchQuery}
                   onChangeText={(text) => {
@@ -1774,7 +1774,7 @@ export default function EventProfileScreen() {
                 {/* Индикатор загрузки */}
                 {isSearching && (
                   <View style={styles.loadingContainer}>
-                    <Text style={styles.loadingText}>Поиск треков...</Text>
+                    <Text style={styles.loadingText}>{t.eventProfile.searchingTracks}</Text>
                   </View>
                 )}
                 
@@ -1797,7 +1797,7 @@ export default function EventProfileScreen() {
                   <>
                     <TextInput
                       style={styles.editInput}
-                      placeholder="Ссылка на трек (SoundCloud)"
+                      placeholder={t.eventProfile.trackLink}
                       placeholderTextColor="#999"
                       value={musicUrl}
                       onChangeText={setMusicUrl}
@@ -1805,7 +1805,7 @@ export default function EventProfileScreen() {
                     
                     <TextInput
                       style={styles.editInput}
-                      placeholder="Название трека"
+                      placeholder={t.eventProfile.trackName}
                       placeholderTextColor="#999"
                       value={musicTitle}
                       onChangeText={setMusicTitle}
@@ -1888,7 +1888,7 @@ export default function EventProfileScreen() {
                       // setContentType(null);
                     }
                   }}>
-                    <Text style={styles.saveButtonText}>Добавить</Text>
+                    <Text style={styles.saveButtonText}>{t.common.add}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1937,7 +1937,7 @@ export default function EventProfileScreen() {
           <View style={styles.shareModalContent}>
             <View style={styles.actionsModalHandle} />
             <View style={styles.shareModalHeader}>
-              <Text style={styles.shareModalTitle}>Передать роль организатора</Text>
+              <Text style={styles.shareModalTitle}>{t.events.transferOrganizer}</Text>
               <TouchableOpacity
                 onPress={() => {
                   setShowTransferOrganizerModal(false);

@@ -258,7 +258,7 @@ export default function MemoriesScreen() {
   if (!authUser) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <Text style={styles.loginPromptTitle}>Авторизуйтесь</Text>
+        <Text style={styles.loginPromptTitle}>{t.auth.pleaseSignIn}</Text>
         <Text style={styles.loginPromptText}>
           Войдите, чтобы просматривать воспоминания ваших событий и друзей.
         </Text>

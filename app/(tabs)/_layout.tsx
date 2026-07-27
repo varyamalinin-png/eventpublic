@@ -6,6 +6,7 @@ import { useEvents } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
 import { useMemo, useRef, useCallback } from 'react';
 import { createLogger } from '../../utils/logger';
+import { useLanguage } from '../../context/LanguageContext';
 
 const logger = createLogger('TabBadge');
 
@@ -48,6 +49,7 @@ function AnimatedTabBarButton({ children, onPress, accessibilityState, style, ..
 }
 
 export default function TabLayout() {
+  const { t } = useLanguage();
   const isWeb = Platform.OS === 'web';
 
   const { chats, unreadNotificationsCount } = useEvents();
@@ -118,7 +120,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="create"
         options={{
-          title: 'Create',
+          title: t.tabs.create,
           headerShown: false,
           href: isWeb ? null : undefined, // Скрываем на вебе
           tabBarIcon: ({ focused, color }) => (

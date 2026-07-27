@@ -26,7 +26,7 @@ export default function FriendsListScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Друзья</Text>
+        <Text style={styles.title}>{t.profile.friendsTitle}</Text>
       </View>
       
       <FlatList

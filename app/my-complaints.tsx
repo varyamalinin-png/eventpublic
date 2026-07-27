@@ -99,7 +99,7 @@ export default function MyComplaintsScreen() {
         <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <AppIcon name="chevronLeft" size={24} color={Palette.text} />
         </TouchableOpacity>
-        <Text style={styles.title}>Мои жалобы</Text>
+        <Text style={styles.title}>{t.support.myComplaints}</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -113,7 +113,7 @@ export default function MyComplaintsScreen() {
         }
       >
         {loading && complaints.length === 0 ? (
-          <Text style={styles.emptyText}>Загрузка...</Text>
+          <Text style={styles.emptyText}>{t.common.loading}</Text>
         ) : complaints.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>{t.empty.noComplaints}</Text>
@@ -146,14 +146,14 @@ export default function MyComplaintsScreen() {
 
               {complaint.reportedEvent && (
                 <View style={styles.reportedItem}>
-                  <Text style={styles.reportedLabel}>Событие:</Text>
+                  <Text style={styles.reportedLabel}>{t.support.eventPrefix}</Text>
                   <Text style={styles.reportedValue}>{complaint.reportedEvent.title}</Text>
                 </View>
               )}
 
               {complaint.reportedUser && (
                 <View style={styles.reportedItem}>
-                  <Text style={styles.reportedLabel}>Пользователь:</Text>
+                  <Text style={styles.reportedLabel}>{t.support.userPrefix}</Text>
                   <Text style={styles.reportedValue}>
                     {complaint.reportedUser.name || complaint.reportedUser.username}
                   </Text>
@@ -162,7 +162,7 @@ export default function MyComplaintsScreen() {
 
               {complaint.adminResponse && (
                 <View style={styles.responseSection}>
-                  <Text style={styles.responseLabel}>Ответ поддержки:</Text>
+                  <Text style={styles.responseLabel}>{t.support.supportAnswer}</Text>
                   <Text style={styles.responseText}>{complaint.adminResponse}</Text>
                 </View>
               )}

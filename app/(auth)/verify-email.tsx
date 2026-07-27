@@ -152,14 +152,14 @@ export default function VerifyEmailScreen() {
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.content}>
-          <Text style={styles.title}>Подтверждение Email</Text>
+          <Text style={styles.title}>{t.auth.verifyEmailTitle}</Text>
           <Text style={styles.subtitle}>
             Для завершения регистрации необходимо подтвердить ваш email адрес
           </Text>
 
               {/* Инструкция */}
               <View style={styles.instructionBox}>
-                <Text style={styles.instructionTitle}>Как подтвердить email:</Text>
+                <Text style={styles.instructionTitle}>{t.auth.howToVerify}</Text>
                 <View style={styles.instructionList}>
                   <Text style={styles.instructionItem}>
                     1. Проверьте вашу почту ({email || t.auth.usedAtSignUp})
@@ -192,7 +192,7 @@ export default function VerifyEmailScreen() {
 
           {/* Повторная отправка письма */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Не получили письмо?</Text>
+            <Text style={styles.sectionTitle}>{t.auth.notReceived}</Text>
             <Text style={styles.sectionDescription}>
               Введите ваш email и мы отправим письмо с подтверждением повторно
             </Text>
@@ -218,19 +218,19 @@ export default function VerifyEmailScreen() {
               {resending ? (
                 <ActivityIndicator color="#f4f4f5" />
               ) : (
-                <Text style={styles.secondaryButtonText}>Отправить письмо повторно</Text>
+                <Text style={styles.secondaryButtonText}>{t.auth.resendEmail}</Text>
               )}
             </TouchableOpacity>
           </View>
 
           {/* Ввод токена */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Введите токен подтверждения</Text>
+            <Text style={styles.sectionTitle}>{t.auth.enterToken}</Text>
             <Text style={styles.sectionDescription}>
               Скопируйте токен из письма и вставьте его здесь
             </Text>
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Токен подтверждения</Text>
+              <Text style={styles.inputLabel}>{t.auth.tokenLabel}</Text>
               <TextInput
                 style={styles.input}
                 placeholder={t.auth.pasteToken}
@@ -250,7 +250,7 @@ export default function VerifyEmailScreen() {
               {loading ? (
                 <ActivityIndicator color="#f4f4f5" />
               ) : (
-                <Text style={styles.primaryButtonText}>Подтвердить</Text>
+                <Text style={styles.primaryButtonText}>{t.auth.verifyAction}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -260,7 +260,7 @@ export default function VerifyEmailScreen() {
             style={styles.linkButton}
             onPress={() => router.replace('/(auth)/login')}
           >
-            <Text style={styles.linkText}>Вернуться к входу</Text>
+            <Text style={styles.linkText}>{t.auth.backToLogin}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

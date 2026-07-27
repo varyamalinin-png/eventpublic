@@ -161,7 +161,7 @@ function buildMapHtml(
       </div>
     </div>
     <div id="preview-footer">
-      <button id="preview-open" onclick="openEvent()">Открыть событие</button>
+      <button id="preview-open" onclick="openEvent()">{t.map.openEvent}</button>
       <button id="preview-close" onclick="closePreview()">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="rgba(244,244,245,.6)" stroke-width="2" stroke-linecap="round">
           <path d="M1 1l12 12M13 1L1 13"/>
@@ -602,7 +602,7 @@ export default function MapScreen() {
           </View>
         ) : (
           <View style={styles.titlePill}>
-            <Text style={styles.titlePillText} numberOfLines={1}>Карта</Text>
+            <Text style={styles.titlePillText} numberOfLines={1}>{t.map.mapTitle}</Text>
           </View>
         )}
 

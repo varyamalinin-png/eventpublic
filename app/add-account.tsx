@@ -191,16 +191,16 @@ export default function AddAccountScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        {/* Кнопка "Назад" */}
+        {/* Кнопка {t.common.back} */}
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
         >
           <Ionicons name="arrow-back" size={24} color="#f4f4f5" />
-          <Text style={styles.backButtonText}>Назад</Text>
+          <Text style={styles.backButtonText}>{t.common.back}</Text>
         </TouchableOpacity>
 
-        <Text style={styles.title}>Добавить аккаунт</Text>
+        <Text style={styles.title}>{t.auth.addAccountTitle}</Text>
         <Text style={styles.subtitle}>
           {mode === 'login' ? t.auth.signInToExisting : 'Создайте новый аккаунт'}
         </Text>
@@ -270,7 +270,7 @@ export default function AddAccountScreen() {
               {loading ? (
                 <ActivityIndicator color="#f4f4f5" />
               ) : (
-                <Text style={styles.primaryButtonText}>Войти</Text>
+                <Text style={styles.primaryButtonText}>{t.auth.signInAction}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -323,7 +323,7 @@ export default function AddAccountScreen() {
               {loading ? (
                 <ActivityIndicator color="#f4f4f5" />
               ) : (
-                <Text style={styles.primaryButtonText}>Зарегистрироваться</Text>
+                <Text style={styles.primaryButtonText}>{t.auth.signUpAction}</Text>
               )}
             </TouchableOpacity>
           </View>

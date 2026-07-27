@@ -33,6 +33,14 @@ export const en = {
     removeEventsFailed: 'Could not remove events from the folder',
   },
   payment: {
+    placementTitle: 'Event placement payment',
+    placement: 'Event placement:',
+    targeting: 'Targeting:',
+    total: 'Total:',
+    cardData: 'Card details',
+    cardNumber: 'Card number',
+    expiry: 'Expiry date',
+    cardHolder: 'Cardholder name',
     paymentNotSupported: 'This event does not support in-app payment',
     invalidCardNumber: 'Invalid card number',
     paymentSuccessful: 'Payment successful',
@@ -43,6 +51,20 @@ export const en = {
     cardHolderExample: 'John Smith',
   },
   support: {
+    myComplaints: 'My complaints',
+    office: 'Support desk',
+    complaintDetails: 'Complaint details',
+    filedBy: 'Filed by',
+    noComplaints: 'No complaints found',
+    answer: 'Answer',
+    supportAnswer: 'Support answer:',
+    replyToComplaint: 'Reply to complaint',
+    yourAnswer: 'Your answer',
+    reply: 'Reply',
+    resolve: 'Resolve',
+    reject: 'Reject',
+    eventPrefix: 'Event:',
+    userPrefix: 'User:',
     pendingReview: 'Pending review',
     pending: 'Pending',
     reviewed: 'Reviewed',
@@ -57,6 +79,17 @@ export const en = {
     replyPlaceholder: 'Write a reply to the user...',
   },
   auth: {
+    verifyEmailTitle: 'Email verification',
+    howToVerify: 'How to verify your email:',
+    notReceived: 'Did not get the email?',
+    resendEmail: 'Resend email',
+    tokenLabel: 'Verification token',
+    verifyAction: 'Verify',
+    backToLogin: 'Back to sign in',
+    signInAction: 'Sign in',
+    signUpAction: 'Sign up',
+    addAccountTitle: 'Add account',
+    pleaseSignIn: 'Please sign in',
     enterEmailAddress: 'Enter an email address',
     verificationSent: 'A verification email has been sent. Check your inbox (including Spam).',
     emailSent: 'Email sent',
@@ -120,6 +153,17 @@ export const en = {
   },
       // Common
       common: {
+    optional: '(optional)',
+    tryAgain: 'Try again',
+    descriptionLabel: 'Description',
+    nameLabel: 'Name',
+    statusLabel: 'Status',
+    typeLabel: 'Type',
+    reasonLabel: 'Reason',
+    userLabel: 'User',
+    eventLabel: 'Event',
+    change: 'Change',
+    createdAt: 'Created at',
     create: 'Create',
     send: 'Send',
     skip: 'Skip',
@@ -171,6 +215,17 @@ export const en = {
 
   // Inbox
   inbox: {
+    noMessages: 'No messages',
+    startChatting: 'Start the conversation',
+    noMessagesYet: 'No messages yet',
+    startViaEvents: 'Start chatting through events',
+    noChatsToAdd: 'No chats available to add',
+    noCustomFolders: 'No custom folders',
+    deleteChat: 'Delete chat',
+    deleteChatAndLeave: 'Delete chat and leave the event',
+    onlyLeaveChat: 'Only leave the chat',
+    transferRole: 'Transfer role',
+    pressToOpen: 'Tap to open',
     messages: 'Messages',
     notifications: 'Notifications',
     incoming: 'Incoming',
@@ -197,6 +252,9 @@ export const en = {
 
   // Profile
   profile: {
+    myEventsTitle: 'My events',
+    selectEventToView: 'Pick an event to view',
+    friendsTitle: 'Friends',
     loadError: 'Failed to load profile data',
     selectAtLeastOneEvent: 'Select at least one event',
     deleteEventsQuestion: 'Delete events?',
@@ -246,6 +304,15 @@ export const en = {
 
   // Settings
   settings: {
+    changeEmailTitle: 'Change email',
+    changePasswordTitle: 'Change password',
+    changeNameTitle: 'Change name',
+    selectGenderTitle: 'Select gender',
+    birthDateTitle: 'Date of birth',
+    changeCityTitle: 'Change city',
+    aboutMeTitle: 'About me',
+    remindersTitle: 'Event reminders',
+    remindersQuestion: 'How many hours before an event should we remind you?',
     title: 'Settings',
     authorize: 'Authorize',
     authorizePrompt: 'Log in to manage profile settings.',
@@ -610,6 +677,11 @@ export const en = {
 
   // Create Event
   createEvent: {
+    targetingPaid: 'Targeting (paid service)',
+    requiredReach: 'Required reach (impressions)',
+    requiredResponses: 'Required number of responses',
+    targetCost: 'Targeting cost:',
+    newEventTitle: 'New event',
     imagePickFailed: 'Could not pick an image. Please try again.',
     signInToCreate: 'Sign in to create events.',
     changesSavedShort: 'Changes saved.',
@@ -839,6 +911,11 @@ export const en = {
 
   // Event Profile
   eventProfile: {
+    loadingEvent: 'Loading event...',
+    online: 'Online',
+    demoTrackSearch: 'Demo track search',
+    trackSearchPh: 'Enter a track name for the demo search...',
+    searchingTracks: 'Searching tracks...',
     mergeIntoOnePost: 'merge into one post',
     authorization: 'Authorization',
     photoPickFailed: 'Could not pick a photo',
@@ -869,6 +946,11 @@ export const en = {
 
   // Map
   map: {
+    mapTitle: 'Map',
+    loadError: 'Map failed to load',
+    selectOnMap: 'Pick a place on the map',
+    confirmPlace: 'Confirm place',
+    openEvent: 'Open event',
     selectedPlace: 'Selected place',
     coordinates: 'Coordinates: ',
     searchAddress: 'Search address...',

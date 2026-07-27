@@ -1,22 +1,24 @@
 import { View, Text, TextInput, Button, StyleSheet } from 'react-native';
+import { useLanguage } from '../context/LanguageContext';
 
 export default function CreateEvent() {
+  const { t } = useLanguage();
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Новое событие</Text>
+      <Text style={styles.title}>{t.createEvent.newEventTitle}</Text>
       
       <TextInput 
         style={styles.input}
-        placeholder="Название"
+        placeholder={t.common.nameLabel}
       />
       
       <TextInput
         style={styles.input}
-        placeholder="Описание"
+        placeholder={t.common.descriptionLabel}
         multiline
       />
       
-      <Button title="Создать" onPress={() => alert('Событие создано!')} />
+      <Button title={t.common.create} onPress={() => alert('Событие создано!')} />
     </View>
   );
 }

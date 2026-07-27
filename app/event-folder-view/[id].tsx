@@ -74,7 +74,7 @@ export default function EventFolderViewScreen() {
           style={styles.backButton}
           onPress={() => router.back()}
         >
-          <Text style={styles.backText}>← Назад</Text>
+          <Text style={styles.backText}>← {t.common.back}</Text>
         </TouchableOpacity>
 
         {/* Карточка папки в формате ленты */}

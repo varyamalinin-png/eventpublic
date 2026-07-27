@@ -80,7 +80,7 @@ export default function SavedScreen() {
         />
         <View style={styles.emptyContainer}>
           <AppIcon name="lock" size={60} color="rgba(244,244,245,0.25)" />
-          <Text style={styles.emptyTitle}>Войдите в аккаунт</Text>
+          <Text style={styles.emptyTitle}>{t.auth.signInToAccount}</Text>
           <Text style={styles.emptyText}>
             Авторизуйтесь, чтобы просматривать сохранённые события
           </Text>

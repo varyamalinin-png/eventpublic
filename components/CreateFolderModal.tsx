@@ -128,7 +128,7 @@ export default function CreateFolderModal({ visible = true, onClose, onSubmit }:
 
         {/* Description field */}
         <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Описание <Text style={styles.fieldOptional}>(необязательно)</Text></Text>
+          <Text style={styles.fieldLabel}>{t.common.descriptionLabel} <Text style={styles.fieldOptional}>{t.common.optional}</Text></Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             placeholder={t.folder.addDescription}

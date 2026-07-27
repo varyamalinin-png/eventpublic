@@ -299,8 +299,8 @@ export default function ChatScreen() {
             >
               <View style={styles.eventPlaceholder}>
                 <Text style={{ fontSize: 28, marginBottom: 6 }}>📅</Text>
-                <Text style={styles.eventPlaceholderText}>Событие</Text>
-                <Text style={styles.eventPlaceholderSubtext}>Нажмите, чтобы открыть</Text>
+                <Text style={styles.eventPlaceholderText}>{t.common.eventLabel}</Text>
+                <Text style={styles.eventPlaceholderSubtext}>{t.inbox.pressToOpen}</Text>
               </View>
               <Text style={styles.messageTime}>
                 {message.createdAt.toLocaleTimeString('ru-RU', {
@@ -517,8 +517,8 @@ export default function ChatScreen() {
           messages.map((message, index) => renderMessage(message, index))
         ) : (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>Нет сообщений</Text>
-            <Text style={styles.emptySubtext}>Начните общение</Text>
+            <Text style={styles.emptyText}>{t.inbox.noMessages}</Text>
+            <Text style={styles.emptySubtext}>{t.inbox.startChatting}</Text>
           </View>
         )}
       </ScrollView>

@@ -571,7 +571,7 @@ export default function ExploreScreen() {
   const removeFilter = (filterType: keyof FilterOptions | 'participantsRange' | 'organizerAgeRange' | 'dateRange', value?: string) => {
     if (filterType === 'selectedTags' && value) {
       const currentTags = filters.selectedTags || [];
-      const newTags = currentTags.filter(t => t !== value);
+      const newTags = currentTags.filter(item => item !== value);
       setFilters({ ...filters, selectedTags: newTags.length > 0 ? newTags : undefined });
     } else if (filterType === 'participantsRange') {
       // Удаляем оба фильтра участников
@@ -1024,7 +1024,7 @@ export default function ExploreScreen() {
                       onPress={() => {
                         const currentTags = filters.selectedTags || [];
                         const newTags = isSelected
-                          ? currentTags.filter(t => t !== tag)
+                          ? currentTags.filter(item => item !== tag)
                           : [...currentTags, tag];
                         setFilters({ ...filters, selectedTags: newTags.length > 0 ? newTags : undefined });
                       }}
