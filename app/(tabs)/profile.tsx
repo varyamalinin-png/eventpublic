@@ -583,6 +583,42 @@ export default function ProfileScreen() {
   // Стабильная ссылка вместо новой стрелки на каждый рендер сетки
   const getFilteredPress = useStableItemHandler(filteredEvents, handleMiniaturePress);
 
+  // Только прошедшее событие можно добавить в папку
+  const pastEventIds = useMemo(() => new Set(pastEvents.map((e: Event) => e.id)), [pastEvents]);
+
+  // Сетка собирается из трёх независимых списков — искать событие по id надо во
+  // всех, иначе обработчик молча не найдёт его и ничего не сделает
+  const gridEvents = useMemo(() => {
+    const byId = new Map<string, Event>();
+    for (const e of [...organizedEvents, ...participatedEvents, ...pastEvents]) byId.set(e.id, e);
+    return Array.from(byId.values());
+  }, [organizedEvents, participatedEvents, pastEvents]);
+
+  // Сетка профиля: инлайновые стрелки в onMiniaturePress/onLongPress давали новую
+  // ссылку на каждый рендер и отключали memo у всех карточек. Обработчики читаются
+  // из рефа в момент вызова, поэтому selectMode и pastEventIds всегда свежие.
+  const getGridPress = useStableItemHandler(gridEvents, (event: Event) => {
+    if (!selectMode) {
+      handleMiniaturePress(event);
+      return;
+    }
+    if (!pastEventIds.has(event.id)) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedEventIds(prev => {
+      const next = new Set(prev);
+      if (next.has(event.id)) next.delete(event.id);
+      else next.add(event.id);
+      return next;
+    });
+  });
+
+  const getGridLongPress = useStableItemHandler(gridEvents, (event: Event) => {
+    if (!pastEventIds.has(event.id)) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setSelectMode(true);
+    setSelectedEventIds(new Set([event.id]));
+  });
+
   // Отладочная информация при каждом рендере (убрано для уменьшения логов)
   // useEffect(() => {
   //   logger.debug('useEffect showEventFeed', { showEventFeed });
@@ -1051,9 +1087,6 @@ export default function ProfileScreen() {
               return rows;
             };
 
-            // Только прошедшее событие можно добавить в папку
-            const pastEventIds = new Set(pastEvents.map((e: Event) => e.id));
-
             const renderGrid = (items: GridItem[]) => {
               if (items.length === 0) {
                 return <Text style={styles.emptyText}>{t.empty.noEvents}</Text>;
@@ -1093,27 +1126,8 @@ export default function ProfileScreen() {
                               mediaAspectRatio={event.mediaAspectRatio}
                               participantsList={event.participantsList}
                               participantsData={event.participantsData}
-                              onMiniaturePress={() => {
-                                if (selectMode) {
-                                  // Текущие и будущие события в папку не добавляются
-                                  if (!selectable) return;
-                                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                  setSelectedEventIds(prev => {
-                                    const next = new Set(prev);
-                                    if (next.has(event.id)) next.delete(event.id);
-                                    else next.add(event.id);
-                                    return next;
-                                  });
-                                } else {
-                                  handleMiniaturePress(event);
-                                }
-                              }}
-                              onLongPress={() => {
-                                if (!selectable) return;
-                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                setSelectMode(true);
-                                setSelectedEventIds(new Set([event.id]));
-                              }}
+                              onMiniaturePress={getGridPress(event.id)}
+                              onLongPress={getGridLongPress(event.id)}
                             />
                             {selectMode && selectable && (
                               <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 14, borderWidth: isSelected ? 3 : 0, borderColor: '#FF8D32', backgroundColor: isSelected ? 'transparent' : 'rgba(0,0,0,0.45)' }} pointerEvents="none">
