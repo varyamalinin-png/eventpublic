@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, KeyboardAvoidingView, Platform, Dimensions, ActivityIndicator, Alert, Modal } from 'react-native';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useStableItemHandler } from '../../../hooks/useStableItemHandler';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEvents } from '../../../context/EventsContext';
 import { useLanguage } from '../../../context/LanguageContext';
@@ -80,6 +81,12 @@ export default function ChatScreen() {
       .filter(message => message.chatId === chatId)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   }, [chatMessages, chatId]);
+
+  // История чата не ограничена, а инлайновая стрелка сбрасывала memo
+  // у каждой карточки события в переписке
+  const getEventPress = useStableItemHandler(messages, (message: any) =>
+    router.push(`/event-profile/${message.eventId}`)
+  );
 
   useEffect(() => {
     if (!chatId) return;
@@ -351,7 +358,7 @@ export default function ChatScreen() {
                   participantsData={event.participantsData}
                   showSwipeAction={false}
                   showOrganizerAvatar={true}
-                  onMiniaturePress={() => router.push(`/event-profile/${message.eventId}`)}
+                  onMiniaturePress={getEventPress(message.id)}
                 />
               </View>
               <Text style={styles.messageTime}>
