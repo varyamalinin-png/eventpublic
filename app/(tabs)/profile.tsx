@@ -713,7 +713,7 @@ export default function ProfileScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.centered}>
-          <Text style={styles.emptyText}>Ошибка загрузки данных профиля</Text>
+          <Text style={styles.emptyText}>{t.profile.loadError}</Text>
         </View>
       </View>
     );
@@ -800,7 +800,7 @@ export default function ProfileScreen() {
         {selectMode && (
           <View style={styles.actionBar}>
             <TouchableOpacity style={styles.cancelButton} onPress={handleCancelSelect}>
-              <Text style={styles.cancelButtonText}>Отмена</Text>
+              <Text style={styles.cancelButtonText}>{t.common.cancel}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.actionButton, selectedEventIds.size === 0 && styles.actionButtonDisabled]}
@@ -808,7 +808,7 @@ export default function ProfileScreen() {
               disabled={selectedEventIds.size === 0}
             >
               <Text style={styles.actionButtonText}>
-                Удалить ({selectedEventIds.size})
+                {t.common.delete} ({selectedEventIds.size})
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -817,7 +817,7 @@ export default function ProfileScreen() {
               disabled={selectedEventIds.size === 0}
             >
               <Text style={styles.actionButtonText}>
-                Создать папку ({selectedEventIds.size})
+                {t.folder.createTitle} ({selectedEventIds.size})
               </Text>
             </TouchableOpacity>
           </View>
@@ -1219,7 +1219,7 @@ export default function ProfileScreen() {
             return null;
           })()}
           <TouchableOpacity style={styles.cancelButton} onPress={handleCancelSelect}>
-            <Text style={styles.cancelButtonText}>Отмена</Text>
+            <Text style={styles.cancelButtonText}>{t.common.cancel}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, selectedEventIds.size === 0 && styles.actionButtonDisabled]}
@@ -1227,7 +1227,7 @@ export default function ProfileScreen() {
             disabled={selectedEventIds.size === 0}
           >
             <Text style={styles.actionButtonText}>
-              Удалить ({selectedEventIds.size})
+              {t.common.delete} ({selectedEventIds.size})
             </Text>
           </TouchableOpacity>
           <TouchableOpacity

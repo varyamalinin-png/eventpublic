@@ -1572,7 +1572,7 @@ function EventCard({
             {/* Метка "Вас пригласили" - показывается только если пользователь приглашен */}
             {isInvited && variant === 'default' && (
               <View style={styles.invitedLabel}>
-                <Text style={styles.invitedLabelText}>Вас пригласили</Text>
+                <Text style={styles.invitedLabelText}>{t.events.invitedYou}</Text>
               </View>
             )}
 
@@ -1697,7 +1697,7 @@ function EventCard({
                       {/* Invited label */}
                       {isInvited && (
                         <View style={[exploreStyles.exploreInvitedLabel, { position: 'absolute' }]}>
-                          <Text style={styles.invitedLabelText}>Вас пригласили</Text>
+                          <Text style={styles.invitedLabelText}>{t.events.invitedYou}</Text>
                         </View>
                       )}
 
@@ -1940,7 +1940,7 @@ function EventCard({
               }}
             >
               <AppIcon name="link" size={18} color={Palette.accent} />
-              <Text style={{ color: '#f4f4f5', fontSize: 15, fontWeight: '500' }}>Поделиться ссылкой</Text>
+              <Text style={{ color: '#f4f4f5', fontSize: 15, fontWeight: '500' }}>{t.events.shareLink}</Text>
             </TouchableOpacity>
 
             {/* Поле поиска */}
@@ -1955,7 +1955,7 @@ function EventCard({
             {/* Список чатов и друзей */}
             <ScrollView style={styles.shareModalScrollView}>
               {/* Чаты */}
-              <Text style={styles.shareModalSectionTitle}>Чаты</Text>
+              <Text style={styles.shareModalSectionTitle}>{t.events.chatsLabel}</Text>
 
               {getChatsForUser(currentUserId || '')
                 .filter(chat => 
@@ -1999,7 +1999,7 @@ function EventCard({
                 ))}
               
               {/* Друзья (создаем личные чаты) */}
-              <Text style={styles.shareModalSectionTitle}>Друзья</Text>
+              <Text style={styles.shareModalSectionTitle}>{t.events.friendsLabel}</Text>
               {getFriendsList()
                 .filter(friend => 
                   friend.name.toLowerCase().includes(shareSearchQuery.toLowerCase()) ||
@@ -2079,7 +2079,7 @@ function EventCard({
               disabled={selectedShareChats.filter(chatId => !chatId.startsWith('friend_')).length === 0}
             >
               <Text style={styles.shareModalSendButtonText}>
-                Отправить ({selectedShareChats.filter(chatId => !chatId.startsWith('friend_')).length})
+                {t.common.send} ({selectedShareChats.filter(chatId => !chatId.startsWith('friend_')).length})
               </Text>
             </TouchableOpacity>
           </View>
@@ -2099,7 +2099,7 @@ function EventCard({
         <View style={styles.shareModalOverlay}>
           <View style={styles.shareModalContent}>
             <View style={styles.shareModalHeader}>
-              <Text style={styles.shareModalTitle}>Добавить в папку</Text>
+              <Text style={styles.shareModalTitle}>{t.folder.addToFolder}</Text>
               <TouchableOpacity onPress={() => {
                 setShowAddToFolderModal(false);
                 setSelectedFolderIds(new Set());
@@ -2158,7 +2158,7 @@ function EventCard({
                   );
                 })
               ) : (
-                <Text style={styles.shareModalEmptyText}>У вас пока нет папок</Text>
+                <Text style={styles.shareModalEmptyText}>{t.folder.noFolders}</Text>
               )}
             </ScrollView>
             
@@ -2185,7 +2185,7 @@ function EventCard({
               disabled={selectedFolderIds.size === 0}
             >
               <Text style={styles.shareModalSendButtonText}>
-                Добавить ({selectedFolderIds.size})
+                {t.common.add} ({selectedFolderIds.size})
               </Text>
             </TouchableOpacity>
           </View>
@@ -2328,7 +2328,7 @@ function EventCard({
         <View style={styles.shareModalOverlay}>
           <View style={styles.shareModalContent}>
             <View style={styles.shareModalHeader}>
-              <Text style={styles.shareModalTitle}>Передать роль организатора</Text>
+              <Text style={styles.shareModalTitle}>{t.events.transferOrganizer}</Text>
               <TouchableOpacity
                 onPress={() => {
                   setShowTransferOrganizerModal(false);

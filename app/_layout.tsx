@@ -148,9 +148,11 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0a0a0c' }}>
       <SafeAreaProvider>
         <StatusBar barStyle="light-content" backgroundColor="#0a0a0c" />
-        <OfflineBanner />
         <ThemeProvider>
         <LanguageProvider>
+          {/* Баннер переведён, поэтому ему нужен LanguageProvider. Он по-прежнему
+              выше Auth и Events — при сбое авторизации или данных всё равно виден */}
+          <OfflineBanner />
           <AuthProvider>
             <EventsProvider>
               <View style={Platform.OS === 'web' ? {

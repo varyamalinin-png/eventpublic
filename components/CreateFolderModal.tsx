@@ -75,7 +75,7 @@ export default function CreateFolderModal({ visible = true, onClose, onSubmit }:
 
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Создать папку</Text>
+        <Text style={styles.headerTitle}>{t.folder.createTitle}</Text>
         <TouchableOpacity
           style={styles.closeBtn}
           onPress={onClose}
@@ -95,7 +95,7 @@ export default function CreateFolderModal({ visible = true, onClose, onSubmit }:
               <View style={styles.coverPlaceholderIcon}>
                 <AppIcon name="image" size={22} color={Palette.textDim} />
               </View>
-              <Text style={styles.coverPlaceholderText}>Добавить обложку</Text>
+              <Text style={styles.coverPlaceholderText}>{t.folder.addCover}</Text>
               <Text style={styles.coverPlaceholderSub}>JPG, PNG, WEBP</Text>
             </View>
           )}
@@ -108,13 +108,13 @@ export default function CreateFolderModal({ visible = true, onClose, onSubmit }:
             activeOpacity={0.7}
           >
             <AppIcon name="close" size={13} color="rgba(255,59,48,0.8)" />
-            <Text style={styles.removePhotoBtnText}>Удалить фото</Text>
+            <Text style={styles.removePhotoBtnText}>{t.folder.removePhoto}</Text>
           </TouchableOpacity>
         )}
 
         {/* Name field */}
         <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Название</Text>
+          <Text style={styles.fieldLabel}>{t.folder.nameLabel}</Text>
           <TextInput
             style={styles.input}
             placeholder={t.folder.enterFolderNamePh}
@@ -144,7 +144,7 @@ export default function CreateFolderModal({ visible = true, onClose, onSubmit }:
         {/* Buttons */}
         <View style={styles.actions}>
           <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
-            <Text style={styles.cancelBtnText}>Отмена</Text>
+            <Text style={styles.cancelBtnText}>{t.common.cancel}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.submitBtn, !name.trim() && styles.submitBtnDisabled]}
@@ -152,7 +152,7 @@ export default function CreateFolderModal({ visible = true, onClose, onSubmit }:
             disabled={!name.trim()}
             activeOpacity={0.8}
           >
-            <Text style={styles.submitBtnText}>Создать</Text>
+            <Text style={styles.submitBtnText}>{t.common.create}</Text>
           </TouchableOpacity>
         </View>
       </View>

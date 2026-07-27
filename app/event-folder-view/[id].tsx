@@ -50,7 +50,7 @@ export default function EventFolderViewScreen() {
   if (loading) {
     return (
       <View style={styles.container}>
-        <Text style={styles.loadingText}>Загрузка...</Text>
+        <Text style={styles.loadingText}>{t.common.loading}</Text>
       </View>
     );
   }
@@ -58,7 +58,7 @@ export default function EventFolderViewScreen() {
   if (!folder) {
     return (
       <View style={styles.container}>
-        <Text style={styles.errorText}>Папка не найдена</Text>
+        <Text style={styles.errorText}>{t.folder.notFound}</Text>
       </View>
     );
   }
@@ -89,7 +89,7 @@ export default function EventFolderViewScreen() {
         {/* События в папке */}
         {folderEvents.length > 0 ? (
           <View style={styles.eventsContainer}>
-            <Text style={styles.sectionTitle}>События в папке</Text>
+            <Text style={styles.sectionTitle}>{t.folder.eventsInFolder}</Text>
             {folderEvents.map((eventItem, index) => {
               // Поддерживаем обе структуры: { event: Event } и просто Event
               const event = (eventItem as any).event || eventItem;
@@ -129,7 +129,7 @@ export default function EventFolderViewScreen() {
           </View>
         ) : (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>В папке пока нет событий</Text>
+            <Text style={styles.emptyText}>{t.folder.emptyFolder}</Text>
           </View>
         )}
       </ScrollView>

@@ -9,6 +9,20 @@ export const ru = {
     next: 'Далее',
   },
   folder: {
+    selectFolder: 'Выберите папку',
+    noFolders: 'У вас пока нет папок',
+    createNew: 'Создать новую папку',
+    createTitle: 'Создать папку',
+    addCover: 'Добавить обложку',
+    removePhoto: 'Удалить фото',
+    nameLabel: 'Название',
+    descriptionLabel: 'Описание',
+    emptyFolder: 'В папке пока нет событий',
+    notFound: 'Папка не найдена',
+    eventsInFolder: 'События в папке',
+    changePhoto: 'Изменить фото',
+    choose: 'Выбрать',
+    addToFolder: 'Добавить в папку',
     enterFolderNamePh: 'Введите название папки',
     addDescription: 'Добавьте описание...',
     notSpecified: 'не указан',
@@ -106,6 +120,10 @@ export const ru = {
   },
       // Common
       common: {
+    create: 'Создать',
+    send: 'Отправить',
+    skip: 'Пропустить',
+    noConnection: 'Нет соединения',
         deletePostError: 'Не удалось удалить пост',
         cancel: 'Отмена',
         save: 'Сохранить',
@@ -179,6 +197,7 @@ export const ru = {
 
   // Profile
   profile: {
+    loadError: 'Ошибка загрузки данных профиля',
     selectAtLeastOneEvent: 'Выберите хотя бы одно событие',
     deleteEventsQuestion: 'Удалить события?',
     failedToDeleteEvents: 'Не удалось удалить события',
@@ -478,6 +497,13 @@ export const ru = {
 
   // Events
   events: {
+    invitedYou: 'Вас пригласили',
+    shareLink: 'Поделиться ссылкой',
+    chatsLabel: 'Чаты',
+    friendsLabel: 'Друзья',
+    transferOrganizer: 'Передать роль организатора',
+    noComments: 'Нет комментариев',
+    addComment: 'Добавить комментарий...',
     authRequired: 'Необходима авторизация',
     signInToCreateEvents: 'Чтобы создавать события, необходимо авторизоваться',
     transferRoleToLeave: 'Для отмены участия передайте роль организатора другому участнику',
@@ -742,6 +768,10 @@ export const ru = {
 
   // Request Item
   requestItem: {
+    noOutgoing: 'Нет исходящих запросов',
+    outgoingHint: 'Здесь будут отображаться ваши запросы',
+    noIncoming: 'Нет новых запросов',
+    incomingHint: 'Здесь будут отображаться входящие запросы',
     sentFriendRequest: 'отправили заявку в друзья к',
     sentJoinRequest: 'отправили заявку на участие в',
     sentInvite: 'пригласили',

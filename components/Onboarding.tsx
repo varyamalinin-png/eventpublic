@@ -76,7 +76,7 @@ export default function Onboarding({ onDone }: Props) {
             onDone();
           }}
         >
-          <Text style={styles.skipText}>Пропустить</Text>
+          <Text style={styles.skipText}>{t.common.skip}</Text>
         </TouchableOpacity>
       )}
     </View>

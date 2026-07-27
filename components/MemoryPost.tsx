@@ -588,7 +588,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
         <View style={styles.commentsContainer}>
           <ScrollView style={styles.commentsList} nestedScrollEnabled={true}>
             {comments.length === 0 ? (
-              <Text style={styles.noCommentsText}>Нет комментариев</Text>
+              <Text style={styles.noCommentsText}>{t.events.noComments}</Text>
             ) : (
               comments.map((comment) => {
                 const commentAuthor = getUserData(comment.authorId);
@@ -621,7 +621,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
             <View style={styles.commentInputContainer}>
               <TextInput
                 style={styles.commentInput}
-                placeholder="Добавить комментарий..."
+                placeholder={t.events.addComment}
                 placeholderTextColor="#999"
                 value={commentText}
                 onChangeText={setCommentText}
@@ -655,7 +655,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
                 }}
                 disabled={!commentText.trim() || isPostingComment}
               >
-                <Text style={styles.commentSendButtonText}>Отправить</Text>
+                <Text style={styles.commentSendButtonText}>{t.common.send}</Text>
               </TouchableOpacity>
             </View>
           )}

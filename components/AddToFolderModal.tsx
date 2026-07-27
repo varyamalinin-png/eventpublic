@@ -3,6 +3,7 @@ import { View, Text, ScrollView, StyleSheet, Image, TouchableOpacity, Modal } fr
 import { useEvents } from '../context/EventsContext';
 import { AppIcon } from './ui/AppIcon';
 import { Palette } from '../constants/DesignSystem';
+import { useLanguage } from '../context/LanguageContext';
 
 interface AddToFolderModalProps {
   visible?: boolean;
@@ -13,6 +14,7 @@ interface AddToFolderModalProps {
 }
 
 export default function AddToFolderModal({ visible = true, eventIds, onClose, onSubmit, onCreateNewFolder }: AddToFolderModalProps) {
+  const { t } = useLanguage();
   const { eventFolders } = useEvents();
   const [selectedFolderIdsLocal, setSelectedFolderIdsLocal] = useState<Set<string>>(new Set());
 
@@ -33,7 +35,7 @@ export default function AddToFolderModal({ visible = true, eventIds, onClose, on
 
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Выберите папку</Text>
+        <Text style={styles.headerTitle}>{t.folder.selectFolder}</Text>
         <TouchableOpacity
           style={styles.closeBtn}
           onPress={onClose}
@@ -79,7 +81,7 @@ export default function AddToFolderModal({ visible = true, eventIds, onClose, on
           })
         ) : (
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>У вас пока нет папок</Text>
+            <Text style={styles.emptyText}>{t.folder.noFolders}</Text>
           </View>
         )}
       </ScrollView>
@@ -90,14 +92,14 @@ export default function AddToFolderModal({ visible = true, eventIds, onClose, on
           <View style={styles.createBtnIcon}>
             <AppIcon name="add" size={16} color={Palette.accent} />
           </View>
-          <Text style={styles.createBtnText}>Создать новую папку</Text>
+          <Text style={styles.createBtnText}>{t.folder.createNew}</Text>
         </TouchableOpacity>
       )}
 
       {/* Action buttons */}
       <View style={styles.actions}>
         <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
-          <Text style={styles.cancelBtnText}>Отмена</Text>
+          <Text style={styles.cancelBtnText}>{t.common.cancel}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.submitBtn, selectedFolderIdsLocal.size === 0 && styles.submitBtnDisabled]}
@@ -106,7 +108,7 @@ export default function AddToFolderModal({ visible = true, eventIds, onClose, on
           activeOpacity={0.8}
         >
           <Text style={styles.submitBtnText}>
-            Добавить{selectedFolderIdsLocal.size > 0 ? ` (${selectedFolderIdsLocal.size})` : ''}
+            {t.common.add}{selectedFolderIdsLocal.size > 0 ? ` (${selectedFolderIdsLocal.size})` : ''}
           </Text>
         </TouchableOpacity>
       </View>

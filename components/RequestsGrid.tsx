@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import RequestMiniCard from './RequestMiniCard';
+import { useLanguage } from '../context/LanguageContext';
 
 interface RequestCardProps {
   id: string;
@@ -25,11 +26,12 @@ interface RequestsGridProps {
 }
 
 export default function RequestsGrid({ requests, onAccept, onDecline, onRequestPress }: RequestsGridProps) {
+  const { t } = useLanguage();
   if (requests.length === 0) {
     return (
       <View style={styles.emptyState}>
-        <Text style={styles.emptyText}>Нет новых запросов</Text>
-        <Text style={styles.emptySubtext}>Здесь будут отображаться входящие запросы</Text>
+        <Text style={styles.emptyText}>{t.requestItem.noIncoming}</Text>
+        <Text style={styles.emptySubtext}>{t.requestItem.incomingHint}</Text>
       </View>
     );
   }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import OutgoingRequestMiniCard from './OutgoingRequestMiniCard';
+import { useLanguage } from '../context/LanguageContext';
 
 interface OutgoingRequestsGridProps {
   requests: Array<{
@@ -14,11 +15,12 @@ interface OutgoingRequestsGridProps {
 }
 
 export default function OutgoingRequestsGrid({ requests, onRequestPress }: OutgoingRequestsGridProps) {
+  const { t } = useLanguage();
   if (requests.length === 0) {
     return (
       <View style={styles.emptyState}>
-        <Text style={styles.emptyText}>Нет исходящих запросов</Text>
-        <Text style={styles.emptySubtext}>Здесь будут отображаться ваши запросы</Text>
+        <Text style={styles.emptyText}>{t.requestItem.noOutgoing}</Text>
+        <Text style={styles.emptySubtext}>{t.requestItem.outgoingHint}</Text>
       </View>
     );
   }

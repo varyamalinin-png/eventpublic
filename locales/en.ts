@@ -9,6 +9,20 @@ export const en = {
     next: 'Next',
   },
   folder: {
+    selectFolder: 'Select a folder',
+    noFolders: 'You have no folders yet',
+    createNew: 'Create a new folder',
+    createTitle: 'Create folder',
+    addCover: 'Add cover',
+    removePhoto: 'Remove photo',
+    nameLabel: 'Name',
+    descriptionLabel: 'Description',
+    emptyFolder: 'No events in this folder yet',
+    notFound: 'Folder not found',
+    eventsInFolder: 'Events in folder',
+    changePhoto: 'Change photo',
+    choose: 'Choose',
+    addToFolder: 'Add to folder',
     enterFolderNamePh: 'Enter a folder name',
     addDescription: 'Add a description...',
     notSpecified: 'not specified',
@@ -106,6 +120,10 @@ export const en = {
   },
       // Common
       common: {
+    create: 'Create',
+    send: 'Send',
+    skip: 'Skip',
+    noConnection: 'No connection',
         deletePostError: 'Could not delete post',
         cancel: 'Cancel',
         save: 'Save',
@@ -179,6 +197,7 @@ export const en = {
 
   // Profile
   profile: {
+    loadError: 'Failed to load profile data',
     selectAtLeastOneEvent: 'Select at least one event',
     deleteEventsQuestion: 'Delete events?',
     failedToDeleteEvents: 'Could not delete events',
@@ -478,6 +497,13 @@ export const en = {
 
   // Events
   events: {
+    invitedYou: 'You were invited',
+    shareLink: 'Share link',
+    chatsLabel: 'Chats',
+    friendsLabel: 'Friends',
+    transferOrganizer: 'Transfer organizer role',
+    noComments: 'No comments',
+    addComment: 'Add a comment...',
     authRequired: 'Sign in required',
     signInToCreateEvents: 'You need to sign in to create events',
     transferRoleToLeave: 'To cancel participation, transfer the organizer role to another participant',
@@ -741,6 +767,10 @@ export const en = {
 
   // Request Item
   requestItem: {
+    noOutgoing: 'No outgoing requests',
+    outgoingHint: 'Your requests will appear here',
+    noIncoming: 'No new requests',
+    incomingHint: 'Incoming requests will appear here',
     sentFriendRequest: 'You sent a friend request to',
     sentJoinRequest: 'You sent a join request to',
     sentInvite: 'You invited',

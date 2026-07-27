@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
+import { useLanguage } from '../context/LanguageContext';
 
 function OfflineBanner() {
+  const { t } = useLanguage();
   const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
@@ -32,7 +34,7 @@ function OfflineBanner() {
 
   return (
     <View style={styles.banner}>
-      <Text style={styles.text}>Нет соединения</Text>
+      <Text style={styles.text}>{t.common.noConnection}</Text>
     </View>
   );
 }

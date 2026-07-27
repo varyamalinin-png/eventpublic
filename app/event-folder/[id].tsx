@@ -107,7 +107,7 @@ export default function EventFolderScreen() {
   if (loading) {
     return (
       <View style={styles.container}>
-        <Text style={styles.loadingText}>Загрузка...</Text>
+        <Text style={styles.loadingText}>{t.common.loading}</Text>
         <Text style={styles.loadingText}>ID: {id || t.folder.notSpecified}</Text>
       </View>
     );
@@ -131,7 +131,7 @@ export default function EventFolderScreen() {
           <Text style={styles.backText}>←</Text>
         </TouchableOpacity>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-          <Text style={styles.errorText}>Папка не найдена</Text>
+          <Text style={styles.errorText}>{t.folder.notFound}</Text>
           <Text style={[styles.errorText, { fontSize: 12, marginTop: 10, color: 'rgba(244,244,245,0.55)' }]}>ID: {id || t.folder.notSpecified}</Text>
         </View>
       </View>
@@ -371,7 +371,7 @@ export default function EventFolderScreen() {
               );
             })
           ) : (
-            <Text style={styles.emptyText}>В папке пока нет событий</Text>
+            <Text style={styles.emptyText}>{t.folder.emptyFolder}</Text>
           )}
         </ScrollView>
       </View>
@@ -540,7 +540,7 @@ export default function EventFolderScreen() {
                 );
               })
             ) : (
-              <Text style={styles.emptyText}>В папке пока нет событий</Text>
+              <Text style={styles.emptyText}>{t.folder.emptyFolder}</Text>
             )}
           </View>
         )}
@@ -602,7 +602,7 @@ export default function EventFolderScreen() {
                 );
               })
             ) : (
-              <Text style={styles.emptyText}>В папке пока нет событий</Text>
+              <Text style={styles.emptyText}>{t.folder.emptyFolder}</Text>
             )}
           </View>
         )}
@@ -624,16 +624,16 @@ export default function EventFolderScreen() {
           <View style={styles.menuContent}>
             <View style={styles.menuHandle} />
             <TouchableOpacity style={styles.menuItem} onPress={handleChangeCoverPhoto}>
-              <Text style={styles.menuItemText}>Изменить фото</Text>
+              <Text style={styles.menuItemText}>{t.folder.changePhoto}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={handleSelectMode}>
-              <Text style={styles.menuItemText}>Выбрать</Text>
+              <Text style={styles.menuItemText}>{t.folder.choose}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.menuItem, styles.menuItemDanger]} onPress={handleDeleteFolder}>
-              <Text style={[styles.menuItemText, styles.menuItemTextDanger]}>Удалить папку</Text>
+              <Text style={[styles.menuItemText, styles.menuItemTextDanger]}>{t.folder.deleteFolder}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={() => setShowMenu(false)}>
-              <Text style={styles.menuItemText}>Отмена</Text>
+              <Text style={styles.menuItemText}>{t.common.cancel}</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -643,7 +643,7 @@ export default function EventFolderScreen() {
       {selectMode && (
         <View style={styles.actionBar}>
           <TouchableOpacity style={styles.cancelButton} onPress={handleCancelSelect}>
-            <Text style={styles.cancelButtonText}>Отмена</Text>
+            <Text style={styles.cancelButtonText}>{t.common.cancel}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, selectedEventIds.size === 0 && styles.actionButtonDisabled]}
