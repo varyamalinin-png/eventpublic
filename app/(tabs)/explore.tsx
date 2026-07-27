@@ -813,9 +813,11 @@ export default function ExploreScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF8D32" />}
         onScroll={(event) => {
           const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-          if (contentSize.height - contentOffset.y - layoutMeasurement.height < 1500) {
-            setVisibleCount(prev => prev + PAGE_SIZE);
-          }
+          if (contentSize.height - contentOffset.y - layoutMeasurement.height >= 1500) return;
+          // Условие выше истинно на всей последней тысяче пикселей, а onScroll летит
+          // ~10 раз в секунду — без потолка по длине списка счётчик рос бы бесконечно
+          const total = (activeTab === 'GLOB' ? globEvents : folderEvents).length;
+          setVisibleCount(prev => (prev >= total ? prev : Math.min(prev + PAGE_SIZE, total)));
         }}
         scrollEventThrottle={100}
       >
