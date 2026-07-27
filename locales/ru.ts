@@ -360,6 +360,8 @@ export const ru = {
 
   // Events
   events: {
+    changePhotoForSelf: 'Изменить фото для себя',
+    addToFolder: 'Добавить в папку',
     goToChat: 'Перейти в чат',
     online: 'Онлайн',
     eventCancelledSuccess: 'Событие было успешно отменено',

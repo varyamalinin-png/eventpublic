@@ -361,6 +361,8 @@ export const en = {
 
   // Events
   events: {
+    changePhotoForSelf: 'Change photo for myself',
+    addToFolder: 'Add to folder',
     goToChat: 'Go to chat',
     online: 'Online',
     eventCancelledSuccess: 'Event cancelled successfully',
