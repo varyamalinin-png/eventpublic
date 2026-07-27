@@ -1,4 +1,35 @@
 export const ru = {
+  folder: {
+    notSpecified: 'не указан',
+    deleteFolder: 'Удалить папку',
+    deleteFolderConfirm: 'Вы уверены, что хотите удалить эту папку? Это действие нельзя отменить.',
+    photoChangeFailed: 'Не удалось изменить фото',
+    removeEventsFromFolder: 'Удалить события из папки',
+    removeEventsFailed: 'Не удалось удалить события из папки',
+  },
+  payment: {
+    paymentNotSupported: 'Это событие не поддерживает оплату через приложение',
+    invalidCardNumber: 'Некорректный номер карты',
+    paymentSuccessful: 'Оплата успешна',
+    placementPaid: 'Размещение события оплачено. Теперь вы можете опубликовать событие.',
+    paidAndJoined: 'Вы успешно оплатили и присоединились к событию!',
+    paidRequestSent: 'Вы успешно оплатили участие в событии. Запрос на участие отправлен.',
+    paymentFailed: 'Не удалось обработать платеж. Попробуйте позже.',
+    cardHolderExample: 'Иван Иванов',
+  },
+  support: {
+    pending: 'Ожидает',
+    reviewed: 'Рассмотрено',
+    resolved: 'Решено',
+    rejectedStatus: 'Отклонено',
+    enterReply: 'Введите ответ',
+    replyFailed: 'Не удалось отправить ответ',
+    resolvedFem: 'решена',
+    statusUpdateFailed: 'Не удалось обновить статус',
+    eventWord: 'Событие',
+    userWord: 'Пользователь',
+    replyPlaceholder: 'Введите ответ пользователю...',
+  },
   auth: {
     enterEmailAddress: 'Введите email адрес',
     verificationSent: 'Письмо с подтверждением отправлено на указанный email. Проверьте почту (включая папку «Спам»).',
@@ -657,6 +688,12 @@ export const ru = {
 
       // Chat
       chat: {
+        searchChats: 'Поиск чатов...',
+        eventSent: 'Отправлено событие',
+        chooseChatAction: 'Выберите действие для чата события:',
+        deleteChatConfirm: 'Вы уверены, что хотите удалить этот чат?',
+        deleteChatFailed: 'Не удалось удалить чат',
+        folderUpdateFailed: 'Не удалось обновить папку',
         createFolder: 'Создать папку',
         folderName: 'Название папки',
         create: 'Создать',

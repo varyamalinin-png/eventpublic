@@ -46,14 +46,14 @@ export default function PaymentScreen() {
   useEffect(() => {
     if (paymentType === 'event_participation') {
       if (!event) {
-        Alert.alert('Ошибка', 'Событие не найдено', [
+        Alert.alert(t.common.error, 'Событие не найдено', [
           { text: 'OK', onPress: () => router.back() },
         ]);
         return;
       }
 
       if (!isBusinessAccount) {
-        Alert.alert('Ошибка', 'Это событие не поддерживает оплату через приложение', [
+        Alert.alert(t.common.error, t.payment.paymentNotSupported, [
           { text: 'OK', onPress: () => router.back() },
         ]);
         return;
@@ -63,14 +63,14 @@ export default function PaymentScreen() {
 
   const handlePayment = async () => {
     if (!cardNumber || !cardExpiry || !cardCVC || !cardholderName) {
-      Alert.alert('Ошибка', 'Заполните все поля');
+      Alert.alert(t.common.error, t.messages.fillAllFields);
       return;
     }
 
     // Валидация номера карты (упрощенная)
     const cleanCardNumber = cardNumber.replace(/\s/g, '');
     if (cleanCardNumber.length < 16) {
-      Alert.alert('Ошибка', 'Некорректный номер карты');
+      Alert.alert(t.common.error, t.payment.invalidCardNumber);
       return;
     }
 
@@ -87,8 +87,8 @@ export default function PaymentScreen() {
         // Для размещения события возвращаемся на страницу создания с флагом оплаты
         const formDataParam = params.formData as string | undefined;
         Alert.alert(
-          'Оплата успешна',
-          'Размещение события оплачено. Теперь вы можете опубликовать событие.',
+          t.payment.paymentSuccessful,
+          t.payment.placementPaid,
           [
             {
               text: 'OK',
@@ -120,10 +120,10 @@ export default function PaymentScreen() {
         const isBusinessAccount = organizerData?.accountType === 'business';
         
         Alert.alert(
-          'Оплата успешна',
+          t.payment.paymentSuccessful,
           isBusinessAccount 
-            ? 'Вы успешно оплатили и присоединились к событию!'
-            : 'Вы успешно оплатили участие в событии. Запрос на участие отправлен.',
+            ? t.payment.paidAndJoined
+            : t.payment.paidRequestSent,
           [
             {
               text: 'OK',
@@ -134,7 +134,7 @@ export default function PaymentScreen() {
       }
     } catch (error) {
       logger.error('Payment error:', error);
-      Alert.alert('Ошибка', 'Не удалось обработать платеж. Попробуйте позже.');
+      Alert.alert(t.common.error, t.payment.paymentFailed);
     } finally {
       setLoading(false);
     }
@@ -161,7 +161,7 @@ export default function PaymentScreen() {
           <Text style={styles.backButtonText}>← Назад</Text>
         </TouchableOpacity>
         <Text style={styles.title}>
-          {paymentType === 'event_placement' ? 'Оплата размещения события' : 'Оплата участия'}
+          {paymentType === 'event_placement' ? t.createEvent.eventPlacementPayment : 'Оплата участия'}
         </Text>
       </View>
 
@@ -246,7 +246,7 @@ export default function PaymentScreen() {
         <Text style={styles.label}>Имя держателя карты</Text>
         <TextInput
           style={styles.input}
-          placeholder="Иван Иванов"
+          placeholder={t.payment.cardHolderExample}
           value={cardholderName}
           onChangeText={setCardholderName}
           autoCapitalize="words"

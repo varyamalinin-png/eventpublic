@@ -1,4 +1,35 @@
 export const en = {
+  folder: {
+    notSpecified: 'not specified',
+    deleteFolder: 'Delete folder',
+    deleteFolderConfirm: 'Are you sure you want to delete this folder? This cannot be undone.',
+    photoChangeFailed: 'Could not change the photo',
+    removeEventsFromFolder: 'Remove events from folder',
+    removeEventsFailed: 'Could not remove events from the folder',
+  },
+  payment: {
+    paymentNotSupported: 'This event does not support in-app payment',
+    invalidCardNumber: 'Invalid card number',
+    paymentSuccessful: 'Payment successful',
+    placementPaid: 'Event placement paid. You can now publish the event.',
+    paidAndJoined: 'Payment complete - you have joined the event!',
+    paidRequestSent: 'Payment complete. Your participation request has been sent.',
+    paymentFailed: 'Could not process the payment. Try again later.',
+    cardHolderExample: 'John Smith',
+  },
+  support: {
+    pending: 'Pending',
+    reviewed: 'Reviewed',
+    resolved: 'Resolved',
+    rejectedStatus: 'Rejected',
+    enterReply: 'Enter a reply',
+    replyFailed: 'Could not send the reply',
+    resolvedFem: 'resolved',
+    statusUpdateFailed: 'Could not update the status',
+    eventWord: 'Event',
+    userWord: 'User',
+    replyPlaceholder: 'Write a reply to the user...',
+  },
   auth: {
     enterEmailAddress: 'Enter an email address',
     verificationSent: 'A verification email has been sent. Check your inbox (including Spam).',
@@ -251,7 +282,6 @@ export const en = {
     },
 
     events: {
-    goToChat: 'Go to chat',
       title: 'EVENTS',
       smartSuggestions: 'Smart suggestions',
       calendarSync: 'Calendar synchronization',
@@ -657,6 +687,12 @@ export const en = {
 
       // Chat
       chat: {
+        searchChats: 'Search chats...',
+        eventSent: 'Event sent',
+        chooseChatAction: 'Choose an action for the event chat:',
+        deleteChatConfirm: 'Are you sure you want to delete this chat?',
+        deleteChatFailed: 'Could not delete the chat',
+        folderUpdateFailed: 'Could not update the folder',
         createFolder: 'Create folder',
         folderName: 'Folder name',
         create: 'Create',

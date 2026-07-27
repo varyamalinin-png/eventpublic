@@ -108,7 +108,7 @@ export default function EventFolderScreen() {
     return (
       <View style={styles.container}>
         <Text style={styles.loadingText}>Загрузка...</Text>
-        <Text style={styles.loadingText}>ID: {id || 'не указан'}</Text>
+        <Text style={styles.loadingText}>ID: {id || t.folder.notSpecified}</Text>
       </View>
     );
   }
@@ -132,7 +132,7 @@ export default function EventFolderScreen() {
         </TouchableOpacity>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
           <Text style={styles.errorText}>Папка не найдена</Text>
-          <Text style={[styles.errorText, { fontSize: 12, marginTop: 10, color: 'rgba(244,244,245,0.55)' }]}>ID: {id || 'не указан'}</Text>
+          <Text style={[styles.errorText, { fontSize: 12, marginTop: 10, color: 'rgba(244,244,245,0.55)' }]}>ID: {id || t.folder.notSpecified}</Text>
         </View>
       </View>
     );
@@ -169,19 +169,19 @@ export default function EventFolderScreen() {
     if (!folder || !isOwner) return;
     
     Alert.alert(
-      'Удалить папку',
-      'Вы уверены, что хотите удалить эту папку? Это действие нельзя отменить.',
+      t.folder.deleteFolder,
+      t.folder.deleteFolderConfirm,
       [
-        { text: 'Отмена', style: 'cancel' },
+        { text: t.common.cancel, style: 'cancel' },
         {
-          text: 'Удалить',
+          text: t.common.delete,
           style: 'destructive',
           onPress: async () => {
             try {
               await deleteEventFolder(folder.id);
               router.back();
             } catch (error) {
-              Alert.alert('Ошибка', 'Не удалось удалить папку');
+              Alert.alert(t.common.error, 'Не удалось удалить папку');
             }
           },
         },
@@ -196,7 +196,7 @@ export default function EventFolderScreen() {
     try {
       const hasPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (hasPermission.status !== 'granted') {
-        Alert.alert('Ошибка', 'Нет доступа к галерее');
+        Alert.alert(t.common.error, t.messages.noGalleryAccess);
         return;
       }
 
@@ -218,10 +218,10 @@ export default function EventFolderScreen() {
         if (updatedFolder) {
           setFolder(updatedFolder);
         }
-        Alert.alert('Успешно', 'Фото папки изменено');
+        Alert.alert(t.common.success, 'Фото папки изменено');
       }
     } catch (error) {
-      Alert.alert('Ошибка', 'Не удалось изменить фото');
+      Alert.alert(t.common.error, t.folder.photoChangeFailed);
     }
     setShowMenu(false);
   };
@@ -240,12 +240,12 @@ export default function EventFolderScreen() {
     if (!folder || selectedEventIds.size === 0) return;
     
     Alert.alert(
-      'Удалить события из папки',
-      `Удалить ${selectedEventIds.size} ${selectedEventIds.size === 1 ? 'событие' : 'событий'} из папки?`,
+      t.folder.removeEventsFromFolder,
+      `Удалить ${selectedEventIds.size} ${selectedEventIds.size === 1 ? t.events.eventWord : 'событий'} из папки?`,
       [
-        { text: 'Отмена', style: 'cancel' },
+        { text: t.common.cancel, style: 'cancel' },
         {
-          text: 'Удалить',
+          text: t.common.delete,
           style: 'destructive',
           onPress: async () => {
             try {
@@ -260,16 +260,16 @@ export default function EventFolderScreen() {
                 setSelectedEventIds(new Set());
               } else {
                 // Папка была автоматически удалена, возвращаемся назад
-                Alert.alert('Папка удалена', 'Папка была удалена, так как в ней не осталось событий');
+                Alert.alert(t.events.folderDeleted, t.events.folderDeletedEmpty);
                 router.back();
               }
             } catch (error) {
               // Если папка не найдена (404), значит она была удалена
               if (error instanceof Error && error.message.includes('404')) {
-                Alert.alert('Папка удалена', 'Папка была удалена, так как в ней не осталось событий');
+                Alert.alert(t.events.folderDeleted, t.events.folderDeletedEmpty);
                 router.back();
               } else {
-                Alert.alert('Ошибка', 'Не удалось удалить события из папки');
+                Alert.alert(t.common.error, t.folder.removeEventsFailed);
               }
             }
           },

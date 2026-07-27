@@ -260,7 +260,7 @@ export default function MessagesTab() {
 
       <TextInput
         style={{ backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: '#f4f4f5', marginHorizontal: 16, marginBottom: 12 }}
-        placeholder="Поиск чатов..."
+        placeholder={t.chat.searchChats}
         placeholderTextColor="rgba(255,255,255,0.3)"
         value={searchQuery}
         onChangeText={setSearchQuery}
@@ -468,7 +468,7 @@ export default function MessagesTab() {
                             <Text style={[styles.chatName, isUnread && { fontWeight: '700' }]}>{chat.name}</Text>
                             {last && (
                               <Text style={[styles.lastMessage, isUnread && { color: '#f4f4f5' }]} numberOfLines={1}>
-                                {last.text ?? 'Отправлено событие'}
+                                {last.text ?? t.chat.eventSent}
                               </Text>
                             )}
                           </View>
@@ -643,8 +643,8 @@ export default function MessagesTab() {
               <>
                 <Text style={styles.modalDescription}>
                   {chatToDelete.type === 'event'
-                    ? 'Выберите действие для чата события:'
-                    : 'Вы уверены, что хотите удалить этот чат?'}
+                    ? t.chat.chooseChatAction
+                    : t.chat.deleteChatConfirm}
                 </Text>
                 
                 {chatToDelete.type === 'event' ? (
@@ -690,7 +690,7 @@ export default function MessagesTab() {
                           setChatToDelete(null);
                         } catch (error) {
                           logger.error('Failed to delete chat and leave event', error);
-                          Alert.alert('Ошибка', 'Не удалось удалить чат и выйти из события');
+                          Alert.alert(t.common.error, 'Не удалось удалить чат и выйти из события');
                         }
                       }}
                     >
@@ -709,7 +709,7 @@ export default function MessagesTab() {
                           setChatToDelete(null);
                         } catch (error) {
                           logger.error('Failed to delete chat', error);
-                          Alert.alert('Ошибка', 'Не удалось удалить чат');
+                          Alert.alert(t.common.error, t.chat.deleteChatFailed);
                         }
                       }}
                     >
@@ -726,7 +726,7 @@ export default function MessagesTab() {
                         setChatToDelete(null);
                       } catch (error) {
                         logger.error('Failed to delete chat', error);
-                        Alert.alert('Ошибка', 'Не удалось удалить чат');
+                        Alert.alert(t.common.error, t.chat.deleteChatFailed);
                       }
                     }}
                   >
@@ -796,7 +796,7 @@ export default function MessagesTab() {
                           setChatForFolder(null);
                         } catch (error) {
                           logger.error('Failed to update chat folder', error);
-                          Alert.alert('Ошибка', 'Не удалось обновить папку');
+                          Alert.alert(t.common.error, t.chat.folderUpdateFailed);
                         }
                       }}
                     >
@@ -899,7 +899,7 @@ export default function MessagesTab() {
                       />
                       <View style={styles.chatInfo}>
                         <Text style={styles.chatName}>
-                          {participantData?.name || participantData?.username || 'Пользователь'}
+                          {participantData?.name || participantData?.username || t.events.userFallback}
                         </Text>
                         {participantData?.username && participantData.username !== participantData?.name && (
                           <Text style={styles.lastMessage}>
@@ -939,12 +939,12 @@ export default function MessagesTab() {
                     setChatToDelete(null);
                     setShowDeleteChatModal(false);
                   } else {
-                    Alert.alert('Ошибка', 'Функция передачи роли не доступна');
+                    Alert.alert(t.common.error, t.events.transferRoleUnavailable);
                   }
                 } catch (error: any) {
                   logger.error('Failed to transfer organizer role', error);
-                  const errorMessage = error?.message || error?.body?.message || 'Не удалось передать роль организатора';
-                  Alert.alert('Ошибка', errorMessage);
+                  const errorMessage = error?.message || error?.body?.message || t.events.failedToTransferRole;
+                  Alert.alert(t.common.error, errorMessage);
                 }
               }}
               disabled={!selectedNewOrganizerId}

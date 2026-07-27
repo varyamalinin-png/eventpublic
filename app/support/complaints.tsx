@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLanguage } from '../../context/LanguageContext';
 import {
   View,
   Text,
@@ -56,14 +57,15 @@ const STATUS_COLORS: Record<ComplaintStatus, string> = {
 };
 
 const STATUS_LABELS: Record<ComplaintStatus, string> = {
-  PENDING: 'Ожидает',
-  REVIEWED: 'Рассмотрено',
-  RESOLVED: 'Решено',
-  REJECTED: 'Отклонено',
+  PENDING: t.support.pending,
+  REVIEWED: t.support.reviewed,
+  RESOLVED: t.support.resolved,
+  REJECTED: t.support.rejectedStatus,
 };
 
 export default function SupportComplaintsScreen() {
   const router = useRouter();
+  const { t } = useLanguage();
   const { accessToken } = useAuth();
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
@@ -90,7 +92,7 @@ export default function SupportComplaintsScreen() {
       setComplaints(data);
     } catch (error) {
       logger.error('Failed to fetch complaints:', error);
-      Alert.alert('Ошибка', 'Не удалось загрузить жалобы');
+      Alert.alert(t.common.error, 'Не удалось загрузить жалобы');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -107,7 +109,7 @@ export default function SupportComplaintsScreen() {
     if (!selectedComplaint || !accessToken) return;
 
     if (!responseText.trim()) {
-      Alert.alert('Ошибка', 'Введите ответ');
+      Alert.alert(t.common.error, t.support.enterReply);
       return;
     }
 
@@ -124,13 +126,13 @@ export default function SupportComplaintsScreen() {
         accessToken,
       );
 
-      Alert.alert('Успешно', 'Ответ отправлен');
+      Alert.alert(t.common.success, 'Ответ отправлен');
       setShowResponseModal(false);
       setShowDetailModal(false);
       fetchComplaints();
     } catch (error) {
       logger.error('Failed to send response:', error);
-      Alert.alert('Ошибка', 'Не удалось отправить ответ');
+      Alert.alert(t.common.error, t.support.replyFailed);
     }
   };
 
@@ -150,12 +152,12 @@ export default function SupportComplaintsScreen() {
         accessToken,
       );
 
-      Alert.alert('Успешно', `Жалоба ${status === 'RESOLVED' ? 'решена' : 'отклонена'}`);
+      Alert.alert(t.common.success, `Жалоба ${status === 'RESOLVED' ? t.support.resolvedFem : 'отклонена'}`);
       setShowDetailModal(false);
       fetchComplaints();
     } catch (error) {
       logger.error('Failed to update status:', error);
-      Alert.alert('Ошибка', 'Не удалось обновить статус');
+      Alert.alert(t.common.error, t.support.statusUpdateFailed);
     }
   };
 
@@ -234,7 +236,7 @@ export default function SupportComplaintsScreen() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <AppIcon name={complaint.type === 'EVENT' ? 'calendar' : 'user'} size={13} color={Palette.textDim} />
                     <Text style={styles.complaintTypeText}>
-                      {complaint.type === 'EVENT' ? 'Событие' : 'Пользователь'}
+                      {complaint.type === 'EVENT' ? t.support.eventWord : t.support.userWord}
                     </Text>
                   </View>
                 </View>
@@ -284,7 +286,7 @@ export default function SupportComplaintsScreen() {
                   <View style={styles.detailSection}>
                     <Text style={styles.detailLabel}>Тип</Text>
                     <Text style={styles.detailValue}>
-                      {selectedComplaint.type === 'EVENT' ? 'Событие' : 'Пользователь'}
+                      {selectedComplaint.type === 'EVENT' ? t.support.eventWord : t.support.userWord}
                     </Text>
                   </View>
 
@@ -400,7 +402,7 @@ export default function SupportComplaintsScreen() {
                 <Text style={styles.detailLabel}>Ваш ответ</Text>
                 <TextInput
                   style={styles.responseInput}
-                  placeholder="Введите ответ пользователю..."
+                  placeholder={t.support.replyPlaceholder}
                   placeholderTextColor="#999"
                   value={responseText}
                   onChangeText={setResponseText}
