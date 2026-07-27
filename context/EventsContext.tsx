@@ -1074,7 +1074,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     };
   }, [events, eventProfilesRef.current, isUserEventMemberWrapper, isUserAttendeeWrapper, isEventUpcomingWrapper, isEventPastWrapper, getUserRequestStatusWrapper, userFriendsMap, accessToken, loadComplaintsCount]);
 
-  const getFriendsList = (): User[] => {
+  const getFriendsList = useCallback((): User[] => {
     if (!currentUserId) {
       return [];
     }
@@ -1086,11 +1086,11 @@ export function EventsProvider({ children }: EventsProviderProps) {
         ...userData,
       };
     });
-  };
+  }, [currentUserId, friends, getUserData, userFriendsMap]);
 
   // Получить реальный список друзей для любого пользователя
   // Использует единый источник истины - userFriendsMap
-  const getUserFriendsList = (userId: string): User[] => {
+  const getUserFriendsList = useCallback((userId: string): User[] => {
     const resolvedUserId = resolveUserId(userId);
     const friendIds = userFriendsMap[resolvedUserId] || [];
     
@@ -1102,14 +1102,14 @@ export function EventsProvider({ children }: EventsProviderProps) {
         ...userData
       };
     });
-  };
+  }, [getUserData, resolveUserId, userFriendsMap]);
 
   const isFriend = useCallback((userId: string): boolean => {
     return friends.includes(userId);
   }, []);
 
   // Обновленная логика FRIENDS согласно новой системе
-  const getFriendsForEvents = (): Event[] => {
+  const getFriendsForEvents = useCallback((): Event[] => {
     if (!currentUserId) {
       return [];
     }
@@ -1152,14 +1152,14 @@ export function EventsProvider({ children }: EventsProviderProps) {
       if (!aIsMyOrganizer && bIsMyOrganizer) return 1;
       return 0;
     });
-  };
+  }, [currentUserId, eventRequests, events, getUserRequestStatus, isEventFull, isEventUpcoming, isFriendOfOrganizer, isUserEventMember, isUserOrganizer]);
 
   // getEventsByUserFolder теперь в useUserFolders хуке
 
   // Функции для работы с чатами теперь в useChats хуке
 
   // Обертки для отправки событий и постов в чаты (используют функции из useChats хука)
-  const sendEventToChats = async (eventId: string, chatIds: string[]) => {
+  const sendEventToChats = useCallback(async (eventId: string, chatIds: string[]) => {
     logger.debug('sendEventToChats called:', { eventId, chatIds });
     await Promise.all(
       chatIds.map(chatId => {
@@ -1167,9 +1167,9 @@ export function EventsProvider({ children }: EventsProviderProps) {
         return sendChatMessage(chatId, '', eventId);
       }),
     );
-  };
+  }, [sendChatMessage]);
 
-  const sendMemoryPostToChats = async (eventId: string, postId: string, chatIds: string[]) => {
+  const sendMemoryPostToChats = useCallback(async (eventId: string, postId: string, chatIds: string[]) => {
     logger.debug('sendMemoryPostToChats called:', { eventId, postId, chatIds });
     await Promise.all(
       chatIds.map(chatId => {
@@ -1177,7 +1177,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
         return sendChatMessage(chatId, '', eventId, postId);
       }),
     );
-  };
+  }, [sendChatMessage]);
 
   // refreshPendingJoinRequests и sendEventRequest теперь в useEventRequests хуке
 
@@ -1570,7 +1570,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
   };
   
   // Получить список принятых участников (только userId)
-  const getAcceptedParticipants = (eventId: string): string[] => {
+  const getAcceptedParticipants = useCallback((eventId: string): string[] => {
     const event = events.find(e => e.id === eventId);
     if (!event) return [];
     
@@ -1616,11 +1616,11 @@ export function EventsProvider({ children }: EventsProviderProps) {
     }
     
     return Array.from(participants);
-  };
+  }, [eventProfiles, eventRequests, events, getUserData, knownUserIds, resolveRequestUserId]);
   
   // Получить статус заявки пользователя
   type RequestStatus = 'organizer' | 'accepted' | 'rejected' | 'pending' | 'not_requested';
-  const getUserRequestStatus = (event: Event, userId: string | null): RequestStatus => {
+  const getUserRequestStatus = useCallback((event: Event, userId: string | null): RequestStatus => {
     if (!userId) return 'not_requested';
     const resolvedUserId = resolveUserId(userId);
     // Если пользователь - организатор
@@ -1651,7 +1651,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     }
     
     return 'not_requested';
-  };
+  }, [eventRequests, requestBelongsToUser, resolveUserId]);
 
   // НОВАЯ ФУНКЦИЯ: Определяет отношения пользователя к событию с приоритетом для приглашений
   const getUserRelationship = useCallback((event: Event, userId: string | null): 'invited' | 'organizer' | 'accepted' | 'waiting' | 'rejected' | 'non_member' => {
@@ -1752,7 +1752,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
   // 2. Если событие прошло И viewerUserId указан (третье лицо смотрит через профиль участника) - показываем персональное фото viewerUserId (если есть)
   // 3. Если событие прошло И userId имеет персональное фото - показываем его (для самого участника)
   // 4. Иначе - фото организатора
-  const getEventPhotoForUser = (eventId: string, userId: string, viewerUserId?: string, useOriginal: boolean = false): string | undefined => {
+  const getEventPhotoForUser = useCallback((eventId: string, userId: string, viewerUserId?: string, useOriginal: boolean = false): string | undefined => {
     const event = events.find(e => e.id === eventId);
     if (!event) return undefined;
 
@@ -1791,7 +1791,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     // Последний fallback - НЕ возвращаем аватарку организатора, возвращаем undefined
     // чтобы было видно, что фото не установлено
     return undefined;
-  };
+  }, [eventProfiles, events, isEventPast]);
 
   // Установить персональное фото события для пользователя (объявлена после syncEventsFromServer)
   
@@ -1899,15 +1899,15 @@ export function EventsProvider({ children }: EventsProviderProps) {
   }, []);
   
   // Событие набрано (достигнут максимум участников)
-  const isEventFull = (event: Event): boolean => {
+  const isEventFull = useCallback((event: Event): boolean => {
     const acceptedParticipants = getAcceptedParticipants(event.id);
     return acceptedParticipants.length >= event.maxParticipants;
-  };
+  }, [getAcceptedParticipants]);
   
   // Событие не набрано
-  const isEventNotFull = (event: Event): boolean => {
+  const isEventNotFull = useCallback((event: Event): boolean => {
     return !isEventFull(event);
-  };
+  }, [isEventFull]);
   
   // 3. ОТНОШЕНИЕ ТЕКУЩЕГО ПОЛЬЗОВАТЕЛЯ К СОБЫТИЮ
   
@@ -1918,7 +1918,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
   }, []);
   
   // Я участник (принятый, но не организатор)
-  const isUserAttendee = (event: Event, userId: string): boolean => {
+  const isUserAttendee = useCallback((event: Event, userId: string): boolean => {
     const resolvedUserId = resolveUserId(userId);
     if (event.organizerId === resolvedUserId) return false; // Организатор не является участником
     
@@ -1940,12 +1940,12 @@ export function EventsProvider({ children }: EventsProviderProps) {
     }
     
     return isInAccepted;
-  };
+  }, [getAcceptedParticipants, getUserData, resolveUserId]);
   
   // Я член события (организатор ИЛИ принятый участник)
-  const isUserEventMember = (event: Event, userId: string): boolean => {
+  const isUserEventMember = useCallback((event: Event, userId: string): boolean => {
     return isUserOrganizer(event, userId) || isUserAttendee(event, userId);
-  };
+  }, [isUserAttendee, isUserOrganizer]);
   
   // 4. ОТНОШЕНИЕ К ДРУГИМ ПОЛЬЗОВАТЕЛЯМ
   
@@ -1958,11 +1958,11 @@ export function EventsProvider({ children }: EventsProviderProps) {
   }, []);
   
   // Универсальная функция для проверки участия пользователя в событии (для обратной совместимости)
-  const isUserParticipant = (event: Event, userId: string): boolean => {
+  const isUserParticipant = useCallback((event: Event, userId: string): boolean => {
     return isUserEventMember(event, userId);
-  };
+  }, [isUserEventMember]);
 
-  const getEventParticipants = (eventId: string): string[] => {
+  const getEventParticipants = useCallback((eventId: string): string[] => {
     const event = events.find(e => e.id === eventId);
     if (!event) return [];
     
@@ -2009,12 +2009,12 @@ export function EventsProvider({ children }: EventsProviderProps) {
     }
     
     return Array.from(participants);
-  };
+  }, [eventProfiles, eventRequests, events, getUserData, knownUserIds, resolveRequestUserId]);
 
   // canEditEventProfile теперь находится в useEventProfiles хуке
 
   // Получить мои исходящие запросы на события
-  const getMyEventRequests = (): EventRequest[] => {
+  const getMyEventRequests = useCallback((): EventRequest[] => {
     const myUserId = currentUserId;
     if (!myUserId) return [];
     
@@ -2043,25 +2043,25 @@ export function EventsProvider({ children }: EventsProviderProps) {
       logger.debug('Мой запрос:', { id: req.id, type: req.type, eventId: req.eventId, fromUserId: req.fromUserId, toUserId: req.toUserId, userId: req.userId, status: req.status });
     });
     return result;
-  };
+  }, [currentUserId, eventRequests, requestBelongsToUser]);
 
   // Получить организатора события
-  const getEventOrganizer = (eventId: string) => {
+  const getEventOrganizer = useCallback((eventId: string) => {
     const event = events.find(e => e.id === eventId);
     if (!event) return null;
     return getUserData(event.organizerId);
-  };
+  }, [events, getUserData]);
 
   // Проверить мой статус участия в событии
-  const getMyEventParticipationStatus = (eventId: string): 'pending' | 'accepted' | 'rejected' | null => {
+  const getMyEventParticipationStatus = useCallback((eventId: string): 'pending' | 'accepted' | 'rejected' | null => {
     const request = eventRequests.find(req => 
       req.eventId === eventId && requestBelongsToUser(req, currentUserId)
     );
     return request ? request.status : null;
-  };
+  }, [currentUserId, eventRequests, requestBelongsToUser]);
 
   // Получить события для моего календаря (только где я организатор или участник со статусом accepted)
-  const getMyCalendarEvents = (): Event[] => {
+  const getMyCalendarEvents = useCallback((): Event[] => {
     return events.filter(event => {
       // Я организатор
       if (event.organizerId === currentUserId) {
@@ -2079,10 +2079,10 @@ export function EventsProvider({ children }: EventsProviderProps) {
       }
       return false;
     });
-  };
+  }, [currentUserId, events, getMyEventParticipationStatus]);
 
   // Получить события для календаря другого пользователя
-  const getUserCalendarEvents = (userId: string): Event[] => {
+  const getUserCalendarEvents = useCallback((userId: string): Event[] => {
     return events.filter(event => {
       // Пользователь организатор
       if (event.organizerId === userId) {
@@ -2092,12 +2092,12 @@ export function EventsProvider({ children }: EventsProviderProps) {
       // Для другого пользователя проверяем только организатора, т.к. нет данных о их участниках
       return false;
     });
-  };
+  }, [events]);
 
   // Получить глобальные события (на которые я еще не откликался)
   // Показываем только события НЕ-друзей
   // Обновленная логика GLOB согласно новой системе
-  const getGlobalEvents = (): Event[] => {
+  const getGlobalEvents = useCallback((): Event[] => {
     const filtered = events.filter(event => {
       // Исключаем preview-события из ленты
       if (event.id === 'preview-event-temp' || event.id.includes('-temp') || event.id.startsWith('preview-')) {
@@ -2125,7 +2125,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
       if (!aIsMyOrganizer && bIsMyOrganizer) return 1;
       return 0;
     });
-  };
+  }, [currentUserId, events, getUserRelationship, isEventFull, isEventUpcoming, isFriendOfOrganizer, isUserOrganizer]);
 
 // mapServerFriendRequest теперь в hooks/friends/useFriends.ts
 
