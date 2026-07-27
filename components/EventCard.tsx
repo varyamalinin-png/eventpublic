@@ -338,14 +338,14 @@ function EventCard({
   // Проверяем как из контекста (event?.isMassEvent), так и из тегов
   const hasMassEvent = event?.isMassEvent || false;
   const hasMassEventTag = allTags.some(t => 
-    t.toLowerCase().includes('массовое') || 
+    t.toLowerCase().includes(t.events.massEvent) || 
     t.toLowerCase().includes('mass')
   );
   
   // Если событие массовое, но тег отсутствует - добавляем его
   // Это важно для preview-событий, где событие может быть не в контексте
   const finalTags = hasMassEvent && !hasMassEventTag 
-    ? [...allTags, 'массовое']
+    ? [...allTags, t.events.massEvent]
     : allTags;
   
   
@@ -398,7 +398,7 @@ function EventCard({
       return {
         primary: {
           type: 'remove_from_folder',
-          label: 'Удалить из папки',
+          label: t.events.removeFromFolder,
           color: Palette.danger,
           icon: '🗑️'
         },
@@ -512,7 +512,7 @@ function EventCard({
         },
         secondary: {
           type: 'cancel_request',
-          label: 'Отменить запрос',
+          label: t.events.cancelRequest,
           color: Palette.danger,
           icon: '✕'
         }
@@ -528,7 +528,7 @@ function EventCard({
         return {
           primary: {
             type: 'cancel_participation',
-            label: 'Отменить участие',
+            label: t.events.cancelParticipation,
             color: Palette.danger,
             icon: '✕'
           },
@@ -539,13 +539,13 @@ function EventCard({
         return {
           primary: {
             type: 'accepted',
-            label: 'Вы уже участвуете',
+            label: t.events.alreadyParticipating,
             color: Palette.success,
             icon: '✓'
           },
           secondary: {
             type: 'cancel_participation',
-            label: 'Отменить участие',
+            label: t.events.cancelParticipation,
             color: Palette.danger,
             icon: '✕'
           }
@@ -737,17 +737,17 @@ function EventCard({
           }, 1000);
         }
       } else {
-        Alert.alert('Событие отменено', 'Событие было успешно отменено');
+        Alert.alert(t.events.eventCancelled, t.events.eventCancelledSuccess);
       }
     } catch (error: any) {
       logger.error('Ошибка при отмене события:', error);
-      const errorMessage = error?.message || 'Не удалось отменить событие';
+      const errorMessage = error?.message || t.events.failedToCancelEvent;
       
       if (Platform.OS === 'web') {
         console.error('Ошибка отмены события:', errorMessage);
         alert(`Ошибка: ${errorMessage}`);
       } else {
-        Alert.alert('Ошибка', errorMessage);
+        Alert.alert(t.common.error, errorMessage);
       }
     }
   }, [cancelEvent]);
@@ -803,7 +803,7 @@ function EventCard({
         router.push(`/(tabs)/inbox/${eventChat.id}`);
         setShowEventActionsModal(false);
       } else {
-        Alert.alert('Ошибка', 'Чат события не найден');
+        Alert.alert(t.common.error, t.events.eventChatNotFound);
         setShowEventActionsModal(false);
       }
     } else if (actionId === 'schedule') {
@@ -833,10 +833,10 @@ function EventCard({
       animateSaveBounce();
       if (isEventSaved(id)) {
         removeSavedEvent(id);
-        Alert.alert('Готово', 'Событие удалено из сохраненных');
+        Alert.alert(t.common.done, t.events.removedFromSavedMsg);
       } else {
         saveEvent(id, event);
-        Alert.alert('Готово', 'Событие сохранено');
+        Alert.alert(t.common.done, t.events.eventSavedMsg);
       }
       setShowEventActionsModal(false);
     } else if (actionId === 'report') {
@@ -848,19 +848,19 @@ function EventCard({
     } else if (actionId === 'remove_from_folder') {
       if (folderId) {
         Alert.alert(
-          'Удалить из папки',
-          'Вы уверены, что хотите удалить это событие из папки?',
+          t.events.removeFromFolder,
+          t.events.removeFromFolderConfirm,
           [
-            { text: 'Отмена', style: 'cancel' },
+            { text: t.common.cancel, style: 'cancel' },
             {
-              text: 'Удалить',
+              text: t.common.delete,
               style: 'destructive',
               onPress: async () => {
                 try {
                   await removeEventFromFolder(folderId, id);
-                  Alert.alert('Готово', 'Событие удалено из папки');
+                  Alert.alert(t.common.done, t.events.removedFromFolderMsg);
                 } catch (error) {
-                  Alert.alert('Ошибка', 'Не удалось удалить событие из папки');
+                  Alert.alert(t.common.error, t.events.failedToRemoveFromFolder);
                 }
               },
             },
@@ -874,7 +874,7 @@ function EventCard({
     } else if (actionId === 'delete_event') {
       // На вебе используем window.confirm, на мобильных - Alert.alert
       if (Platform.OS === 'web') {
-        const confirmed = window.confirm(t.events.deleteEventConfirm || 'Вы уверены, что хотите удалить это событие?');
+        const confirmed = window.confirm(t.events.deleteEventConfirm || t.events.deleteEventConfirm);
         if (confirmed) {
           (async () => {
             try {
@@ -903,7 +903,7 @@ function EventCard({
               }
             } catch (error) {
               logger.error('Error deleting event:', error);
-              alert(t.events.deleteError || 'Не удалось удалить событие');
+              alert(t.events.deleteError || t.events.failedToDeleteEvent);
             }
           })();
         } else {
@@ -911,16 +911,16 @@ function EventCard({
         }
       } else {
         Alert.alert(
-          t.events.deleteEvent || 'Удалить событие',
-          t.events.deleteEventConfirm || 'Вы уверены, что хотите удалить это событие?',
+          t.events.deleteEvent || t.events.deleteEvent,
+          t.events.deleteEventConfirm || t.events.deleteEventConfirm,
           [
             {
-              text: t.common.cancel || 'Отмена',
+              text: t.common.cancel || t.common.cancel,
               style: 'cancel',
               onPress: () => setShowEventActionsModal(false),
             },
             {
-              text: t.events.deleteEvent || 'Удалить',
+              text: t.events.deleteEvent || t.common.delete,
               style: 'destructive',
               onPress: async () => {
                 try {
@@ -937,7 +937,7 @@ function EventCard({
                   }
                 } catch (error) {
                   logger.error('Error deleting event:', error);
-                  Alert.alert(t.common.error || 'Ошибка', (t.events as any).deleteError || 'Не удалось удалить событие');
+                  Alert.alert(t.common.error || t.common.error, (t.events as any).deleteError || t.events.failedToDeleteEvent);
                 }
               },
             },
@@ -995,7 +995,7 @@ function EventCard({
       logger.debug('Результат разрешений:', hasPermission);
       
       if (hasPermission.status !== 'granted') {
-        Alert.alert('Ошибка', 'Нет доступа к галерее');
+        Alert.alert(t.common.error, t.events.noGalleryAccess);
         return;
       }
 
@@ -1013,7 +1013,7 @@ function EventCard({
       // Добавляем таймаут для диагностики
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
-          reject(new Error('Таймаут ожидания галереи (10 секунд)'));
+          reject(new Error(t.events.galleryTimeout));
         }, 10000);
       });
       
@@ -1024,13 +1024,13 @@ function EventCard({
       if (result && !result.canceled && result.assets && result.assets[0] && currentUserId) {
         logger.debug('Сохраняем фото:', result.assets[0].uri);
         setPersonalEventPhoto(id, currentUserId, result.assets[0].uri);
-        Alert.alert('Успешно', 'Фото события изменено');
+        Alert.alert(t.common.success, t.events.eventPhotoChanged);
       } else {
         logger.debug('Выбор фото отменен пользователем');
       }
     } catch (error) {
       logger.error('Ошибка при выборе фото:', error);
-      Alert.alert('Ошибка', `Не удалось открыть галерею: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
+      Alert.alert(t.common.error, `Не удалось открыть галерею: ${error instanceof Error ? error.message : t.events.unknownError}`);
     }
   }, [id, currentUserId, setPersonalEventPhoto]);
 
@@ -1046,7 +1046,7 @@ function EventCard({
         logger.debug('Открываем галерею после закрытия модального окна (задержка 800ms)');
         handleChangeEventPhoto().catch(error => {
           logger.error('Ошибка при открытии галереи:', error);
-          Alert.alert('Ошибка', `Не удалось открыть галерею: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
+          Alert.alert(t.common.error, `Не удалось открыть галерею: ${error instanceof Error ? error.message : t.events.unknownError}`);
         });
       }, 800);
     });
@@ -1086,11 +1086,11 @@ function EventCard({
         // Удаление события из папки
         if (folderId) {
           Alert.alert(
-            'Удалить из папки',
-            'Удалить это событие из папки?',
+            t.events.removeFromFolder,
+            t.events.removeFromFolderConfirm,
             [
               { 
-                text: 'Отмена', 
+                text: t.common.cancel, 
                 style: 'cancel',
                 onPress: () => {
                   setShowSwipeButtons(false);
@@ -1101,7 +1101,7 @@ function EventCard({
                 }
               },
               {
-                text: 'Удалить',
+                text: t.common.delete,
                 style: 'destructive',
                 onPress: async () => {
                   try {
@@ -1109,13 +1109,13 @@ function EventCard({
                     await removeEventFromFolder(folderId, id);
                     // Если это было последнее событие, папка будет автоматически удалена на сервере
                     // Обновление состояния произойдет через refreshFolders в контексте
-                    Alert.alert('Готово', 'Событие удалено из папки');
+                    Alert.alert(t.common.done, t.events.removedFromFolderMsg);
                   } catch (error: any) {
                     // Если папка не найдена (404), значит она была автоматически удалена
                     if (error?.status === 404 || error?.message?.includes('404')) {
-                      Alert.alert('Папка удалена', 'Папка была удалена, так как в ней не осталось событий');
+                      Alert.alert(t.events.folderDeleted, t.events.folderDeletedEmpty);
                     } else {
-                      Alert.alert('Ошибка', 'Не удалось удалить событие из папки');
+                      Alert.alert(t.common.error, t.events.failedToRemoveFromFolder);
                     }
                   } finally {
                     setShowSwipeButtons(false);
@@ -1591,10 +1591,11 @@ function EventCard({
                   'age_16_plus': '16+',
                   'women_only': 'women only',
                   'men_only': 'men only',
-                  'recurring': 'recurring',
+                  'recurring': t.events.recurringEvent,
                   'starting_soon': 'starting soon',
-                  'массовое': 'массовое',
-                  'регулярное': 'recurring',
+                  // Ключи приходят с сервера как есть — переводим только подписи
+                  'массовое': t.events.massEvent,
+                  'регулярное': t.events.recurringEvent,
                 };
 
                 return (
@@ -1712,7 +1713,7 @@ function EventCard({
                       >
                         {/* Title */}
                         <Text style={exploreStyles.exploreTitle} numberOfLines={2}>
-                          {title || 'Название события'}
+                          {title || t.events.eventTitlePlaceholder}
                         </Text>
 
                         {/* Date + Location row */}
@@ -1732,7 +1733,7 @@ function EventCard({
                           <View style={exploreStyles.exploreInfoItem}>
                             <AppIcon name="pin" size={12} color="rgba(255,255,255,0.8)" />
                             <Text style={exploreStyles.exploreInfoText} numberOfLines={1}>
-                              {isOnlineEvent ? 'Онлайн' : (location || 'Место')}
+                              {isOnlineEvent ? t.events.online : (location || t.events.locationFallback)}
                             </Text>
                           </View>
                         </View>
@@ -1744,7 +1745,7 @@ function EventCard({
                             {description.length > 80 && (
                               <TouchableOpacity onPress={(e) => { e.stopPropagation(); setDescriptionExpanded(!descriptionExpanded); }} activeOpacity={0.7}>
                                 <Text style={{ fontSize: 13, color: '#FF8D32', fontWeight: '600', marginTop: 4 }}>
-                                  {descriptionExpanded ? 'Свернуть' : 'Ещё'}
+                                  {descriptionExpanded ? t.common.showLess : t.events.more}
                                 </Text>
                               </TouchableOpacity>
                             )}
@@ -1988,7 +1989,7 @@ function EventCard({
                     <View style={styles.shareModalItemInfo}>
                       <Text style={styles.shareModalItemName}>{chat.name}</Text>
                       <Text style={styles.shareModalItemSubtext}>
-                        {chat.type === 'event' ? 'Чат события' : 'Личный чат'}
+                        {chat.type === 'event' ? t.events.eventChat : t.events.personalChat2}
                       </Text>
                     </View>
                     {renderCheckbox(selectedShareChats.includes(chat.id))}
@@ -2142,8 +2143,8 @@ function EventCard({
                       <View style={styles.shareModalItemInfo}>
                         <Text style={styles.shareModalItemName}>{folder.name}</Text>
                         <Text style={styles.shareModalItemSubtext}>
-                          {folder.eventCount || folder.events?.length || 0} {folder.eventCount === 1 || folder.events?.length === 1 ? 'событие' : 'событий'}
-                          {isEventInFolder && ' • Уже в папке'}
+                          {folder.eventCount || folder.events?.length || 0} {folder.eventCount === 1 || folder.events?.length === 1 ? t.events.eventWord : t.events.eventsWord}
+                          {isEventInFolder && ` • ${t.events.alreadyInFolder}`}
                         </Text>
                       </View>
                       {(isEventInFolder || isSelected) ? (
@@ -2171,11 +2172,11 @@ function EventCard({
                     for (const folderId of selectedFolderIds) {
                       await addEventToFolder(folderId, id);
                     }
-                    Alert.alert('Готово', `Событие добавлено в ${selectedFolderIds.size} ${selectedFolderIds.size === 1 ? 'папку' : 'папок'}`);
+                    Alert.alert(t.common.done, t.events.addedToFolders);
                     setShowAddToFolderModal(false);
                     setSelectedFolderIds(new Set());
                   } catch (error) {
-                    Alert.alert('Ошибка', 'Не удалось добавить событие в папку');
+                    Alert.alert(t.common.error, t.events.failedToAddToFolder);
                   }
                 }
               }}
@@ -2199,7 +2200,7 @@ function EventCard({
         <View style={styles.shareModalOverlay}>
           <View style={styles.shareModalContent}>
             <View style={styles.shareModalHeader}>
-              <Text style={styles.shareModalTitle}>{(t.events as any).selectDate || 'Выберите дату'}</Text>
+              <Text style={styles.shareModalTitle}>{(t.events as any).selectDate || t.events.selectDate}</Text>
               <TouchableOpacity
                 onPress={() => setShowRecurringDatesModal(false)}
               >
@@ -2218,7 +2219,7 @@ function EventCard({
                     {/* Будущие даты */}
                     {futureDates.length > 0 && (
                       <>
-                        <Text style={styles.recurringDatesSectionTitle}>{(t.events as any).upcomingDates || 'Предстоящие даты'}</Text>
+                        <Text style={styles.recurringDatesSectionTitle}>{(t.events as any).upcomingDates || t.events.upcomingDates}</Text>
                         {futureDates.map((dateItem, index) => {
                           const dateObj = new Date(dateItem.date);
                           const day = dateObj.getDate().toString().padStart(2, '0');
@@ -2244,10 +2245,10 @@ function EventCard({
                                 try {
 
                                   await sendEventRequest(id, currentUserId);
-                                  Alert.alert(t.common.success || 'Успешно', (t.events as any).requestSent || 'Запрос отправлен');
+                                  Alert.alert(t.common.success || t.common.success, (t.events as any).requestSent || t.events.requestSent);
                                 } catch (error) {
                                   logger.error('Failed to send event request', error);
-                                  Alert.alert(t.common.error || 'Ошибка', (t.events as any).failedToSendRequest || 'Не удалось отправить запрос');
+                                  Alert.alert(t.common.error || t.common.error, (t.events as any).failedToSendRequest || t.events.failedToSendRequest);
                                 }
                               }}
                               disabled={isScheduled}
@@ -2255,9 +2256,9 @@ function EventCard({
                               <Text style={styles.recurringDateText}>{formattedDate}</Text>
                               <Text style={styles.recurringDateTime}>{time}</Text>
                               {isScheduled ? (
-                                <Text style={styles.recurringDateStatus}>⏱ {(t.events as any).requestPending || 'Запрос отправлен'}</Text>
+                                <Text style={styles.recurringDateStatus}>⏱ {(t.events as any).requestPending || t.events.requestSent}</Text>
                               ) : (
-                                <Text style={styles.recurringDateButton}>{t.events.schedule || 'Запланировать'}</Text>
+                                <Text style={styles.recurringDateButton}>{t.events.schedule || t.events.schedule}</Text>
                               )}
                             </TouchableOpacity>
                           );
@@ -2283,16 +2284,16 @@ function EventCard({
                                     logger.warn(`Failed to send request for date ${dateItem.date}`, error);
                                   }
                                 }
-                                Alert.alert(t.common.success || 'Успешно', (t.events as any).allRequestsSent || 'Запросы на все даты отправлены');
+                                Alert.alert(t.common.success || t.common.success, (t.events as any).allRequestsSent || t.events.allRequestsSentMsg);
                                 setShowRecurringDatesModal(false);
                               } catch (error) {
                                 logger.error('Failed to send all event requests', error);
-                                Alert.alert(t.common.error || 'Ошибка', (t.events as any).failedToSendRequests || 'Не удалось отправить запросы');
+                                Alert.alert(t.common.error || t.common.error, (t.events as any).failedToSendRequests || t.events.failedToSendRequestsMsg);
                               }
                             }}
                           >
                             <Text style={styles.scheduleAllButtonText}>
-                              {(t.events as any).scheduleAllDates || 'Запланировать все даты'} ({futureDates.length})
+                              {(t.events as any).scheduleAllDates || t.events.scheduleAllDates} ({futureDates.length})
                             </Text>
                           </TouchableOpacity>
                         )}
@@ -2303,7 +2304,7 @@ function EventCard({
                     {pastDates.length > 0 && (typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production') && (
                       <>
                         <Text style={[styles.recurringDatesSectionTitle, { opacity: 0.5, marginTop: 20 } as any]}>
-                          {(t.events as any).pastDates || 'Прошедшие даты'} ({pastDates.length})
+                          {(t.events as any).pastDates || t.events.pastDates} ({pastDates.length})
                         </Text>
                       </>
                     )}
@@ -2375,7 +2376,7 @@ function EventCard({
                       />
                       <View style={styles.shareModalItemInfo}>
                         <Text style={styles.shareModalItemName}>
-                          {participantData?.name || participantData?.username || 'Пользователь'}
+                          {participantData?.name || participantData?.username || t.events.userFallback}
                         </Text>
                         {participantData?.username && participantData.username !== participantData?.name && (
                           <Text style={styles.shareModalItemSubtext}>
@@ -2415,22 +2416,22 @@ function EventCard({
                     // После успешной передачи роли данные обновятся через syncEventsFromServer
                     // Событие автоматически исчезнет из календаря и списка участников
                   } else {
-                    const errorMsg = 'Функция передачи роли не доступна';
+                    const errorMsg = t.events.transferRoleUnavailable;
                     if (Platform.OS === 'web') {
                       console.error(errorMsg);
                       alert(`Ошибка: ${errorMsg}`);
                     } else {
-                      Alert.alert('Ошибка', errorMsg);
+                      Alert.alert(t.common.error, errorMsg);
                     }
                   }
                 } catch (error: any) {
                   logger.error('Failed to transfer organizer role', error);
-                  const errorMessage = error?.message || error?.body?.message || 'Не удалось передать роль организатора';
+                  const errorMessage = error?.message || error?.body?.message || t.events.failedToTransferRole;
                   if (Platform.OS === 'web') {
                     console.error('Ошибка передачи роли организатора:', errorMessage);
                     alert(`Ошибка: ${errorMessage}`);
                   } else {
-                    Alert.alert('Ошибка', errorMessage);
+                    Alert.alert(t.common.error, errorMessage);
                   }
                 }
               }}
