@@ -858,50 +858,6 @@ export function EventsProvider({ children }: EventsProviderProps) {
   }, [friends]);
 
   // Обновленная логика FRIENDS согласно новой системе
-  const getFriendsForEvents = useCallback((): Event[] => {
-    if (!currentUserId) {
-      return [];
-    }
-    const viewerId = currentUserId;
-    const now = new Date();
-    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 часа назад
-    
-    const filtered = events.filter(event => {
-      // Исключаем preview-события из ленты
-      if (event.id === 'preview-event-temp' || event.id.includes('-temp') || event.id.startsWith('preview-')) {
-        return false;
-      }
-      
-      // предстоящее
-      if (!isEventUpcoming(event)) return false;
-      // не_набрано
-      if (isEventFull(event)) return false;
-      
-      // Исключаем отклоненные события и отклонённые приглашения
-      const userStatus = getUserRequestStatus(event, viewerId);
-      if (userStatus === 'rejected') return false;
-      const hasRejectedRequest = eventRequests.some(
-        r => r.eventId === event.id && (r.fromUserId === viewerId || r.toUserId === viewerId) && r.status === 'rejected'
-      );
-      if (hasRejectedRequest) return false;
-      
-      // Для остальных событий применяем обычные фильтры:
-      // !я_член_события (скрываем все события, где мы уже участники, но не организаторы)
-      if (isUserEventMember(event, viewerId) && !isUserOrganizer(event, viewerId)) return false;
-      // друг_организатора
-      if (!isFriendOfOrganizer(event, viewerId)) return false;
-      return true;
-    });
-    
-    // Сортируем: сначала события, где я организатор (недавно созданные), затем остальные
-    return filtered.sort((a, b) => {
-      const aIsMyOrganizer = isUserOrganizer(a, viewerId);
-      const bIsMyOrganizer = isUserOrganizer(b, viewerId);
-      if (aIsMyOrganizer && !bIsMyOrganizer) return -1;
-      if (!aIsMyOrganizer && bIsMyOrganizer) return 1;
-      return 0;
-    });
-  }, [currentUserId, eventRequests, events, getUserRequestStatus, isEventFull, isFriendOfOrganizer, isUserEventMember, isUserOrganizer]);
 
   // getEventsByUserFolder теперь в useUserFolders хуке
 
@@ -1608,6 +1564,51 @@ export function EventsProvider({ children }: EventsProviderProps) {
     const friendIds = userFriendsMap[resolvedUserId] ?? [];
     return friendIds.includes(event.organizerId);
   }, [resolveUserId, userFriendsMap]);
+
+  const getFriendsForEvents = useCallback((): Event[] => {
+    if (!currentUserId) {
+      return [];
+    }
+    const viewerId = currentUserId;
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 часа назад
+    
+    const filtered = events.filter(event => {
+      // Исключаем preview-события из ленты
+      if (event.id === 'preview-event-temp' || event.id.includes('-temp') || event.id.startsWith('preview-')) {
+        return false;
+      }
+      
+      // предстоящее
+      if (!isEventUpcoming(event)) return false;
+      // не_набрано
+      if (isEventFull(event)) return false;
+      
+      // Исключаем отклоненные события и отклонённые приглашения
+      const userStatus = getUserRequestStatus(event, viewerId);
+      if (userStatus === 'rejected') return false;
+      const hasRejectedRequest = eventRequests.some(
+        r => r.eventId === event.id && (r.fromUserId === viewerId || r.toUserId === viewerId) && r.status === 'rejected'
+      );
+      if (hasRejectedRequest) return false;
+      
+      // Для остальных событий применяем обычные фильтры:
+      // !я_член_события (скрываем все события, где мы уже участники, но не организаторы)
+      if (isUserEventMember(event, viewerId) && !isUserOrganizer(event, viewerId)) return false;
+      // друг_организатора
+      if (!isFriendOfOrganizer(event, viewerId)) return false;
+      return true;
+    });
+    
+    // Сортируем: сначала события, где я организатор (недавно созданные), затем остальные
+    return filtered.sort((a, b) => {
+      const aIsMyOrganizer = isUserOrganizer(a, viewerId);
+      const bIsMyOrganizer = isUserOrganizer(b, viewerId);
+      if (aIsMyOrganizer && !bIsMyOrganizer) return -1;
+      if (!aIsMyOrganizer && bIsMyOrganizer) return 1;
+      return 0;
+    });
+  }, [currentUserId, eventRequests, events, getUserRequestStatus, isEventFull, isFriendOfOrganizer, isUserEventMember, isUserOrganizer]);
   
   // Универсальная функция для проверки участия пользователя в событии (для обратной совместимости)
   const isUserParticipant = useCallback((event: Event, userId: string): boolean => {
