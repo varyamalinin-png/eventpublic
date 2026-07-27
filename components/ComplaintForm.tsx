@@ -30,18 +30,18 @@ interface ComplaintFormProps {
 
 const COMPLAINT_REASONS = {
   EVENT: [
-    'Некорректное содержание',
-    'Спам',
-    'Мошенничество',
-    'Нарушение правил',
-    'Другое',
+    t.complaint.inappropriateContent,
+    t.complaint.spam,
+    t.complaint.fraud,
+    t.complaint.rulesViolation,
+    t.complaint.other,
   ],
   USER: [
-    'Оскорбления',
-    'Спам',
-    'Мошенничество',
-    'Некорректное поведение',
-    'Другое',
+    t.complaint.insults,
+    t.complaint.spam,
+    t.complaint.fraud,
+    t.complaint.inappropriateBehavior,
+    t.complaint.other,
   ],
 };
 
@@ -59,7 +59,7 @@ export default function ComplaintForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const reasons = COMPLAINT_REASONS[type];
-  const title = type === 'EVENT' ? 'Жалоба на событие' : 'Жалоба на пользователя';
+  const title = type === 'EVENT' ? t.complaint.complaintAboutEvent : t.complaint.complaintAboutUser;
 
   const handleClose = () => {
     setSelectedReason('');
@@ -69,12 +69,12 @@ export default function ComplaintForm({
 
   const handleSubmit = async () => {
     if (!selectedReason) {
-      Alert.alert('Ошибка', 'Пожалуйста, выберите причину жалобы');
+      Alert.alert(t.common.error, t.complaint.selectReason);
       return;
     }
 
     if (!accessToken) {
-      Alert.alert('Ошибка', 'Необходимо войти в аккаунт для отправки жалобы');
+      Alert.alert(t.common.error, t.complaint.signInToReport);
       return;
     }
 
@@ -91,14 +91,14 @@ export default function ComplaintForm({
         }),
       }, accessToken);
 
-      Alert.alert('Жалоба отправлена', 'Мы рассмотрим её в ближайшее время.');
+      Alert.alert(t.complaint.complaintSent, t.complaint.willReviewSoon);
       setSelectedReason('');
       setDescription('');
       onSuccess?.();
       onClose();
     } catch (error) {
       logger.error('Failed to submit complaint:', error);
-      Alert.alert('Ошибка', 'Не удалось отправить жалобу. Попробуйте позже.');
+      Alert.alert(t.common.error, t.complaint.complaintFailed);
     } finally {
       setIsSubmitting(false);
     }
@@ -146,7 +146,7 @@ export default function ComplaintForm({
             <Text style={s.sectionLabel}>Дополнительно (необязательно)</Text>
             <TextInput
               style={s.textInput}
-              placeholder="Опишите проблему подробнее..."
+              placeholder={t.complaint.describeProblem}
               placeholderTextColor="rgba(244,244,245,0.28)"
               value={description}
               onChangeText={setDescription}
@@ -166,7 +166,7 @@ export default function ComplaintForm({
               disabled={!selectedReason || isSubmitting}
               activeOpacity={0.8}
             >
-              <Text style={s.submitBtnText}>{isSubmitting ? 'Отправка...' : 'Отправить'}</Text>
+              <Text style={s.submitBtnText}>{isSubmitting ? t.complaint.sending : t.complaint.send}</Text>
             </TouchableOpacity>
           </View>
         </View>

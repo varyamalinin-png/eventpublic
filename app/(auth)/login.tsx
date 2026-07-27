@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useLanguage } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
 import { createLogger } from '../../utils/logger';
 import * as AuthSession from 'expo-auth-session';
@@ -42,6 +43,8 @@ export default function AuthScreen() {
     isAuthenticated,
     user,
   } = useAuth();
+  
+  const { t } = useLanguage();
 
   // После успешной авторизации переходим в приложение или настройки
   useEffect(() => {
@@ -101,7 +104,7 @@ export default function AuthScreen() {
       handleGoogleSignIn(response.params.id_token);
     } else if (Platform.OS !== 'web' && response?.type === 'error') {
       logger.error('Google OAuth error:', response.error);
-      setErrorMessage('Не удалось войти через Google');
+      setErrorMessage(t.auth.googleSignInFailed);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [response]);
@@ -109,7 +112,7 @@ export default function AuthScreen() {
   // Функция для прямого запуска Google OAuth на вебе
   const handleGoogleSignInWeb = () => {
     if (Platform.OS !== 'web' || !googleClientId) {
-      setErrorMessage('Google OAuth не настроен');
+      setErrorMessage(t.auth.googleNotConfigured);
       return;
     }
 
@@ -143,7 +146,7 @@ export default function AuthScreen() {
       // После успешного логина useEffect выше обработает переход
     } catch (error: any) {
       logger.error('Google sign in failed', error);
-      const errorMsg = error?.body?.message || error?.message || 'Не удалось войти через Google';
+      const errorMsg = error?.body?.message || error?.message || t.auth.googleSignInFailed;
       setErrorMessage(errorMsg);
     }
   };
@@ -151,7 +154,7 @@ export default function AuthScreen() {
   const handleLogin = async () => {
     setErrorMessage(null);
     if (!loginEmail.trim() || !loginPassword) {
-      setErrorMessage('Введите email и пароль');
+      setErrorMessage(t.auth.enterEmailAndPassword);
       return;
     }
 
@@ -160,10 +163,10 @@ export default function AuthScreen() {
       // После успешного логина useEffect выше обработает переход
     } catch (error: any) {
       logger.error('login failed', error);
-      const errorMsg = error?.body?.message || error?.message || 'Не удалось войти';
+      const errorMsg = error?.body?.message || error?.message || t.auth.signInFailed;
       
       // Если email не подтвержден, переходим на подтверждение
-      if (errorMsg.toLowerCase().includes('email') && errorMsg.toLowerCase().includes('подтвержден')) {
+      if (errorMsg.toLowerCase().includes('email') && errorMsg.toLowerCase().includes(t.auth.verified)) {
         router.push({
           pathname: '/(auth)/verify-email',
           params: { 
@@ -180,12 +183,12 @@ export default function AuthScreen() {
   const handleRegister = async () => {
     setErrorMessage(null);
     if (!registerEmail.trim() || !registerUsername.trim() || !registerPassword) {
-      setErrorMessage('Заполните все обязательные поля');
+      setErrorMessage(t.auth.fillRequiredFields);
       return;
     }
 
     if (registerPassword.length < 6) {
-      setErrorMessage('Пароль должен быть не менее 6 символов');
+      setErrorMessage(t.messages.passwordTooShort);
       return;
     }
 
@@ -206,16 +209,16 @@ export default function AuthScreen() {
       });
     } catch (error: any) {
       logger.error('register failed', error);
-      setErrorMessage(error?.body?.message || error?.message || 'Не удалось зарегистрироваться');
+      setErrorMessage(error?.body?.message || error?.message || t.auth.signUpFailed);
     }
   };
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Добро пожаловать</Text>
+        <Text style={styles.title}>{t.auth.welcome}</Text>
         <Text style={styles.subtitle}>
-          {mode === 'login' ? 'Войдите в свой аккаунт' : 'Создайте новый аккаунт'}
+          {mode === 'login' ? t.auth.signInToAccount : t.auth.createNewAccount}
         </Text>
 
         {/* Переключатель режимов */}
@@ -229,7 +232,7 @@ export default function AuthScreen() {
             disabled={loading}
           >
             <Text style={[styles.tabButtonText, mode === 'login' && styles.tabButtonTextActive]}>
-              Вход
+              {t.auth.signIn}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -241,7 +244,7 @@ export default function AuthScreen() {
             disabled={loading}
           >
             <Text style={[styles.tabButtonText, mode === 'register' && styles.tabButtonTextActive]}>
-              Регистрация
+              {t.auth.signUp}
             </Text>
           </TouchableOpacity>
         </View>
@@ -268,7 +271,7 @@ export default function AuthScreen() {
             />
             <TextInput
               style={styles.input}
-              placeholder="Пароль"
+              placeholder={t.auth.password}
               placeholderTextColor="rgba(244,244,245,0.35)"
               secureTextEntry
               value={loginPassword}
@@ -283,14 +286,14 @@ export default function AuthScreen() {
               {loading ? (
                 <ActivityIndicator color="#f4f4f5" />
               ) : (
-                <Text style={styles.primaryButtonText}>Войти</Text>
+                <Text style={styles.primaryButtonText}>{t.auth.signInButton}</Text>
               )}
             </TouchableOpacity>
 
             {(SHOW_GOOGLE_AUTH || Platform.OS === 'ios') && (
               <View style={styles.divider}>
                 <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>или</Text>
+                <Text style={styles.dividerText}>{t.auth.or}</Text>
                 <View style={styles.dividerLine} />
               </View>
             )}
@@ -301,7 +304,7 @@ export default function AuthScreen() {
                 onPress={Platform.OS === 'web' ? handleGoogleSignInWeb : () => promptAsync()}
                 disabled={loading || !googleClientId}
               >
-                <Text style={styles.googleButtonText}>Продолжить с Google</Text>
+                <Text style={styles.googleButtonText}>{t.auth.continueWithGoogle}</Text>
               </TouchableOpacity>
             )}
 
@@ -321,12 +324,12 @@ export default function AuthScreen() {
                     }
                   } catch (e: any) {
                     if (e.code !== 'ERR_REQUEST_CANCELED') {
-                      setErrorMessage('Не удалось войти через Apple');
+                      setErrorMessage(t.auth.appleSignInFailed);
                     }
                   }
                 }}
               >
-                <Text style={[styles.googleButtonText, { color: '#fff' }]}> Продолжить с Apple</Text>
+                <Text style={[styles.googleButtonText, { color: '#fff' }]}> {t.auth.continueWithApple}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -347,7 +350,7 @@ export default function AuthScreen() {
             />
             <TextInput
               style={styles.input}
-              placeholder="Имя пользователя"
+              placeholder={t.auth.username}
               placeholderTextColor="rgba(244,244,245,0.35)"
               autoCapitalize="none"
               value={registerUsername}
@@ -356,7 +359,7 @@ export default function AuthScreen() {
             />
             <TextInput
               style={styles.input}
-              placeholder="Имя (необязательно)"
+              placeholder={t.auth.nameOptional}
               placeholderTextColor="rgba(244,244,245,0.35)"
               value={registerName}
               onChangeText={setRegisterName}
@@ -364,7 +367,7 @@ export default function AuthScreen() {
             />
             <TextInput
               style={styles.input}
-              placeholder="Пароль"
+              placeholder={t.auth.password}
               placeholderTextColor="rgba(244,244,245,0.35)"
               secureTextEntry
               value={registerPassword}
@@ -385,7 +388,7 @@ export default function AuthScreen() {
 
             <View style={styles.divider}>
               <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>или</Text>
+              <Text style={styles.dividerText}>{t.auth.or}</Text>
               <View style={styles.dividerLine} />
             </View>
 
@@ -394,7 +397,7 @@ export default function AuthScreen() {
               onPress={Platform.OS === 'web' ? handleGoogleSignInWeb : () => promptAsync()}
               disabled={loading || !googleClientId}
             >
-              <Text style={styles.googleButtonText}>Регистрация через Google</Text>
+              <Text style={styles.googleButtonText}>{t.auth.signUpWithGoogle}</Text>
             </TouchableOpacity>
 
             {Platform.OS === 'ios' && (
@@ -413,12 +416,12 @@ export default function AuthScreen() {
                     }
                   } catch (e: any) {
                     if (e.code !== 'ERR_REQUEST_CANCELED') {
-                      setErrorMessage('Не удалось войти через Apple');
+                      setErrorMessage(t.auth.appleSignInFailed);
                     }
                   }
                 }}
               >
-                <Text style={[styles.googleButtonText, { color: '#fff' }]}> Регистрация через Apple</Text>
+                <Text style={[styles.googleButtonText, { color: '#fff' }]}> {t.auth.signUpWithApple}</Text>
               </TouchableOpacity>
             )}
           </View>
