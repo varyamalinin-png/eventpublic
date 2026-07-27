@@ -337,9 +337,10 @@ function EventCard({
   // Явно добавляем метку "массовое" если событие массовое, но тег отсутствует
   // Проверяем как из контекста (event?.isMassEvent), так и из тегов
   const hasMassEvent = event?.isMassEvent || false;
-  const hasMassEventTag = allTags.some(t => 
-    t.toLowerCase().includes(t.events.massEvent) || 
-    t.toLowerCase().includes('mass')
+  // Параметр назван tag, а не t: короткое t затеняло бы t из useLanguage
+  const hasMassEventTag = allTags.some(tag =>
+    tag.toLowerCase().includes('массов') ||
+    tag.toLowerCase().includes('mass')
   );
   
   // Если событие массовое, но тег отсутствует - добавляем его
