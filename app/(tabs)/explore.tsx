@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Animated, PanResponder, Dimensions, Image, Platform, RefreshControl } from 'react-native';
+import { View, Text, FlatList, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Animated, PanResponder, Dimensions, Image, Platform, RefreshControl } from 'react-native';
 import { Link, useRouter, useFocusEffect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useRefresh } from '../../hooks/useRefresh';
@@ -30,15 +30,17 @@ interface EventFolder {
   eventIds: string[];
 }
 
-// Количество событий, подгружаемых за один раз (прогрессивный рендеринг)
+// Первая пачка и размер батча виртуализации FlatList
 const PAGE_SIZE = 12;
+
+// Одна ссылка на пустой список меток: `|| []` создавал новый массив
+// на каждый рендер и сбрасывал memo у EventCard
+const EMPTY_TAGS: string[] = [];
 
 export default function ExploreScreen() {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'GLOB' | 'FRIENDS'>('GLOB');
   const [searchQuery, setSearchQuery] = useState('');
-  // Прогрессивный рендеринг: начинаем с PAGE_SIZE событий, добавляем при скролле к концу
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [eventHeights, setEventHeights] = useState<{[key: string]: number}>({});
   const handleEventLayout = useCallback((eventId: string, height: number) => {
     // Без сравнения каждый layout писал в state и перерисовывал всю ленту,
@@ -62,7 +64,7 @@ export default function ExploreScreen() {
   // Состояния для свайпа и ленты организаторов
   const [showOrganizers, setShowOrganizers] = useState(false);
   const translateX = useRef(new Animated.Value(0)).current;
-  const eventsScrollViewRef = useRef<ScrollView>(null);
+  const eventsScrollViewRef = useRef<FlatList<Event>>(null);
   const { refreshing, onRefresh } = useRefresh();
   const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
 
@@ -477,7 +479,7 @@ export default function ExploreScreen() {
     if (globEvents.length > prevEventsCountRef.current && eventsScrollViewRef.current && activeTab === 'GLOB') {
       // Небольшая задержка для рендеринга
       setTimeout(() => {
-        eventsScrollViewRef.current?.scrollTo({ y: 0, animated: true });
+        eventsScrollViewRef.current?.scrollToOffset({ offset: 0, animated: true });
       }, 300);
     }
     prevEventsCountRef.current = globEvents.length;
@@ -627,6 +629,185 @@ export default function ExploreScreen() {
       </View>
     );
   }
+
+  // Лента виртуализирована: строка списка ушла в renderItem, шапка — в
+  // ListHeaderComponent. Обе функции стабильны, иначе FlatList пересоздаёт ячейки.
+  const renderGlobItem = useCallback(({ item: event }: { item: Event }) => {
+    const org = organizersForCurrentEvents?.find(o => o.eventId === event.id);
+    return (
+        <View key={event.id} style={{ flexDirection: 'row', width: SCREEN_W + ORGANIZER_WIDTH }}>
+          <View style={{ width: ORGANIZER_WIDTH, paddingHorizontal: 8 }}>
+            <OrganizerCard
+              organizerId={event.organizerId}
+              name={org?.name || ''}
+              age={org?.age || ''}
+              username={org?.username || ''}
+              avatar={org?.avatar || event.organizerAvatar || ''}
+              bio={org?.bio || ''}
+              geoPosition={org?.geoPosition || ''}
+              stats={org?.stats || { totalEvents: 0, organizedEvents: 0, participatedEvents: 0, complaints: 0, friends: 0 }}
+              correspondingEventId={event.id}
+              eventHeight={eventHeights[event.id]}
+              currentUserId={currentUserId}
+            />
+          </View>
+          <View style={{ width: SCREEN_W, paddingHorizontal: 20 }}>
+            <EventCard
+              id={event.id}
+              title={event.title}
+              description={event.description}
+              date={event.date}
+              time={event.time}
+              displayDate={event.displayDate}
+              location={event.location}
+              price={event.price}
+              participants={event.participants}
+              maxParticipants={event.maxParticipants}
+              organizerAvatar={event.organizerAvatar}
+              organizerId={event.organizerId}
+              variant="default"
+              // Пока открыта лента организаторов, свайп карточки выключен:
+              // иначе она перехватывала жест закрытия панели и наезжала
+              // на карточку организатора
+              showSwipeAction={!showOrganizers}
+              mediaUrl={event.mediaUrl}
+              mediaType={event.mediaType}
+              mediaAspectRatio={event.mediaAspectRatio}
+              participantsList={event.participantsList}
+              participantsData={event.participantsData}
+              context="explore"
+              tags={event.tags}
+              onLayout={getLayoutHandler(event.id)}
+            />
+          </View>
+        </View>
+    );
+  }, [SCREEN_W, currentUserId, eventHeights, getLayoutHandler, organizersForCurrentEvents, showOrganizers]);
+
+  const renderFolderItem = useCallback(({ item: event }: { item: Event }) => (
+      <EventCard
+          key={event.id}
+          id={event.id}
+          title={event.title}
+          description={event.description}
+          date={event.date}
+          time={event.time}
+          displayDate={event.displayDate}
+          location={event.location}
+          price={event.price}
+          participants={event.participants}
+          maxParticipants={event.maxParticipants}
+          organizerAvatar={event.organizerAvatar}
+          organizerId={event.organizerId}
+        variant="default"
+        showSwipeAction={!showOrganizers}
+          mediaUrl={event.mediaUrl}
+          mediaType={event.mediaType}
+          mediaAspectRatio={event.mediaAspectRatio}
+          participantsList={event.participantsList}
+          participantsData={event.participantsData}
+          context="explore"
+          tags={event.tags || EMPTY_TAGS}
+          onLayout={getLayoutHandler(event.id)}
+        />
+  ), [getLayoutHandler, showOrganizers]);
+
+  const listHeader = (
+    <>
+    {/* Табы — ряд с организаторским spacer слева */}
+    <View style={{ flexDirection: 'row', width: SCREEN_W + ORGANIZER_WIDTH }}>
+      <View style={{ width: ORGANIZER_WIDTH, paddingHorizontal: 8 }}>
+        <View style={styles.tabsBar}>
+          <View style={[styles.tab, styles.activeTab]}>
+            <Text style={[styles.tabText, styles.activeTabText]}>{t.explore.organizers}</Text>
+          </View>
+        </View>
+      </View>
+    <View style={[styles.tabsBar, { width: SCREEN_W, paddingHorizontal: 20 }]} {...(Platform.OS === 'web' ? { nativeID: 'explore-tabs-bar', dataSet: { exploreTabsBar: 'true' } } : {})}>
+      <TouchableOpacity
+        style={[styles.tab, activeTab === 'GLOB' && styles.activeTab]}
+        onPress={() => {
+          setActiveTab('GLOB');
+          setShowOrganizers(false);
+          translateX.setValue(0);
+        }}
+        {...(Platform.OS === 'web' ? { dataSet: { active: activeTab === 'GLOB' ? 'true' : 'false' } } : {})}
+      >
+        <Text style={[styles.tabText, activeTab === 'GLOB' && styles.activeTabText]}>GLOB</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.tab, activeTab === 'FRIENDS' && styles.activeTab]}
+        onPress={() => {
+          setActiveTab('FRIENDS');
+          setShowOrganizers(false);
+          translateX.setValue(0);
+        }}
+        {...(Platform.OS === 'web' ? { dataSet: { active: activeTab === 'FRIENDS' ? 'true' : 'false' } } : {})}
+      >
+        <Text style={[styles.tabText, activeTab === 'FRIENDS' && styles.activeTabText]}>FRIENDS</Text>
+      </TouchableOpacity>
+
+    </View>
+    </View>
+
+    {/* Папки для FRIENDS - перемещены внутрь ScrollView */}
+    {activeTab === 'FRIENDS' && (
+      <View style={styles.foldersContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.foldersScroll}>
+          <TouchableOpacity 
+            style={[styles.folderItem, selectedFolder === null && styles.selectedFolder]}
+            onPress={() => handleFolderPress(null)}
+          >
+            <Text style={[styles.folderText, selectedFolder === null && styles.selectedFolderText]}>
+              {t.settings.profileVisibility.all}
+            </Text>
+          </TouchableOpacity>
+          
+          {folders.map((folder, index) => (
+            <TouchableOpacity
+              key={folder.id}
+              style={[
+                styles.folderItem, 
+                selectedFolder === folder.id && styles.selectedFolder,
+                draggedIndex === index && styles.draggedFolder
+              ]}
+              onPress={() => handleFolderPress(folder.id, index)}
+              onLongPress={() => handleDragStart(index)}
+            >
+              <Text style={[styles.folderText, selectedFolder === folder.id && styles.selectedFolderText]}>
+                {folder.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          
+          {/* Кнопка добавления папки */}
+          <TouchableOpacity 
+            style={styles.addFolderButtonSmall}
+            onPress={() => setShowCreateFolder(true)}
+          >
+            <Text style={styles.addFolderIconSmall}>+</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    )}
+    </>
+  );
+
+  // Контейнер ленты сдвинут влево на ширину колонки организаторов,
+  // поэтому пустое состояние надо вернуть обратно — иначе уезжает за экран
+  const listEmpty = activeTab === 'GLOB' ? (
+      <View style={[styles.emptyState, { width: SCREEN_W, paddingHorizontal: 20, marginLeft: ORGANIZER_WIDTH }]}>
+        <Text style={styles.emptyText}>{t.empty.noEvents}</Text>
+        <Text style={styles.emptySubtext}>{t.empty.noEventsSubtext}</Text>
+      </View>
+  ) : (
+      <View style={[styles.emptyState, { width: SCREEN_W, paddingHorizontal: 20, marginLeft: ORGANIZER_WIDTH }]}>
+        <Text style={styles.emptyText}>{t.empty.noFriendsEvents}</Text>
+        <Text style={styles.emptySubtext}>{t.empty.noFriendsEventsSubtext}</Text>
+      </View>
+  );
+
 
   return (
     <View style={styles.container}>
@@ -818,197 +999,20 @@ export default function ExploreScreen() {
       {/* Контент — единая широкая лента, сдвигается горизонтально */}
       <View style={{ flex: 1, overflow: 'hidden' }} {...panResponder.panHandlers}>
       <Animated.View style={{ flex: 1, width: SCREEN_W + ORGANIZER_WIDTH, transform: [{ translateX: Animated.subtract(translateX, new Animated.Value(ORGANIZER_WIDTH)) }] }}>
-      <ScrollView
+      <FlatList
         ref={eventsScrollViewRef}
+        data={activeTab === 'GLOB' ? globEvents : folderEvents}
+        keyExtractor={(item) => item.id}
+        renderItem={activeTab === 'GLOB' ? renderGlobItem : renderFolderItem}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
         contentContainerStyle={{ paddingBottom: 24 }}
         removeClippedSubviews={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF8D32" />}
-        onScroll={(event) => {
-          const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-          if (contentSize.height - contentOffset.y - layoutMeasurement.height >= 1500) return;
-          // Условие выше истинно на всей последней тысяче пикселей, а onScroll летит
-          // ~10 раз в секунду — без потолка по длине списка счётчик рос бы бесконечно
-          const total = (activeTab === 'GLOB' ? globEvents : folderEvents).length;
-          setVisibleCount(prev => (prev >= total ? prev : Math.min(prev + PAGE_SIZE, total)));
-        }}
-        scrollEventThrottle={100}
-      >
-        {/* Табы — ряд с организаторским spacer слева */}
-        <View style={{ flexDirection: 'row', width: SCREEN_W + ORGANIZER_WIDTH }}>
-          <View style={{ width: ORGANIZER_WIDTH, paddingHorizontal: 8 }}>
-            <View style={styles.tabsBar}>
-              <View style={[styles.tab, styles.activeTab]}>
-                <Text style={[styles.tabText, styles.activeTabText]}>{t.explore.organizers}</Text>
-              </View>
-            </View>
-          </View>
-        <View style={[styles.tabsBar, { width: SCREEN_W, paddingHorizontal: 20 }]} {...(Platform.OS === 'web' ? { nativeID: 'explore-tabs-bar', dataSet: { exploreTabsBar: 'true' } } : {})}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'GLOB' && styles.activeTab]}
-            onPress={() => {
-              setActiveTab('GLOB');
-              setVisibleCount(PAGE_SIZE);
-              setShowOrganizers(false);
-              translateX.setValue(0);
-            }}
-            {...(Platform.OS === 'web' ? { dataSet: { active: activeTab === 'GLOB' ? 'true' : 'false' } } : {})}
-          >
-            <Text style={[styles.tabText, activeTab === 'GLOB' && styles.activeTabText]}>GLOB</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'FRIENDS' && styles.activeTab]}
-            onPress={() => {
-              setActiveTab('FRIENDS');
-              setVisibleCount(PAGE_SIZE);
-              setShowOrganizers(false);
-              translateX.setValue(0);
-            }}
-            {...(Platform.OS === 'web' ? { dataSet: { active: activeTab === 'FRIENDS' ? 'true' : 'false' } } : {})}
-          >
-            <Text style={[styles.tabText, activeTab === 'FRIENDS' && styles.activeTabText]}>FRIENDS</Text>
-          </TouchableOpacity>
-
-        </View>
-        </View>
-
-        {/* Папки для FRIENDS - перемещены внутрь ScrollView */}
-        {activeTab === 'FRIENDS' && (
-          <View style={styles.foldersContainer}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.foldersScroll}>
-              <TouchableOpacity 
-                style={[styles.folderItem, selectedFolder === null && styles.selectedFolder]}
-                onPress={() => handleFolderPress(null)}
-              >
-                <Text style={[styles.folderText, selectedFolder === null && styles.selectedFolderText]}>
-                  {t.settings.profileVisibility.all}
-                </Text>
-              </TouchableOpacity>
-              
-              {folders.map((folder, index) => (
-                <TouchableOpacity
-                  key={folder.id}
-                  style={[
-                    styles.folderItem, 
-                    selectedFolder === folder.id && styles.selectedFolder,
-                    draggedIndex === index && styles.draggedFolder
-                  ]}
-                  onPress={() => handleFolderPress(folder.id, index)}
-                  onLongPress={() => handleDragStart(index)}
-                >
-                  <Text style={[styles.folderText, selectedFolder === folder.id && styles.selectedFolderText]}>
-                    {folder.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              
-              {/* Кнопка добавления папки */}
-              <TouchableOpacity 
-                style={styles.addFolderButtonSmall}
-                onPress={() => setShowCreateFolder(true)}
-              >
-                <Text style={styles.addFolderIconSmall}>+</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        )}
-
-        {activeTab === 'GLOB' ? (
-          globEvents.length > 0 ? (
-            globEvents.slice(0, visibleCount).map((event) => {
-              const org = organizersForCurrentEvents?.find(o => o.eventId === event.id);
-              return (
-                <View key={event.id} style={{ flexDirection: 'row', width: SCREEN_W + ORGANIZER_WIDTH }}>
-                  <View style={{ width: ORGANIZER_WIDTH, paddingHorizontal: 8 }}>
-                    <OrganizerCard
-                      organizerId={event.organizerId}
-                      name={org?.name || ''}
-                      age={org?.age || ''}
-                      username={org?.username || ''}
-                      avatar={org?.avatar || event.organizerAvatar || ''}
-                      bio={org?.bio || ''}
-                      geoPosition={org?.geoPosition || ''}
-                      stats={org?.stats || { totalEvents: 0, organizedEvents: 0, participatedEvents: 0, complaints: 0, friends: 0 }}
-                      correspondingEventId={event.id}
-                      eventHeight={eventHeights[event.id]}
-                      currentUserId={currentUserId}
-                    />
-                  </View>
-                  <View style={{ width: SCREEN_W, paddingHorizontal: 20 }}>
-                    <EventCard
-                      id={event.id}
-                      title={event.title}
-                      description={event.description}
-                      date={event.date}
-                      time={event.time}
-                      displayDate={event.displayDate}
-                      location={event.location}
-                      price={event.price}
-                      participants={event.participants}
-                      maxParticipants={event.maxParticipants}
-                      organizerAvatar={event.organizerAvatar}
-                      organizerId={event.organizerId}
-                      variant="default"
-                      // Пока открыта лента организаторов, свайп карточки выключен:
-                      // иначе она перехватывала жест закрытия панели и наезжала
-                      // на карточку организатора
-                      showSwipeAction={!showOrganizers}
-                      mediaUrl={event.mediaUrl}
-                      mediaType={event.mediaType}
-                      mediaAspectRatio={event.mediaAspectRatio}
-                      participantsList={event.participantsList}
-                      participantsData={event.participantsData}
-                      context="explore"
-                      tags={event.tags}
-                      onLayout={getLayoutHandler(event.id)}
-                    />
-                  </View>
-                </View>
-              );
-            })
-          ) : (
-            <View style={[styles.emptyState, { width: SCREEN_W, paddingHorizontal: 20 }]}>
-              <Text style={styles.emptyText}>{t.empty.noEvents}</Text>
-              <Text style={styles.emptySubtext}>{t.empty.noEventsSubtext}</Text>
-            </View>
-          )
-        ) : (
-          folderEvents.length > 0 ? (
-            folderEvents.slice(0, visibleCount).map((event) => (
-            <EventCard
-                key={event.id}
-                id={event.id}
-                title={event.title}
-                description={event.description}
-                date={event.date}
-                time={event.time}
-                displayDate={event.displayDate}
-                location={event.location}
-                price={event.price}
-                participants={event.participants}
-                maxParticipants={event.maxParticipants}
-                organizerAvatar={event.organizerAvatar}
-                organizerId={event.organizerId}
-              variant="default"
-              showSwipeAction={!showOrganizers}
-                mediaUrl={event.mediaUrl}
-                mediaType={event.mediaType}
-                mediaAspectRatio={event.mediaAspectRatio}
-                participantsList={event.participantsList}
-                participantsData={event.participantsData}
-                context="explore"
-                tags={event.tags || []}
-                onLayout={getLayoutHandler(event.id)}
-              />
-            ))
-          ) : (
-            <View style={[styles.emptyState, { width: SCREEN_W, paddingHorizontal: 20 }]}>
-              <Text style={styles.emptyText}>{t.empty.noFriendsEvents}</Text>
-              <Text style={styles.emptySubtext}>{t.empty.noFriendsEventsSubtext}</Text>
-            </View>
-          )
-        )}
-      </ScrollView>
+        initialNumToRender={PAGE_SIZE}
+        maxToRenderPerBatch={PAGE_SIZE}
+        windowSize={7}
+      />
       </Animated.View>
       </View>
 
