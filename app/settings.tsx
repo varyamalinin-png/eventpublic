@@ -203,17 +203,17 @@ const resolveAssetInfo = (asset: ImagePicker.ImagePickerAsset) => {
 const uploadAvatarAsset = async (asset: ImagePicker.ImagePickerAsset | { uri: string; file?: File; type?: string; name?: string }) => {
   if (!asset?.uri) {
     if (Platform.OS === 'web') {
-      window.alert('Ошибка: Не удалось прочитать файл.');
+      window.alert(`${t.common.error}: ${t.settings.messages.fileReadError}`);
     } else {
-      Alert.alert('Ошибка', 'Не удалось прочитать файл.');
+      Alert.alert(t.common.error, t.settings.messages.fileReadError);
     }
     return;
   }
   if (!accessToken || !currentUserId) {
     if (Platform.OS === 'web') {
-      window.alert('Ошибка: Авторизуйтесь заново.');
+      window.alert(`${t.common.error}: ${t.settings.messages.reauthorize}`);
     } else {
-      Alert.alert('Ошибка', 'Авторизуйтесь заново.');
+      Alert.alert(t.common.error, t.settings.messages.reauthorize);
     }
     return;
   }
@@ -267,18 +267,18 @@ const uploadAvatarAsset = async (asset: ImagePicker.ImagePickerAsset | { uri: st
     await refreshUser();
     
     if (Platform.OS === 'web') {
-      window.alert('Успех: Фото профиля обновлено');
+      window.alert(`${t.common.success}: ${t.settings.messages.profilePhotoUpdated}`);
     } else {
-      Alert.alert('Успех', 'Фото профиля обновлено');
+      Alert.alert(t.common.success, t.settings.messages.profilePhotoUpdated);
     }
     setShowAvatarModal(false);
   } catch (error: any) {
-    const errorMessage = error?.message || 'Не удалось загрузить фото. Проверьте подключение к интернету.';
+    const errorMessage = error?.message || t.settings.messages.photoUploadFailed;
     logger.error('Avatar upload failed:', errorMessage);
     if (Platform.OS === 'web') {
       window.alert(`Ошибка: ${errorMessage}`);
     } else {
-      Alert.alert('Ошибка', errorMessage);
+      Alert.alert(t.common.error, errorMessage);
     }
   } finally {
     setAvatarUploading(false);
@@ -287,7 +287,7 @@ const uploadAvatarAsset = async (asset: ImagePicker.ImagePickerAsset | { uri: st
 
 const removeAvatarFromServer = async () => {
   if (!accessToken || !currentUserId) {
-    Alert.alert('Ошибка', 'Авторизуйтесь заново.');
+    Alert.alert(t.common.error, t.settings.messages.reauthorize);
     return;
   }
   setAvatarUploading(true);
@@ -300,7 +300,7 @@ const removeAvatarFromServer = async () => {
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data?.message || 'Не удалось удалить фото.');
+      throw new Error(data?.message || t.settings.messages.photoDeleteFailed);
     }
     const avatarUrl: string | undefined =
       data?.avatarUrl ?? data?.user?.avatarUrl ?? data?.avatar_url ?? undefined;
@@ -310,11 +310,11 @@ const removeAvatarFromServer = async () => {
       updateUserData(currentUserId, { avatar: undefined });
     }
     await refreshUser();
-    Alert.alert('Готово', 'Фото профиля удалено');
+    Alert.alert(t.common.done, t.settings.messages.profilePhotoDeleted);
     setShowAvatarModal(false);
   } catch (error: any) {
     logger.error('Avatar delete failed', error);
-    Alert.alert('Ошибка', error?.message || 'Не удалось удалить фото. Попробуйте позже.');
+    Alert.alert(t.common.error, error?.message || t.settings.messages.photoDeleteRetry);
   } finally {
     setAvatarUploading(false);
   }
@@ -322,26 +322,26 @@ const removeAvatarFromServer = async () => {
   
   const handleDeleteAccount = () => {
     Alert.alert(
-      'Удаление аккаунта',
-      'Для удаления аккаунта и всех связанных данных напишите на support@iwent.ru с указанием вашего email. Мы обработаем запрос в течение 30 дней.',
+      t.settings.messages.deleteAccountTitle,
+      t.settings.messages.deleteAccountBody,
       [
-        { text: 'Написать в поддержку', onPress: () => Linking.openURL('mailto:support@iwent.ru?subject=Запрос на удаление аккаунта') },
-        { text: 'Отмена', style: 'cancel' },
+        { text: t.settings.messages.contactSupport, onPress: () => Linking.openURL('mailto:support@iwent.ru?subject=Запрос на удаление аккаунта') },
+        { text: t.common.cancel, style: 'cancel' },
       ]
     );
   };
   
   const handleDeactivateAccount = () => {
     Alert.alert(
-      'Деактивация аккаунта',
-      'Вы уверены, что хотите деактивировать аккаунт?',
+      t.settings.messages.deactivateTitle,
+      t.settings.account.deactivateConfirm,
       [
-        { text: 'Отмена', style: 'cancel' },
+        { text: t.common.cancel, style: 'cancel' },
         { 
-          text: 'Деактивировать', 
+          text: t.settings.messages.deactivateAction, 
           onPress: () => {
             // Логика деактивации
-            Alert.alert('Аккаунт деактивирован');
+            Alert.alert(t.settings.messages.accountDeactivated);
           }
         }
       ]
@@ -350,12 +350,12 @@ const removeAvatarFromServer = async () => {
   
   const handleLogout = () => {
     Alert.alert(
-      'Выход',
-      'Вы уверены, что хотите выйти?',
+      t.settings.messages.logoutTitle,
+      t.settings.account.logoutConfirm,
       [
-        { text: 'Отмена', style: 'cancel' },
+        { text: t.common.cancel, style: 'cancel' },
         { 
-          text: 'Выйти', 
+          text: t.settings.messages.logoutAction, 
           style: 'destructive',
           onPress: async () => {
             try {
@@ -375,7 +375,7 @@ const removeAvatarFromServer = async () => {
   const requestPermissions = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Ошибка', 'Нет доступа к галерее');
+      Alert.alert(t.common.error, t.settings.messages.noGalleryAccess);
       return false;
     }
     return true;
@@ -402,7 +402,7 @@ const removeAvatarFromServer = async () => {
     if (avatarUploading) return;
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Ошибка', 'Нет доступа к камере');
+      Alert.alert(t.common.error, t.settings.messages.noCameraAccess);
       return;
     }
 
@@ -419,16 +419,16 @@ const removeAvatarFromServer = async () => {
 
   const handleRemoveAvatar = () => {
     if (avatarUploading) {
-      Alert.alert('Подождите', 'Завершается предыдущая операция с фото.');
+      Alert.alert(t.settings.messages.pleaseWait, t.settings.messages.photoOpInProgress);
       return;
     }
     Alert.alert(
-      'Удалить фото',
-      'Вы уверены, что хотите удалить фото профиля?',
+      t.settings.messages.deletePhotoTitle,
+      t.settings.messages.deletePhotoConfirm,
       [
-        { text: 'Отмена', style: 'cancel' },
+        { text: t.common.cancel, style: 'cancel' },
         { 
-          text: 'Удалить', 
+          text: t.common.delete, 
           style: 'destructive',
           onPress: () => {
             void removeAvatarFromServer();
@@ -450,29 +450,29 @@ const removeAvatarFromServer = async () => {
     if (userId === currentUserId) return;
     try {
       await switchAccount(userId);
-      Alert.alert('Готово', 'Вы переключились на другой аккаунт.');
+      Alert.alert(t.common.done, t.settings.messages.switchedAccount);
     } catch (error) {
-      Alert.alert('Ошибка', 'Не удалось переключить аккаунт. Попробуйте позже.');
+      Alert.alert(t.common.error, t.settings.messages.switchAccountFailed);
     }
   };
 
   const confirmRemoveAccount = (userId: string) => {
     const isSelf = userId === currentUserId;
     Alert.alert(
-      isSelf ? 'Удалить текущий аккаунт?' : 'Удалить аккаунт из списка?',
+      isSelf ? t.settings.messages.removeAccountTitle : t.settings.messages.removeAccountFromList,
       isSelf
-        ? 'Аккаунт будет удален с устройства. Если других аккаунтов нет, вы будете перенаправлены на экран входа.'
-        : 'Этот аккаунт исчезнет из списка быстрого переключения.',
+        ? t.settings.messages.removeAccountBody
+        : t.settings.messages.removeAccountHint,
       [
-        { text: 'Отмена', style: 'cancel' },
+        { text: t.common.cancel, style: 'cancel' },
         {
-          text: 'Удалить',
+          text: t.common.delete,
           style: 'destructive',
           onPress: async () => {
             try {
               await removeAccount(userId);
             } catch (error) {
-              Alert.alert('Ошибка', 'Не удалось удалить аккаунт. Попробуйте позже.');
+              Alert.alert(t.common.error, t.settings.messages.removeAccountFailed);
             }
           },
         },
@@ -514,10 +514,10 @@ const removeAvatarFromServer = async () => {
       
       updateUserData(currentUserId, updates);
       if (refreshUser) await refreshUser();
-      Alert.alert('Готово', 'Изменения сохранены');
+      Alert.alert(t.common.done, t.settings.messages.changesSaved);
     } catch (error: any) {
-      const message = error instanceof ApiError ? error.message : 'Не удалось сохранить изменения';
-      Alert.alert('Ошибка', message);
+      const message = error instanceof ApiError ? error.message : t.settings.messages.saveChangesFailed;
+      Alert.alert(t.common.error, message);
     } finally {
       setUpdating(false);
     }
@@ -525,7 +525,7 @@ const removeAvatarFromServer = async () => {
 
   const handleUpdateName = async () => {
     if (!editName.trim()) {
-      Alert.alert('Ошибка', 'Введите имя');
+      Alert.alert(t.common.error, t.settings.messages.enterName);
       return;
     }
     await updateProfileField('name', editName.trim());
@@ -541,7 +541,7 @@ const removeAvatarFromServer = async () => {
 
   const handleUpdateDateOfBirth = async () => {
     if (!editDateOfBirth) {
-      Alert.alert('Ошибка', 'Выберите дату рождения');
+      Alert.alert(t.common.error, t.settings.messages.selectBirthDate);
       return;
     }
     // Форматируем дату в ISO строку для отправки на сервер
@@ -579,11 +579,11 @@ const removeAvatarFromServer = async () => {
 
   const handleChangeEmail = async () => {
     if (!newEmail.trim()) {
-      Alert.alert('Ошибка', 'Введите новый email');
+      Alert.alert(t.common.error, t.settings.messages.enterNewEmail);
       return;
     }
     if (!emailPassword) {
-      Alert.alert('Ошибка', 'Введите текущий пароль');
+      Alert.alert(t.common.error, t.settings.messages.enterCurrentPassword);
       return;
     }
     setUpdating(true);
@@ -596,14 +596,14 @@ const removeAvatarFromServer = async () => {
         },
         accessToken,
       );
-      Alert.alert('Готово', 'Email изменен. Проверьте почту для подтверждения.');
+      Alert.alert(t.common.done, t.settings.messages.emailChanged);
       setShowEmailModal(false);
       setNewEmail('');
       setEmailPassword('');
       if (refreshUser) await refreshUser();
     } catch (error: any) {
-      const message = error instanceof ApiError ? error.message : 'Не удалось изменить email';
-      Alert.alert('Ошибка', message);
+      const message = error instanceof ApiError ? error.message : t.settings.messages.emailChangeFailed;
+      Alert.alert(t.common.error, message);
     } finally {
       setUpdating(false);
     }
@@ -611,15 +611,15 @@ const removeAvatarFromServer = async () => {
 
   const handleChangePassword = async () => {
     if (!currentPassword || !newPassword) {
-      Alert.alert('Ошибка', 'Заполните все поля');
+      Alert.alert(t.common.error, t.settings.messages.fillAllFields);
       return;
     }
     if (newPassword !== confirmPassword) {
-      Alert.alert('Ошибка', 'Пароли не совпадают');
+      Alert.alert(t.common.error, t.validation.passwordsNotMatch);
       return;
     }
     if (newPassword.length < 6) {
-      Alert.alert('Ошибка', 'Пароль должен быть не менее 6 символов');
+      Alert.alert(t.common.error, t.settings.messages.passwordTooShort);
       return;
     }
     setUpdating(true);
@@ -632,14 +632,14 @@ const removeAvatarFromServer = async () => {
         },
         accessToken,
       );
-      Alert.alert('Готово', 'Пароль изменен');
+      Alert.alert(t.common.done, t.settings.messages.passwordChanged);
       setShowPasswordModal(false);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (error: any) {
-      const message = error instanceof ApiError ? error.message : 'Не удалось изменить пароль';
-      Alert.alert('Ошибка', message);
+      const message = error instanceof ApiError ? error.message : t.settings.messages.passwordChangeFailed;
+      Alert.alert(t.common.error, message);
     } finally {
       setUpdating(false);
     }
@@ -648,9 +648,9 @@ const removeAvatarFromServer = async () => {
   const showImageOptions = () => {
     if (avatarUploading) {
       if (Platform.OS === 'web') {
-        window.alert('Подождите, сначала завершите текущую загрузку.');
+        window.alert(`${t.settings.messages.pleaseWait}. ${t.settings.messages.finishCurrentUpload}`);
       } else {
-        Alert.alert('Подождите', 'Сначала завершите текущую загрузку.');
+        Alert.alert(t.settings.messages.pleaseWait, t.settings.messages.finishCurrentUpload);
       }
       return;
     }
@@ -667,7 +667,7 @@ const removeAvatarFromServer = async () => {
           const file = files[0];
           const type = (file.type || '').toLowerCase();
           if (type.includes('heic') || type.includes('heif')) {
-            window.alert('Формат HEIC/HEIF пока не поддерживается. Выберите JPG/PNG/WebP.');
+            window.alert(t.settings.messages.heicNotSupported);
             return;
           }
           // Создаем объект, похожий на ImagePickerAsset для веба
@@ -685,13 +685,13 @@ const removeAvatarFromServer = async () => {
     }
 
     Alert.alert(
-      'Выберите фото',
-      'Откуда хотите добавить фото?',
+      t.settings.messages.choosePhoto,
+      t.settings.messages.choosePhotoSource,
       [
-        { text: 'Галерея', onPress: () => void pickImage() },
-        { text: 'Камера', onPress: () => void takePhoto() },
-        { text: 'Удалить фото', onPress: handleRemoveAvatar, style: 'destructive' },
-        { text: 'Отмена', style: 'cancel' }
+        { text: t.settings.messages.gallery, onPress: () => void pickImage() },
+        { text: t.settings.messages.camera, onPress: () => void takePhoto() },
+        { text: t.settings.messages.deletePhotoTitle, onPress: handleRemoveAvatar, style: 'destructive' },
+        { text: t.common.cancel, style: 'cancel' }
       ]
     );
   };
@@ -914,8 +914,8 @@ const removeAvatarFromServer = async () => {
               () => router.push('/(tabs)/saved')
             )}
             {renderSettingItem(
-              t.settings.saved.savedMemories || 'Сохраненные меморис',
-              getSavedMemoryPosts(eventProfiles).length > 0 ? `${getSavedMemoryPosts(eventProfiles).length} ${(t.settings.saved as any).memoriesCount || 'постов'}` : t.settings.saved.noSaved,
+              t.settings.saved.savedMemories || t.settings.messages.savedMemoriesTitle,
+              getSavedMemoryPosts(eventProfiles).length > 0 ? `${getSavedMemoryPosts(eventProfiles).length} ${(t.settings.saved as any).memoriesCount || t.settings.messages.postsWord}` : t.settings.saved.noSaved,
               () => router.push('/(tabs)/saved')
             )}
           </>
@@ -1027,7 +1027,7 @@ const removeAvatarFromServer = async () => {
             <Text style={styles.modalTitle}>Изменить электронную почту</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Новый email"
+              placeholder={t.settings.accountSecurity.newEmail}
               placeholderTextColor="#999"
               value={newEmail}
               onChangeText={setNewEmail}
@@ -1036,7 +1036,7 @@ const removeAvatarFromServer = async () => {
             />
             <TextInput
               style={styles.modalInput}
-              placeholder="Текущий пароль"
+              placeholder={t.settings.accountSecurity.currentPassword}
               placeholderTextColor="#999"
               value={emailPassword}
               onChangeText={setEmailPassword}
@@ -1077,7 +1077,7 @@ const removeAvatarFromServer = async () => {
             <Text style={styles.modalTitle}>Сменить пароль</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Текущий пароль"
+              placeholder={t.settings.accountSecurity.currentPassword}
               placeholderTextColor="#999"
               value={currentPassword}
               onChangeText={setCurrentPassword}
@@ -1085,7 +1085,7 @@ const removeAvatarFromServer = async () => {
             />
             <TextInput
               style={styles.modalInput}
-              placeholder="Новый пароль"
+              placeholder={t.settings.accountSecurity.newPassword}
               placeholderTextColor="#999"
               value={newPassword}
               onChangeText={setNewPassword}
@@ -1093,7 +1093,7 @@ const removeAvatarFromServer = async () => {
             />
             <TextInput
               style={styles.modalInput}
-              placeholder="Подтвердите новый пароль"
+              placeholder={t.settings.accountSecurity.confirmNewPassword}
               placeholderTextColor="#999"
               value={confirmPassword}
               onChangeText={setConfirmPassword}
@@ -1135,7 +1135,7 @@ const removeAvatarFromServer = async () => {
             <Text style={styles.modalTitle}>Изменить имя</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Имя и фамилия"
+              placeholder={t.settings.profileVisibility.name}
               placeholderTextColor="#999"
               value={editName}
               onChangeText={setEditName}
@@ -1179,7 +1179,7 @@ const removeAvatarFromServer = async () => {
                 onPress={() => setEditGender(gender)}
               >
                 <Text style={[styles.genderOptionText, editGender === gender && styles.genderOptionTextSelected]}>
-                  {gender === 'male' ? 'Мужской' : gender === 'female' ? 'Женский' : gender === 'other' ? 'Другой' : 'Не указывать'}
+                  {gender === 'male' ? t.settings.profileVisibility.male : gender === 'female' ? t.settings.profileVisibility.female : gender === 'other' ? 'Другой' : 'Не указывать'}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -1261,7 +1261,7 @@ const removeAvatarFromServer = async () => {
                   onPress={() => setShowDatePicker(true)}
                 >
                   <Text style={styles.datePickerButtonText}>
-                    {editDateOfBirth ? formatDateWithDots(editDateOfBirth) : 'Выберите дату'}
+                    {editDateOfBirth ? formatDateWithDots(editDateOfBirth) : t.settings.profileVisibility.selectDate}
                   </Text>
                   <Ionicons name="calendar-outline" size={20} color="#FF8D32" />
                 </TouchableOpacity>
@@ -1317,7 +1317,7 @@ const removeAvatarFromServer = async () => {
             <Text style={styles.modalTitle}>Изменить город</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Город"
+              placeholder={t.settings.profileVisibility.city}
               placeholderTextColor="#999"
               value={editCity}
               onChangeText={setEditCity}
@@ -1356,7 +1356,7 @@ const removeAvatarFromServer = async () => {
             <Text style={styles.modalTitle}>О себе</Text>
             <TextInput
               style={[styles.modalInput, { minHeight: 100, textAlignVertical: 'top' }]}
-              placeholder="Расскажите о себе"
+              placeholder={t.settings.profileVisibility.bio}
               placeholderTextColor="#999"
               value={editBio}
               onChangeText={setEditBio}
@@ -1398,7 +1398,7 @@ const removeAvatarFromServer = async () => {
             <Text style={styles.modalSubtitle}>За сколько часов напоминать о событии?</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Количество часов"
+              placeholder={t.settings.reminders.hoursCount}
               placeholderTextColor="#999"
               value={reminderHours}
               onChangeText={setReminderHours}
@@ -1415,7 +1415,7 @@ const removeAvatarFromServer = async () => {
                 style={[styles.modalButton, styles.modalButtonConfirm]}
                 onPress={() => {
                   setShowReminderModal(false);
-                  Alert.alert('Напоминания настроены');
+                  Alert.alert(t.settings.messages.remindersConfigured);
                 }}
               >
                 <Text style={styles.modalButtonText}>Сохранить</Text>
