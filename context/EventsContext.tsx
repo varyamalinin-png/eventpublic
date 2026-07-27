@@ -43,8 +43,12 @@ import type {
 import {
   DEFAULT_AVATAR_URL,
   calculateAge,
+  isEventPast,
+  isEventUpcoming,
   isHttpUrl,
   mapServerUserToClient,
+  mergeUserRecord,
+  normalizeMediaUrl,
 } from './EventsContext.helpers';
 
 // Типы переехали в EventsContext.types.ts — реэкспорт, чтобы не трогать импорты потребителей
@@ -153,24 +157,6 @@ export function EventsProvider({ children }: EventsProviderProps) {
     [logout, refreshToken, refreshSession],
   );
 
-  const mergeUserRecord = useCallback((record: Record<string, UserProfilePatch>, userId: string, updates: UserProfilePatch) => {
-    const nextEntry: UserProfilePatch = { ...(record[userId] ?? {}) };
-    Object.entries(updates).forEach(([key, value]) => {
-      if (value === undefined || value === null || value === '') {
-        delete nextEntry[key as keyof UserProfilePatch];
-      } else {
-        (nextEntry as any)[key] = value;
-      }
-    });
-    if (Object.keys(nextEntry).length === 0) {
-      const { [userId]: _removed, ...rest } = record;
-      return rest;
-    }
-    return {
-      ...record,
-      [userId]: nextEntry,
-    };
-  }, []);
 
 
   const resolveUserId = useCallback(
@@ -189,37 +175,6 @@ export function EventsProvider({ children }: EventsProviderProps) {
   // resolveRequestUserId и requestBelongsToUser теперь в useEventRequests хуке
 
   // Нормализация ссылок медиа (устраняем старый IP в уже сохраненных URL)
-  const normalizeMediaUrl = useCallback((input?: string | null): string | undefined => {
-    if (!input) return undefined;
-    try {
-      // Получаем storage URL из переменной окружения (поддерживаем и EXPO_PUBLIC для мобильных, и NEXT_PUBLIC для веба)
-      const storageUrl = (typeof process !== 'undefined' && process.env) 
-        ? (process.env.NEXT_PUBLIC_STORAGE_URL || process.env.EXPO_PUBLIC_STORAGE_URL || 'https://iwent.ru/storage')
-        : 'https://iwent.ru/storage';
-      
-      // Заменяем старые origin на актуальный, остальную часть пути сохраняем
-      let normalized = input;
-
-      // Исправляем известные “битые” demo-URL (Wikimedia иногда удаляет/перемещает файлы → 404).
-      // Делаем это здесь, чтобы починить и кэшированные на клиенте карточки.
-      const DEMO_URL_FIXES: Record<string, string> = {
-        'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f9/Phoenicopterus_ruber_ruber.jpg/1200px-Phoenicopterus_ruber_ruber.jpg':
-          'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cf/Phoenicopterus_ruber_Bonaire_1.jpg/1200px-Phoenicopterus_ruber_Bonaire_1.jpg',
-        'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2d/Siberian_tiger_at_Columbus_Zoo.jpg/1200px-Siberian_tiger_at_Columbus_Zoo.jpg':
-          'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/Siberian_Tiger_by_Malene_Th.jpg/1200px-Siberian_Tiger_by_Malene_Th.jpg',
-      };
-      normalized = DEMO_URL_FIXES[normalized] ?? normalized;
-
-      // Заменяем старые IP адреса на актуальный
-      normalized = normalized.replace(/http:\/\/192\.168\.0\.\d+:9000/g, storageUrl);
-      normalized = normalized.replace(/http:\/\/192\.168\.0\.\d+:4000/g, storageUrl);
-      normalized = normalized.replace(/https?:\/\/(www\.)?iventapp\.ru/gi, 'https://iwent.ru');
-
-      return normalized || undefined;
-    } catch {
-      return input || undefined;
-    }
-  }, []);
 
   const applyServerUserDataToState = useCallback(
     (serverUser: ServerUser | any) => {
@@ -278,7 +233,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
         }),
       );
     },
-    [mergeUserRecord, normalizeMediaUrl],
+    [],
   );
 
   // Используем хук для работы с друзьями
@@ -629,7 +584,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
   const updateUserData = useCallback((userId: string, updates: UserProfilePatch) => {
     setServerUserData(prev => mergeUserRecord(prev, userId, updates));
     setUserDataUpdates(prev => mergeUserRecord(prev, userId, updates));
-  }, [mergeUserRecord]);
+  }, []);
 
   // Эти функции теперь находятся в useEventActions hook
 
@@ -946,7 +901,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
       if (!aIsMyOrganizer && bIsMyOrganizer) return 1;
       return 0;
     });
-  }, [currentUserId, eventRequests, events, getUserRequestStatus, isEventFull, isEventUpcoming, isFriendOfOrganizer, isUserEventMember, isUserOrganizer]);
+  }, [currentUserId, eventRequests, events, getUserRequestStatus, isEventFull, isFriendOfOrganizer, isUserEventMember, isUserOrganizer]);
 
   // getEventsByUserFolder теперь в useUserFolders хуке
 
@@ -1153,7 +1108,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
       visibility: serverEvent.visibility ?? undefined,
       invitedUsers: serverEvent.invitedUsers ?? undefined,
     };
-  }, [normalizeMediaUrl]);
+  }, []);
 
   // Используем хук для действий с событиями
   const {
@@ -1585,112 +1540,15 @@ export function EventsProvider({ children }: EventsProviderProps) {
     // Последний fallback - НЕ возвращаем аватарку организатора, возвращаем undefined
     // чтобы было видно, что фото не установлено
     return undefined;
-  }, [eventProfiles, events, isEventPast]);
+  }, [eventProfiles, events]);
 
   // Установить персональное фото события для пользователя (объявлена после syncEventsFromServer)
   
   // 2. ПРОИЗВОДНЫЕ АТРИБУТЫ (вычисляются)
   
   // Событие предстоящее
-  const isEventUpcoming = useCallback((event: Event): boolean => {
-    // Для регулярных событий проверяем ближайшую будущую дату
-    if (event.isRecurring) {
-      const now = Date.now();
-      const [hh, mm] = event.time.split(':').map((v: string) => parseInt(v, 10));
-      
-      switch (event.recurringType) {
-        case 'daily':
-          // Ежедневные события всегда предстоящие
-          return true;
-          
-        case 'weekly':
-        case 'monthly':
-          // Для weekly и monthly события всегда предстоящие (они повторяются)
-          return true;
-          
-        case 'custom':
-          // Для custom проверяем, есть ли хотя бы одна будущая дата
-          if (event.recurringCustomDates && event.recurringCustomDates.length > 0) {
-            const hasFutureDate = event.recurringCustomDates.some(dateStr => {
-              const dateTime = new Date(dateStr + 'T' + `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00`);
-              return dateTime.getTime() > now;
-            });
-            return hasFutureDate;
-          }
-          return false;
-          
-        default:
-          // Для неизвестного типа используем стандартную логику
-          const eventDateTime = getEventDateTime(event);
-          return eventDateTime.getTime() > Date.now();
-      }
-    }
-    
-    // Для обычных событий проверяем дату события
-    const eventDateTime = getEventDateTime(event);
-    return eventDateTime.getTime() > Date.now();
-  }, []);
   
   // Событие прошедшее
-  const isEventPast = useCallback((event: Event): boolean => {
-    // Для регулярных событий проверяем ближайшую будущую дату
-    if (event.isRecurring) {
-      const now = Date.now();
-      const [hh, mm] = event.time.split(':').map((v: string) => parseInt(v, 10));
-      
-      switch (event.recurringType) {
-        case 'daily':
-          // Для ежедневных событий проверяем время сегодня
-          // Если время уже прошло сегодня, событие будет завтра
-          const today = new Date();
-          today.setHours(hh, mm || 0, 0, 0);
-          // Событие прошедшее только если оно было в прошлом и больше не повторяется
-          // Для ежедневных событий это никогда (они всегда актуальны)
-          return false;
-          
-        case 'weekly':
-        case 'monthly':
-          // Для weekly и monthly проверяем, есть ли еще будущие даты
-          // Ближайшая дата - это дата из event.date
-          const eventDateTime = new Date(event.date + 'T' + `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:00`);
-          // Если текущая дата прошла, ищем следующую
-          if (eventDateTime.getTime() <= now) {
-            // Для weekly/monthly событий, если первая дата прошла, 
-            // событие все еще актуально (будет на следующей неделе/месяце)
-            return false;
-          }
-          return false;
-          
-        case 'custom':
-          // Для custom проверяем, есть ли хотя бы одна будущая дата
-          if (event.recurringCustomDates && event.recurringCustomDates.length > 0) {
-            // Сбрасываем время для корректного сравнения только по дате
-            const nowDateOnly = new Date();
-            nowDateOnly.setHours(0, 0, 0, 0);
-            
-            const hasFutureDate = event.recurringCustomDates.some(dateStr => {
-              // dateStr может быть в формате "YYYY-MM-DD" или Date объект
-              const dateOnly = typeof dateStr === 'string' 
-                ? new Date(dateStr + 'T00:00:00')
-                : new Date(dateStr);
-              dateOnly.setHours(0, 0, 0, 0);
-              return dateOnly >= nowDateOnly;
-            });
-            // Событие прошедшее только если все даты в прошлом
-            return !hasFutureDate;
-          }
-          // Если дат нет - считаем событие прошедшим (невалидное событие)
-          return true;
-          
-        default:
-          return false;
-      }
-    }
-    
-    // Для обычных событий проверяем дату события
-    const eventDateTime = new Date(event.date + 'T' + event.time + ':00');
-    return eventDateTime.getTime() <= Date.now();
-  }, []);
   
   // Событие набрано (достигнут максимум участников)
   const isEventFull = useCallback((event: Event): boolean => {
@@ -1919,7 +1777,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
       if (!aIsMyOrganizer && bIsMyOrganizer) return 1;
       return 0;
     });
-  }, [currentUserId, events, getUserRelationship, isEventFull, isEventUpcoming, isFriendOfOrganizer, isUserOrganizer]);
+  }, [currentUserId, events, getUserRelationship, isEventFull, isFriendOfOrganizer, isUserOrganizer]);
 
 // mapServerFriendRequest теперь в hooks/friends/useFriends.ts
 
@@ -2139,7 +1997,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     } finally {
       setIsSyncing(false);
     }
-  }, [accessToken, applyServerUserDataToState, currentUserId, handleUnauthorizedError, isEventPast, language, mapServerEventToClient, refreshPendingJoinRequests, setEventRequests]);
+  }, [accessToken, applyServerUserDataToState, currentUserId, handleUnauthorizedError, language, mapServerEventToClient, refreshPendingJoinRequests, setEventRequests]);
 
   // cancelEventRequest и cancelEventParticipation теперь в useEventRequests хуке
   // removeParticipantFromEvent теперь в useEventActions хуке
@@ -2777,7 +2635,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     isUserEventMemberRef.current = isUserEventMember;
     getUserRequestStatusRef.current = getUserRequestStatus;
     getEventParticipantsRef.current = getEventParticipants;
-  }, [isEventPast, isEventUpcoming, isUserAttendee, isUserEventMember, getUserRequestStatus, getEventParticipants]);
+  }, [isUserAttendee, isUserEventMember, getUserRequestStatus, getEventParticipants]);
 
   // Жалоба на меморис пост
   const reportMemoryPost = useCallback(async (eventId: string, postId: string) => {
