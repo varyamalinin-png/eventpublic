@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { useLanguage } from '../context/LanguageContext';
 import {
   View,
   Text,
@@ -20,6 +21,7 @@ const logger = createLogger('AddAccountVerify');
 
 export default function AddAccountVerifyScreen() {
   const router = useRouter();
+  const { t } = useLanguage();
   const params = useLocalSearchParams<{ email?: string }>();
   const { resendVerificationEmail, verifyEmail, user, isAuthenticated } = useAuth();
   
@@ -60,7 +62,7 @@ export default function AddAccountVerifyScreen() {
 
   const handleResendEmail = useCallback(async () => {
     if (!email.trim()) {
-      setErrorMessage('Введите email адрес');
+      setErrorMessage(t.auth.enterEmailAddress);
       return;
     }
 
@@ -70,17 +72,17 @@ export default function AddAccountVerifyScreen() {
 
     try {
       await resendVerificationEmail(email.trim());
-      setStatusMessage('Письмо с подтверждением отправлено на указанный email. Проверьте почту (включая папку "Спам").');
+      setStatusMessage(t.auth.verificationSent);
       Alert.alert(
-        'Письмо отправлено',
+        t.auth.emailSent,
         'Проверьте вашу почту (включая папку "Спам") и следуйте инструкциям в письме для подтверждения email.',
         [{ text: 'OK' }]
       );
     } catch (error: any) {
       logger.error('Failed to resend verification email', error);
-      const message = error?.body?.message || error?.message || 'Не удалось отправить письмо. Попробуйте позже.';
+      const message = error?.body?.message || error?.message || t.auth.sendFailed;
       setErrorMessage(message);
-      Alert.alert('Ошибка', message);
+      Alert.alert(t.common.error, message);
     } finally {
       setResending(false);
     }
@@ -88,7 +90,7 @@ export default function AddAccountVerifyScreen() {
 
   const handleVerifyToken = useCallback(async () => {
     if (!token.trim()) {
-      setErrorMessage('Введите токен подтверждения');
+      setErrorMessage(t.auth.enterToken);
       return;
     }
 
@@ -102,14 +104,14 @@ export default function AddAccountVerifyScreen() {
       // Если сервер вернул токены, пользователь автоматически залогинен
       if (result && result.accessToken && result.user) {
         hasVerifiedOnThisPage.current = true; // Отмечаем, что verify был успешным на этой странице
-        setStatusMessage('Email успешно подтверждён! Вы автоматически вошли в приложение.');
+        setStatusMessage(t.auth.verifiedAndSignedIn);
         // useEffect выше обработает переход в настройки
       } else {
         // Если токены не вернулись, перенаправляем на логин
-        setStatusMessage('Email успешно подтверждён! Теперь вы можете войти в приложение.');
+        setStatusMessage(t.auth.verifiedCanSignIn);
         Alert.alert(
-          'Email подтверждён',
-          'Ваш email успешно подтверждён. Теперь вы можете войти в приложение.',
+          t.auth.emailVerified,
+          t.auth.verifiedBody,
           [
             {
               text: 'OK',
@@ -120,7 +122,7 @@ export default function AddAccountVerifyScreen() {
       }
     } catch (error: any) {
       logger.error('Failed to verify email', error);
-      const message = error?.body?.message || error?.message || 'Токен недействителен или устарел.';
+      const message = error?.body?.message || error?.message || t.auth.tokenInvalid;
       setErrorMessage(message);
     } finally {
       setLoading(false);
@@ -150,7 +152,7 @@ export default function AddAccountVerifyScreen() {
                 <Text style={styles.instructionTitle}>Как подтвердить email:</Text>
                 <View style={styles.instructionList}>
                   <Text style={styles.instructionItem}>
-                    1. Проверьте вашу почту ({email || 'указанный при регистрации'})
+                    1. Проверьте вашу почту ({email || t.auth.usedAtSignUp})
                   </Text>
                   <Text style={styles.instructionItem}>
                     2. ⚠️ Обязательно проверьте папку "Спам" - письмо может попасть туда
@@ -188,7 +190,7 @@ export default function AddAccountVerifyScreen() {
               <Text style={styles.inputLabel}>Email</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Введите email"
+                placeholder={t.auth.enterEmail}
                 placeholderTextColor="rgba(244,244,245,0.35)"
                 value={email}
                 onChangeText={setEmail}
@@ -221,7 +223,7 @@ export default function AddAccountVerifyScreen() {
               <Text style={styles.inputLabel}>Токен подтверждения</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Вставьте токен из письма"
+                placeholder={t.auth.pasteToken}
                 placeholderTextColor="rgba(244,244,245,0.35)"
                 value={token}
                 onChangeText={setToken}

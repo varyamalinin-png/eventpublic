@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useLanguage } from '../context/LanguageContext';
 import {
   View,
   Text,
@@ -21,6 +22,7 @@ type Mode = 'login' | 'register';
 
 export default function AddAccountScreen() {
   const router = useRouter();
+  const { t } = useLanguage();
   const params = useLocalSearchParams<{ mode?: string }>();
   const initialMode = (params.mode === 'register' ? 'register' : 'login') as Mode;
   
@@ -100,7 +102,7 @@ export default function AddAccountScreen() {
   const handleLogin = async () => {
     setErrorMessage(null);
     if (!loginEmail.trim() || !loginPassword) {
-      setErrorMessage('Введите email и пароль');
+      setErrorMessage(t.auth.enterEmailAndPassword);
       return;
     }
 
@@ -114,7 +116,7 @@ export default function AddAccountScreen() {
       logger.error('login failed', error);
       
       // Извлекаем сообщение об ошибке из разных возможных мест
-      const errorMsg = error?.body?.message || error?.message || error?.toString() || 'Не удалось войти';
+      const errorMsg = error?.body?.message || error?.message || error?.toString() || t.auth.signInFailed;
       const errorMsgLower = errorMsg.toLowerCase();
       
       // Проверяем, является ли ошибка связанной с неподтвержденным email
@@ -122,10 +124,10 @@ export default function AddAccountScreen() {
       const isEmailNotVerified = 
         errorMsgLower.includes('email') && 
         (errorMsgLower.includes('not verified') || 
-         errorMsgLower.includes('не подтвержден') || 
+         errorMsgLower.includes(t.auth.notVerified) || 
          errorMsgLower.includes('verification email') ||
          errorMsgLower.includes('verification email has been sent') ||
-         errorMsgLower.includes('подтвержден'));
+         errorMsgLower.includes(t.auth.verified));
       
       if (isEmailNotVerified) {
         hasAttemptedAuth.current = false; // Сбрасываем флаг, так как переходим на verify
@@ -150,12 +152,12 @@ export default function AddAccountScreen() {
   const handleRegister = async () => {
     setErrorMessage(null);
     if (!registerEmail.trim() || !registerUsername.trim() || !registerPassword) {
-      setErrorMessage('Заполните все обязательные поля');
+      setErrorMessage(t.auth.fillRequiredFields);
       return;
     }
 
     if (registerPassword.length < 6) {
-      setErrorMessage('Пароль должен быть не менее 6 символов');
+      setErrorMessage(t.messages.passwordTooShort);
       return;
     }
 
@@ -182,7 +184,7 @@ export default function AddAccountScreen() {
     } catch (error: any) {
       logger.error('register failed', error);
       hasAttemptedAuth.current = false; // Сбрасываем флаг при ошибке
-      setErrorMessage(error?.body?.message || error?.message || 'Не удалось зарегистрироваться');
+      setErrorMessage(error?.body?.message || error?.message || t.auth.signUpFailed);
     }
   };
 
@@ -200,7 +202,7 @@ export default function AddAccountScreen() {
 
         <Text style={styles.title}>Добавить аккаунт</Text>
         <Text style={styles.subtitle}>
-          {mode === 'login' ? 'Войдите в существующий аккаунт' : 'Создайте новый аккаунт'}
+          {mode === 'login' ? t.auth.signInToExisting : 'Создайте новый аккаунт'}
         </Text>
 
         {/* Переключатель режимов */}
@@ -253,7 +255,7 @@ export default function AddAccountScreen() {
             />
             <TextInput
               style={styles.input}
-              placeholder="Пароль"
+              placeholder={t.auth.password}
               placeholderTextColor="rgba(244,244,245,0.35)"
               secureTextEntry
               value={loginPassword}
@@ -289,7 +291,7 @@ export default function AddAccountScreen() {
             />
             <TextInput
               style={styles.input}
-              placeholder="Имя пользователя"
+              placeholder={t.auth.username}
               placeholderTextColor="rgba(244,244,245,0.35)"
               autoCapitalize="none"
               value={registerUsername}
@@ -298,7 +300,7 @@ export default function AddAccountScreen() {
             />
             <TextInput
               style={styles.input}
-              placeholder="Имя (необязательно)"
+              placeholder={t.auth.nameOptional}
               placeholderTextColor="rgba(244,244,245,0.35)"
               value={registerName}
               onChangeText={setRegisterName}
@@ -306,7 +308,7 @@ export default function AddAccountScreen() {
             />
             <TextInput
               style={styles.input}
-              placeholder="Пароль"
+              placeholder={t.auth.password}
               placeholderTextColor="rgba(244,244,245,0.35)"
               secureTextEntry
               value={registerPassword}
