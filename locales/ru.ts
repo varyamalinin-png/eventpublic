@@ -712,7 +712,6 @@ export const ru = {
       // Chat
       chat: {
         chatFallback: 'Чат',
-        chat: 'Чат',
         authRequiredForChat: 'Необходима авторизация для создания чата',
         chatCreateFailed: 'Не удалось создать чат',
         justNow: 'только что',
