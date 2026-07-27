@@ -74,6 +74,14 @@ export const en = {
 
   // Profile
   profile: {
+    selectAtLeastOneEvent: 'Select at least one event',
+    deleteEventsQuestion: 'Delete events?',
+    failedToDeleteEvents: 'Could not delete events',
+    enterFolderName: 'Enter a folder name',
+    folderCreateFailed: 'Could not create folder. Please try again.',
+    toFolder: 'To folder',
+    partialError: 'Partial error',
+    failedToAddEventsToFolder: 'Could not add events to folder',
     backToProfile: '← Back to profile',
     organizer: 'Organizer',
     participant: 'Participant',
@@ -659,6 +667,20 @@ export const en = {
 
   // Event Profile
   eventProfile: {
+    mergeIntoOnePost: 'merge into one post',
+    authorization: 'Authorization',
+    photoPickFailed: 'Could not pick a photo',
+    partiallySuccessful: 'Partially successful',
+    photoTooLarge: 'Could not upload photo. Try choosing a smaller one.',
+    fillAllMusicFields: 'Fill in all fields to add music',
+    signInToAddContent: 'Sign in to add event content.',
+    trackAssociated: 'This track reminds me of our meetup',
+    information: 'Information',
+    selectParticipantToRemove: 'Select a participant to remove',
+    choosePhotoBtn: 'Choose photo',
+    demoSearchPlaceholder: 'Enter a track name for demo search...',
+    trackLink: 'Track link (SoundCloud)',
+    trackName: 'Track name',
     backToProfile: '← Back to profile',
     save: 'Save',
     removeFromSaved: 'Remove from saved',

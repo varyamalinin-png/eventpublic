@@ -74,6 +74,14 @@ export const ru = {
 
   // Profile
   profile: {
+    selectAtLeastOneEvent: 'Выберите хотя бы одно событие',
+    deleteEventsQuestion: 'Удалить события?',
+    failedToDeleteEvents: 'Не удалось удалить события',
+    enterFolderName: 'Введите название папки',
+    folderCreateFailed: 'Не удалось создать папку. Попробуйте ещё раз.',
+    toFolder: 'В папку',
+    partialError: 'Частичная ошибка',
+    failedToAddEventsToFolder: 'Не удалось добавить события в папку',
     backToProfile: '← Назад к профилю',
     organizer: 'Организатор',
     participant: 'Участник',
@@ -659,6 +667,20 @@ export const ru = {
 
       // Event Profile
       eventProfile: {
+    mergeIntoOnePost: 'объединить в один пост',
+    authorization: 'Авторизация',
+    photoPickFailed: 'Не удалось выбрать фото',
+    partiallySuccessful: 'Частично успешно',
+    photoTooLarge: 'Не удалось загрузить фото. Попробуйте выбрать фото меньшего размера.',
+    fillAllMusicFields: 'Заполните все поля для добавления музыки',
+    signInToAddContent: 'Войдите, чтобы добавлять контент события.',
+    trackAssociated: 'Трек ассоциируется с нашей встречей',
+    information: 'Информация',
+    selectParticipantToRemove: 'Выберите участника для удаления',
+    choosePhotoBtn: 'Выбрать фото',
+    demoSearchPlaceholder: 'Введите название трека для демо-поиска...',
+    trackLink: 'Ссылка на трек (SoundCloud)',
+    trackName: 'Название трека',
         backToProfile: '← Назад к профилю',
         save: 'Сохранить',
         removeFromSaved: 'Удалить из сохраненного',

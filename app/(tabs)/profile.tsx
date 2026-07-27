@@ -487,7 +487,7 @@ export default function ProfileScreen() {
     });
     
     if (selectedEventIds.size === 0) {
-      Alert.alert('Ошибка', 'Выберите хотя бы одно событие');
+      Alert.alert(t.common.error, t.profile.selectAtLeastOneEvent);
       return;
     }
     // Если есть папки, показываем попап выбора папки, иначе создаем новую
@@ -502,17 +502,17 @@ export default function ProfileScreen() {
 
   const handleDeleteSelectedEvents = useCallback(async () => {
     if (selectedEventIds.size === 0) {
-      Alert.alert('Ошибка', 'Выберите хотя бы одно событие');
+      Alert.alert(t.common.error, t.profile.selectAtLeastOneEvent);
       return;
     }
 
     Alert.alert(
-      'Удалить события?',
-      `Вы уверены, что хотите удалить ${selectedEventIds.size} ${selectedEventIds.size === 1 ? 'событие' : 'событий'}?`,
+      t.profile.deleteEventsQuestion,
+      `Вы уверены, что хотите удалить ${selectedEventIds.size} ${selectedEventIds.size === 1 ? t.events.eventWord : 'событий'}?`,
       [
-        { text: 'Отмена', style: 'cancel' },
+        { text: t.common.cancel, style: 'cancel' },
         {
-          text: 'Удалить',
+          text: t.common.delete,
           style: 'destructive',
           onPress: async () => {
             try {
@@ -522,7 +522,7 @@ export default function ProfileScreen() {
               setSelectMode(false);
               setSelectedEventIds(new Set());
             } catch (error) {
-              Alert.alert('Ошибка', 'Не удалось удалить события');
+              Alert.alert(t.common.error, t.profile.failedToDeleteEvents);
             }
           },
         },
@@ -537,7 +537,7 @@ export default function ProfileScreen() {
 
   const handleCreateFolderSubmit = useCallback(async (name: string, description?: string, coverPhoto?: { uri: string; type: string; name: string }) => {
     if (!name.trim()) {
-      Alert.alert('Ошибка', 'Введите название папки');
+      Alert.alert(t.common.error, t.profile.enterFolderName);
       return;
     }
 
@@ -560,15 +560,15 @@ export default function ProfileScreen() {
         setShowCreateFolderModal(false);
         setSelectMode(false);
         setSelectedEventIds(new Set());
-        Alert.alert('Успешно', 'Папка создана');
+        Alert.alert(t.common.success, 'Папка создана');
       } else {
         logger.error('Folder creation returned null');
-        Alert.alert('Ошибка', 'Не удалось создать папку. Попробуйте еще раз.');
+        Alert.alert(t.common.error, t.profile.folderCreateFailed);
       }
     } catch (error) {
       logger.error('Failed to create folder:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка';
-      Alert.alert('Ошибка', `Не удалось создать папку: ${errorMessage}`);
+      const errorMessage = error instanceof Error ? error.message : t.events.unknownError;
+      Alert.alert(t.common.error, `Не удалось создать папку: ${errorMessage}`);
     }
   }, [selectedEventIds, createEventFolder, addEventToFolder]);
 
@@ -1217,7 +1217,7 @@ export default function ProfileScreen() {
             disabled={selectedEventIds.size === 0}
           >
             <Text style={styles.actionButtonText}>
-              {eventFolders && Array.isArray(eventFolders) && eventFolders.length > 0 ? 'В папку' : 'Создать папку'} ({selectedEventIds.size})
+              {eventFolders && Array.isArray(eventFolders) && eventFolders.length > 0 ? t.profile.toFolder : 'Создать папку'} ({selectedEventIds.size})
             </Text>
           </TouchableOpacity>
         </View>
@@ -1250,7 +1250,7 @@ export default function ProfileScreen() {
                 try {
                   await addEventToFolder(folderId, eventId);
                 } catch (error) {
-                  const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка';
+                  const errorMessage = error instanceof Error ? error.message : t.events.unknownError;
                   logger.error(`Failed to add event ${eventId} to folder ${folderId}:`, error);
                   errors.push(errorMessage);
                 }
@@ -1258,18 +1258,18 @@ export default function ProfileScreen() {
             }
 
             if (errors.length > 0) {
-              Alert.alert('Частичная ошибка', `Некоторые события не удалось добавить:\n${errors.slice(0, 3).join('\n')}${errors.length > 3 ? '\n...' : ''}`);
+              Alert.alert(t.profile.partialError, `Некоторые события не удалось добавить:\n${errors.slice(0, 3).join('\n')}${errors.length > 3 ? '\n...' : ''}`);
             } else {
-              Alert.alert('Готово', `События добавлены в ${folderIds.length} ${folderIds.length === 1 ? 'папку' : 'папок'}`);
+              Alert.alert(t.common.done, `События добавлены в ${folderIds.length} ${folderIds.length === 1 ? 'папку' : 'папок'}`);
             }
             await refreshEventFolders();
             setShowAddToFolderModal(false);
             setSelectMode(false);
             setSelectedEventIds(new Set());
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Не удалось добавить события в папку';
+            const errorMessage = error instanceof Error ? error.message : t.profile.failedToAddEventsToFolder;
             logger.error('Failed to add events to folders:', error);
-            Alert.alert('Ошибка', errorMessage);
+            Alert.alert(t.common.error, errorMessage);
           }
         }}
       />

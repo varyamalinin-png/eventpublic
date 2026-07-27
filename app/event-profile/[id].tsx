@@ -319,7 +319,7 @@ export default function EventProfileScreen() {
           actions.push({ id: 'cancel_event', label: t.events.cancelEvent, isClickable: true });
         // Действие "продлить" для регулярных событий
         if (event.isRecurring) {
-          actions.push({ id: 'extend_recurring', label: t.events.extendRecurring || 'Продлить', isClickable: true });
+          actions.push({ id: 'extend_recurring', label: t.events.extendRecurring || t.events.extendRecurring, isClickable: true });
         }
         actions.push({ id: 'remove_participant', label: t.events.removeParticipant, isClickable: true });
         // Опция "go to chat" - активна для принятых участников
@@ -408,7 +408,7 @@ export default function EventProfileScreen() {
     
     const hasPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (hasPermission.status !== 'granted') {
-      Alert.alert('Ошибка', 'Нет доступа к галерее');
+      Alert.alert(t.common.error, 'Нет доступа к галерее');
       return;
     }
 
@@ -421,13 +421,13 @@ export default function EventProfileScreen() {
 
     if (!result.canceled && result.assets[0] && event) {
       setPersonalEventPhoto(event.id, currentUserId, result.assets[0].uri);
-      Alert.alert('Успешно', 'Фото события изменено');
+      Alert.alert(t.common.success, 'Фото события изменено');
     }
   };
 
   const handleAddPhoto = async () => {
     if (!currentUserId) {
-      Alert.alert('Авторизация', 'Войдите, чтобы добавлять контент события.');
+      Alert.alert(t.eventProfile.authorization, t.eventProfile.signInToAddContent);
       return;
     }
 
@@ -496,7 +496,7 @@ export default function EventProfileScreen() {
       }
     } catch (error) {
       logger.error('Failed to pick photos:', error);
-      Alert.alert('Ошибка', 'Не удалось выбрать фото');
+      Alert.alert(t.common.error, t.eventProfile.photoPickFailed);
     }
   };
 
@@ -781,25 +781,25 @@ export default function EventProfileScreen() {
         const message = combineIntoOnePost && sortedPhotos.length > 1
           ? `Создан пост с ${successfulUploads.length} фото`
           : `Загружено ${successfulUploads.length} фото`;
-        Alert.alert('Успешно', message);
+        Alert.alert(t.common.success, message);
         // Если все фото загружены успешно, закрываем модальное окно
         setShowAddContentModal(false);
       } else if (successfulUploads.length > 0 && failedUploads.length > 0) {
         const message = payloadTooLargeCount > 0
           ? `Загружено ${successfulUploads.length} из ${sortedPhotos.length} фото. ${payloadTooLargeCount} фото слишком большие и не были загружены. Попробуйте выбрать фото меньшего размера.`
           : `Загружено ${successfulUploads.length} из ${sortedPhotos.length} фото. ${failedUploads.length} фото не удалось загрузить.`;
-        Alert.alert('Частично успешно', message);
+        Alert.alert(t.eventProfile.partiallySuccessful, message);
         // Если есть успешные загрузки, но не все - оставляем модальное окно открытым для повторной попытки
       } else if (failedUploads.length > 0) {
         const message = payloadTooLargeCount > 0
           ? `Не удалось загрузить ${failedUploads.length} фото. Файлы слишком большие. Попробуйте выбрать фото меньшего размера или уменьшите качество.`
           : `Не удалось загрузить ${failedUploads.length} фото. Попробуйте еще раз.`;
-        Alert.alert('Ошибка', message);
+        Alert.alert(t.common.error, message);
         // Если все загрузки провалились - оставляем модальное окно открытым для повторной попытки
       }
     } catch (error) {
       logger.error('Error in handleUploadSelectedPhotos:', error);
-      Alert.alert('Ошибка', 'Не удалось загрузить фото. Попробуйте выбрать фото меньшего размера.');
+      Alert.alert(t.common.error, t.eventProfile.photoTooLarge);
     } finally {
       setIsUploadingPhotos(false);
     }
@@ -879,12 +879,12 @@ export default function EventProfileScreen() {
 
   const handleAddMusic = () => {
     if (!musicUrl || !musicTitle || !musicArtist) {
-      Alert.alert('Ошибка', 'Заполните все поля для добавления музыки');
+      Alert.alert(t.common.error, t.eventProfile.fillAllMusicFields);
       return;
     }
 
     if (!currentUserId) {
-      Alert.alert('Авторизация', 'Войдите, чтобы добавлять контент события.');
+      Alert.alert(t.eventProfile.authorization, t.eventProfile.signInToAddContent);
       return;
     }
 
@@ -895,7 +895,7 @@ export default function EventProfileScreen() {
       title: musicTitle,
       artist: musicArtist,
       artwork_url: selectedTrack?.artwork_url,
-      caption: contentCaption || 'Трек ассоциируется с нашей встречей'
+      caption: contentCaption || t.eventProfile.trackAssociated
     });
     
     // НЕ закрываем модальное окно и НЕ сбрасываем состояние, чтобы можно было добавить еще
@@ -1442,7 +1442,7 @@ export default function EventProfileScreen() {
                         // Для регулярных событий показываем модальное окно со списком дат
                         if (event.isRecurring) {
                           // TODO: Добавить модальное окно для регулярных событий
-                          Alert.alert('Информация', 'Для регулярных событий выберите конкретную дату');
+                          Alert.alert(t.eventProfile.information, 'Для регулярных событий выберите конкретную дату');
                         } else {
                           const isoDateTime = `${event.date}T${event.time}:00`;
                           router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${eventId}`);
@@ -1491,7 +1491,7 @@ export default function EventProfileScreen() {
                     } else if (action.id === 'remove_participant') {
                       // Удаление участника (для организатора)
                       // TODO: Реализовать выбор участника для удаления
-                      Alert.alert(t.common.confirm || 'Info', 'Выберите участника для удаления');
+                      Alert.alert(t.common.confirm || 'Info', t.eventProfile.selectParticipantToRemove);
                       setShowEventActionsModal(false);
                     } else if (action.id === 'view_requests') {
                       // Переход в "Мои запросы" (всегда кликабельно)
@@ -1720,8 +1720,8 @@ export default function EventProfileScreen() {
                   >
                     <Text style={styles.saveButtonText}>
                       {selectedPhotos.length > 0 
-                        ? (isUploadingPhotos ? 'Загрузка...' : `Загрузить ${selectedPhotos.length} фото`)
-                        : 'Выбрать фото'}
+                        ? (isUploadingPhotos ? t.common.loading : `Загрузить ${selectedPhotos.length} фото`)
+                        : t.eventProfile.choosePhotoBtn}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -1873,7 +1873,7 @@ export default function EventProfileScreen() {
                   <TouchableOpacity style={styles.saveButton} onPress={() => {
                     if (contentCaption.trim()) {
                       if (!currentUserId) {
-                        Alert.alert('Авторизация', 'Войдите, чтобы добавлять контент события.');
+                        Alert.alert(t.eventProfile.authorization, t.eventProfile.signInToAddContent);
                         return;
                       }
                       addEventProfilePost(eventId, {
@@ -1988,7 +1988,7 @@ export default function EventProfileScreen() {
                       />
                       <View style={styles.shareModalItemInfo}>
                         <Text style={styles.shareModalItemName}>
-                          {participantData?.name || participantData?.username || 'Пользователь'}
+                          {participantData?.name || participantData?.username || t.events.userFallback}
                         </Text>
                         {participantData?.username && participantData.username !== participantData?.name && (
                           <Text style={styles.shareModalItemSubtext}>
@@ -2022,12 +2022,12 @@ export default function EventProfileScreen() {
                     // После успешной передачи роли данные обновятся через syncEventsFromServer
                     // Событие автоматически исчезнет из календаря и списка участников
                   } else {
-                    Alert.alert('Ошибка', 'Функция передачи роли не доступна');
+                    Alert.alert(t.common.error, t.events.transferRoleUnavailable);
                   }
                 } catch (error: any) {
                   logger.error('Failed to transfer organizer role', error);
-                  const errorMessage = error?.message || error?.body?.message || 'Не удалось передать роль организатора';
-                  Alert.alert('Ошибка', errorMessage);
+                  const errorMessage = error?.message || error?.body?.message || t.events.failedToTransferRole;
+                  Alert.alert(t.common.error, errorMessage);
                 }
               }}
               disabled={!selectedNewOrganizerId}
