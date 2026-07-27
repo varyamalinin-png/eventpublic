@@ -203,17 +203,17 @@ const resolveAssetInfo = (asset: ImagePicker.ImagePickerAsset) => {
 const uploadAvatarAsset = async (asset: ImagePicker.ImagePickerAsset | { uri: string; file?: File; type?: string; name?: string }) => {
   if (!asset?.uri) {
     if (Platform.OS === 'web') {
-      window.alert(`${t.common.error}: ${t.settings.messages.fileReadError}`);
+      window.alert(`${t.common.error}: ${t.messages.fileReadError}`);
     } else {
-      Alert.alert(t.common.error, t.settings.messages.fileReadError);
+      Alert.alert(t.common.error, t.messages.fileReadError);
     }
     return;
   }
   if (!accessToken || !currentUserId) {
     if (Platform.OS === 'web') {
-      window.alert(`${t.common.error}: ${t.settings.messages.reauthorize}`);
+      window.alert(`${t.common.error}: ${t.messages.reauthorize}`);
     } else {
-      Alert.alert(t.common.error, t.settings.messages.reauthorize);
+      Alert.alert(t.common.error, t.messages.reauthorize);
     }
     return;
   }
@@ -267,13 +267,13 @@ const uploadAvatarAsset = async (asset: ImagePicker.ImagePickerAsset | { uri: st
     await refreshUser();
     
     if (Platform.OS === 'web') {
-      window.alert(`${t.common.success}: ${t.settings.messages.profilePhotoUpdated}`);
+      window.alert(`${t.common.success}: ${t.messages.profilePhotoUpdated}`);
     } else {
-      Alert.alert(t.common.success, t.settings.messages.profilePhotoUpdated);
+      Alert.alert(t.common.success, t.messages.profilePhotoUpdated);
     }
     setShowAvatarModal(false);
   } catch (error: any) {
-    const errorMessage = error?.message || t.settings.messages.photoUploadFailed;
+    const errorMessage = error?.message || t.messages.photoUploadFailed;
     logger.error('Avatar upload failed:', errorMessage);
     if (Platform.OS === 'web') {
       window.alert(`Ошибка: ${errorMessage}`);
@@ -287,7 +287,7 @@ const uploadAvatarAsset = async (asset: ImagePicker.ImagePickerAsset | { uri: st
 
 const removeAvatarFromServer = async () => {
   if (!accessToken || !currentUserId) {
-    Alert.alert(t.common.error, t.settings.messages.reauthorize);
+    Alert.alert(t.common.error, t.messages.reauthorize);
     return;
   }
   setAvatarUploading(true);
@@ -300,7 +300,7 @@ const removeAvatarFromServer = async () => {
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data?.message || t.settings.messages.photoDeleteFailed);
+      throw new Error(data?.message || t.messages.photoDeleteFailed);
     }
     const avatarUrl: string | undefined =
       data?.avatarUrl ?? data?.user?.avatarUrl ?? data?.avatar_url ?? undefined;
@@ -310,11 +310,11 @@ const removeAvatarFromServer = async () => {
       updateUserData(currentUserId, { avatar: undefined });
     }
     await refreshUser();
-    Alert.alert(t.common.done, t.settings.messages.profilePhotoDeleted);
+    Alert.alert(t.common.done, t.messages.profilePhotoDeleted);
     setShowAvatarModal(false);
   } catch (error: any) {
     logger.error('Avatar delete failed', error);
-    Alert.alert(t.common.error, error?.message || t.settings.messages.photoDeleteRetry);
+    Alert.alert(t.common.error, error?.message || t.messages.photoDeleteRetry);
   } finally {
     setAvatarUploading(false);
   }
@@ -322,10 +322,10 @@ const removeAvatarFromServer = async () => {
   
   const handleDeleteAccount = () => {
     Alert.alert(
-      t.settings.messages.deleteAccountTitle,
-      t.settings.messages.deleteAccountBody,
+      t.messages.deleteAccountTitle,
+      t.messages.deleteAccountBody,
       [
-        { text: t.settings.messages.contactSupport, onPress: () => Linking.openURL('mailto:support@iwent.ru?subject=Запрос на удаление аккаунта') },
+        { text: t.messages.contactSupport, onPress: () => Linking.openURL('mailto:support@iwent.ru?subject=Запрос на удаление аккаунта') },
         { text: t.common.cancel, style: 'cancel' },
       ]
     );
@@ -333,15 +333,15 @@ const removeAvatarFromServer = async () => {
   
   const handleDeactivateAccount = () => {
     Alert.alert(
-      t.settings.messages.deactivateTitle,
+      t.messages.deactivateTitle,
       t.settings.account.deactivateConfirm,
       [
         { text: t.common.cancel, style: 'cancel' },
         { 
-          text: t.settings.messages.deactivateAction, 
+          text: t.messages.deactivateAction, 
           onPress: () => {
             // Логика деактивации
-            Alert.alert(t.settings.messages.accountDeactivated);
+            Alert.alert(t.messages.accountDeactivated);
           }
         }
       ]
@@ -350,12 +350,12 @@ const removeAvatarFromServer = async () => {
   
   const handleLogout = () => {
     Alert.alert(
-      t.settings.messages.logoutTitle,
+      t.messages.logoutTitle,
       t.settings.account.logoutConfirm,
       [
         { text: t.common.cancel, style: 'cancel' },
         { 
-          text: t.settings.messages.logoutAction, 
+          text: t.messages.logoutAction, 
           style: 'destructive',
           onPress: async () => {
             try {
@@ -375,7 +375,7 @@ const removeAvatarFromServer = async () => {
   const requestPermissions = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(t.common.error, t.settings.messages.noGalleryAccess);
+      Alert.alert(t.common.error, t.messages.noGalleryAccess);
       return false;
     }
     return true;
@@ -402,7 +402,7 @@ const removeAvatarFromServer = async () => {
     if (avatarUploading) return;
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(t.common.error, t.settings.messages.noCameraAccess);
+      Alert.alert(t.common.error, t.messages.noCameraAccess);
       return;
     }
 
@@ -419,12 +419,12 @@ const removeAvatarFromServer = async () => {
 
   const handleRemoveAvatar = () => {
     if (avatarUploading) {
-      Alert.alert(t.settings.messages.pleaseWait, t.settings.messages.photoOpInProgress);
+      Alert.alert(t.messages.pleaseWait, t.messages.photoOpInProgress);
       return;
     }
     Alert.alert(
-      t.settings.messages.deletePhotoTitle,
-      t.settings.messages.deletePhotoConfirm,
+      t.messages.deletePhotoTitle,
+      t.messages.deletePhotoConfirm,
       [
         { text: t.common.cancel, style: 'cancel' },
         { 
@@ -450,19 +450,19 @@ const removeAvatarFromServer = async () => {
     if (userId === currentUserId) return;
     try {
       await switchAccount(userId);
-      Alert.alert(t.common.done, t.settings.messages.switchedAccount);
+      Alert.alert(t.common.done, t.messages.switchedAccount);
     } catch (error) {
-      Alert.alert(t.common.error, t.settings.messages.switchAccountFailed);
+      Alert.alert(t.common.error, t.messages.switchAccountFailed);
     }
   };
 
   const confirmRemoveAccount = (userId: string) => {
     const isSelf = userId === currentUserId;
     Alert.alert(
-      isSelf ? t.settings.messages.removeAccountTitle : t.settings.messages.removeAccountFromList,
+      isSelf ? t.messages.removeAccountTitle : t.messages.removeAccountFromList,
       isSelf
-        ? t.settings.messages.removeAccountBody
-        : t.settings.messages.removeAccountHint,
+        ? t.messages.removeAccountBody
+        : t.messages.removeAccountHint,
       [
         { text: t.common.cancel, style: 'cancel' },
         {
@@ -472,7 +472,7 @@ const removeAvatarFromServer = async () => {
             try {
               await removeAccount(userId);
             } catch (error) {
-              Alert.alert(t.common.error, t.settings.messages.removeAccountFailed);
+              Alert.alert(t.common.error, t.messages.removeAccountFailed);
             }
           },
         },
@@ -514,9 +514,9 @@ const removeAvatarFromServer = async () => {
       
       updateUserData(currentUserId, updates);
       if (refreshUser) await refreshUser();
-      Alert.alert(t.common.done, t.settings.messages.changesSaved);
+      Alert.alert(t.common.done, t.messages.changesSaved);
     } catch (error: any) {
-      const message = error instanceof ApiError ? error.message : t.settings.messages.saveChangesFailed;
+      const message = error instanceof ApiError ? error.message : t.messages.saveChangesFailed;
       Alert.alert(t.common.error, message);
     } finally {
       setUpdating(false);
@@ -525,7 +525,7 @@ const removeAvatarFromServer = async () => {
 
   const handleUpdateName = async () => {
     if (!editName.trim()) {
-      Alert.alert(t.common.error, t.settings.messages.enterName);
+      Alert.alert(t.common.error, t.messages.enterName);
       return;
     }
     await updateProfileField('name', editName.trim());
@@ -541,7 +541,7 @@ const removeAvatarFromServer = async () => {
 
   const handleUpdateDateOfBirth = async () => {
     if (!editDateOfBirth) {
-      Alert.alert(t.common.error, t.settings.messages.selectBirthDate);
+      Alert.alert(t.common.error, t.messages.selectBirthDate);
       return;
     }
     // Форматируем дату в ISO строку для отправки на сервер
@@ -579,11 +579,11 @@ const removeAvatarFromServer = async () => {
 
   const handleChangeEmail = async () => {
     if (!newEmail.trim()) {
-      Alert.alert(t.common.error, t.settings.messages.enterNewEmail);
+      Alert.alert(t.common.error, t.messages.enterNewEmail);
       return;
     }
     if (!emailPassword) {
-      Alert.alert(t.common.error, t.settings.messages.enterCurrentPassword);
+      Alert.alert(t.common.error, t.messages.enterCurrentPassword);
       return;
     }
     setUpdating(true);
@@ -596,13 +596,13 @@ const removeAvatarFromServer = async () => {
         },
         accessToken,
       );
-      Alert.alert(t.common.done, t.settings.messages.emailChanged);
+      Alert.alert(t.common.done, t.messages.emailChanged);
       setShowEmailModal(false);
       setNewEmail('');
       setEmailPassword('');
       if (refreshUser) await refreshUser();
     } catch (error: any) {
-      const message = error instanceof ApiError ? error.message : t.settings.messages.emailChangeFailed;
+      const message = error instanceof ApiError ? error.message : t.messages.emailChangeFailed;
       Alert.alert(t.common.error, message);
     } finally {
       setUpdating(false);
@@ -611,7 +611,7 @@ const removeAvatarFromServer = async () => {
 
   const handleChangePassword = async () => {
     if (!currentPassword || !newPassword) {
-      Alert.alert(t.common.error, t.settings.messages.fillAllFields);
+      Alert.alert(t.common.error, t.messages.fillAllFields);
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -619,7 +619,7 @@ const removeAvatarFromServer = async () => {
       return;
     }
     if (newPassword.length < 6) {
-      Alert.alert(t.common.error, t.settings.messages.passwordTooShort);
+      Alert.alert(t.common.error, t.messages.passwordTooShort);
       return;
     }
     setUpdating(true);
@@ -632,13 +632,13 @@ const removeAvatarFromServer = async () => {
         },
         accessToken,
       );
-      Alert.alert(t.common.done, t.settings.messages.passwordChanged);
+      Alert.alert(t.common.done, t.messages.passwordChanged);
       setShowPasswordModal(false);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (error: any) {
-      const message = error instanceof ApiError ? error.message : t.settings.messages.passwordChangeFailed;
+      const message = error instanceof ApiError ? error.message : t.messages.passwordChangeFailed;
       Alert.alert(t.common.error, message);
     } finally {
       setUpdating(false);
@@ -648,9 +648,9 @@ const removeAvatarFromServer = async () => {
   const showImageOptions = () => {
     if (avatarUploading) {
       if (Platform.OS === 'web') {
-        window.alert(`${t.settings.messages.pleaseWait}. ${t.settings.messages.finishCurrentUpload}`);
+        window.alert(`${t.messages.pleaseWait}. ${t.messages.finishCurrentUpload}`);
       } else {
-        Alert.alert(t.settings.messages.pleaseWait, t.settings.messages.finishCurrentUpload);
+        Alert.alert(t.messages.pleaseWait, t.messages.finishCurrentUpload);
       }
       return;
     }
@@ -667,7 +667,7 @@ const removeAvatarFromServer = async () => {
           const file = files[0];
           const type = (file.type || '').toLowerCase();
           if (type.includes('heic') || type.includes('heif')) {
-            window.alert(t.settings.messages.heicNotSupported);
+            window.alert(t.messages.heicNotSupported);
             return;
           }
           // Создаем объект, похожий на ImagePickerAsset для веба
@@ -685,12 +685,12 @@ const removeAvatarFromServer = async () => {
     }
 
     Alert.alert(
-      t.settings.messages.choosePhoto,
-      t.settings.messages.choosePhotoSource,
+      t.messages.choosePhoto,
+      t.messages.choosePhotoSource,
       [
-        { text: t.settings.messages.gallery, onPress: () => void pickImage() },
-        { text: t.settings.messages.camera, onPress: () => void takePhoto() },
-        { text: t.settings.messages.deletePhotoTitle, onPress: handleRemoveAvatar, style: 'destructive' },
+        { text: t.messages.gallery, onPress: () => void pickImage() },
+        { text: t.messages.camera, onPress: () => void takePhoto() },
+        { text: t.messages.deletePhotoTitle, onPress: handleRemoveAvatar, style: 'destructive' },
         { text: t.common.cancel, style: 'cancel' }
       ]
     );
@@ -914,8 +914,8 @@ const removeAvatarFromServer = async () => {
               () => router.push('/(tabs)/saved')
             )}
             {renderSettingItem(
-              t.settings.saved.savedMemories || t.settings.messages.savedMemoriesTitle,
-              getSavedMemoryPosts(eventProfiles).length > 0 ? `${getSavedMemoryPosts(eventProfiles).length} ${(t.settings.saved as any).memoriesCount || t.settings.messages.postsWord}` : t.settings.saved.noSaved,
+              t.settings.saved.savedMemories || t.messages.savedMemoriesTitle,
+              getSavedMemoryPosts(eventProfiles).length > 0 ? `${getSavedMemoryPosts(eventProfiles).length} ${(t.settings.saved as any).memoriesCount || t.messages.postsWord}` : t.settings.saved.noSaved,
               () => router.push('/(tabs)/saved')
             )}
           </>
@@ -1398,7 +1398,7 @@ const removeAvatarFromServer = async () => {
             <Text style={styles.modalSubtitle}>За сколько часов напоминать о событии?</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder={t.settings.reminders.hoursCount}
+              placeholder={t.settings.events.hoursCount}
               placeholderTextColor="#999"
               value={reminderHours}
               onChangeText={setReminderHours}
@@ -1415,7 +1415,7 @@ const removeAvatarFromServer = async () => {
                 style={[styles.modalButton, styles.modalButtonConfirm]}
                 onPress={() => {
                   setShowReminderModal(false);
-                  Alert.alert(t.settings.messages.remindersConfigured);
+                  Alert.alert(t.messages.remindersConfigured);
                 }}
               >
                 <Text style={styles.modalButtonText}>Сохранить</Text>
