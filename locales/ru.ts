@@ -463,6 +463,10 @@ export const ru = {
 
   // Validation
   validation: {
+    usernameEmpty: 'Юзернейм не может быть пустым',
+    usernameTooShort: 'Юзернейм должен быть не менее 3 символов',
+    usernameTooLong: 'Юзернейм должен быть не более 30 символов',
+    usernameChars: 'Юзернейм может содержать только латинские буквы, цифры и подчёркивание',
     googleSignInFailed: 'Не удалось войти через Google',
     required: 'Это поле обязательно',
     emailInvalid: 'Неверный формат email',
@@ -472,6 +476,13 @@ export const ru = {
 
   // Events
   events: {
+    authRequired: 'Необходима авторизация',
+    signInToCreateEvents: 'Чтобы создавать события, необходимо авторизоваться',
+    transferRoleToLeave: 'Для отмены участия передайте роль организатора другому участнику',
+    eventNotFound: 'Событие не найдено',
+    onlyOrganizerCanTransfer: 'Только организатор события может передать роль',
+    useTransferInstead: 'Используйте передачу роли организатора вместо отмены участия',
+    joinedEvent: 'Вы присоединились к событию!',
     changePhotoForSelf: 'Изменить фото для себя',
     addToFolder: 'Добавить в папку',
     goToChat: 'Перейти в чат',
@@ -700,6 +711,13 @@ export const ru = {
 
       // Chat
       chat: {
+        chatFallback: 'Чат',
+        chat: 'Чат',
+        authRequiredForChat: 'Необходима авторизация для создания чата',
+        chatCreateFailed: 'Не удалось создать чат',
+        justNow: 'только что',
+        memory: 'Воспоминание',
+        noMessages: 'Нет сообщений',
         writeMessage: 'Написать сообщение...',
         noMicAccess: 'Нет доступа к микрофону',
         comingSoon: 'Скоро',
@@ -745,6 +763,9 @@ export const ru = {
 
   // Empty states
   empty: {
+    searchMemories: 'Поиск воспоминаний...',
+    noMemoriesYet: 'Пока нет воспоминаний',
+    appearAfterEvents: 'Они появятся после завершения событий',
     searchSaved: 'Поиск сохранённых...',
     nothingFound: 'Ничего не найдено',
     tryAnotherQuery: 'Попробуйте другой запрос',
@@ -815,6 +836,10 @@ export const ru = {
 
   // Map
   map: {
+    selectedPlace: 'Выбранное место',
+    coordinates: 'Координаты: ',
+    searchAddress: 'Поиск адреса...',
+    pickPlaceOnMap: 'Пожалуйста, выберите место на карте',
     back: 'Назад',
     selectLocation: 'Выберите место',
     eventLocation: 'Место события',

@@ -1010,7 +1010,7 @@ export default function ExploreScreen() {
             <Text style={styles.modalTitle}>{t.explore.createFolder}</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder={t.explore.createFolder || 'Название папки'}
+              placeholder={t.explore.createFolder || t.chat.folderName}
               value={newFolderName}
               onChangeText={setNewFolderName}
               autoFocus={true}

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useLanguage } from '../../context/LanguageContext';
 import { apiRequest, ApiError } from '../../services/api';
 import type { Chat, ChatMessage, Event, EventRequest, EventProfile } from '../../types';
 import type { ServerUser, ServerChat, ServerChatMessage } from '../../types/api';
@@ -30,7 +31,7 @@ export const mapServerChatToClient = (chat: ServerChat): Chat => ({
   id: chat.id,
   type: (chat.type ? String(chat.type).toLowerCase() : 'personal') as Chat['type'],
   eventId: chat.eventId ?? undefined,
-  name: chat.name ?? chat.event?.title ?? 'Чат',
+  name: chat.name ?? chat.event?.title ?? t.chat.chatFallback,
   participants: (chat.participants ?? []).map((participant) => participant.userId ?? '').filter(Boolean),
   lastMessage: chat.lastMessage ? mapServerMessageToClient(chat.lastMessage) : undefined,
   lastActivity: chat.updatedAt ? new Date(chat.updatedAt) : new Date(),
@@ -129,7 +130,7 @@ export function useChats({
             if (otherUserId) {
               const otherUserData = getUserData(otherUserId);
               if (otherUserData) {
-                chat.name = otherUserData.name || otherUserData.username || 'Чат';
+                chat.name = otherUserData.name || otherUserData.username || t.chat.chatFallback;
               }
             }
           }
@@ -327,7 +328,7 @@ export function useChats({
     const actualToken = currentAccessTokenRef.current;
     const actualUserId = currentUserIdRef.current;
     if (!actualToken || !actualUserId) {
-      throw new Error('Необходима авторизация для создания чата');
+      throw new Error(t.chat.authRequiredForChat);
     }
 
     // Проверяем, существует ли уже чат с этим пользователем
@@ -380,12 +381,12 @@ export function useChats({
         const localId = `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         return localId;
       }
-      throw new Error('Не удалось создать чат');
+      throw new Error(t.chat.chatCreateFailed);
     } catch (error) {
       logger.warn('Failed to create personal chat on server, creating locally', error);
       // Fallback: создаем локально
       const otherUserData = getUserData(otherUserId);
-      const chatName = otherUserData.name || otherUserData.username || 'Чат';
+      const chatName = otherUserData.name || otherUserData.username || t.chat.chatFallback;
       const chatId = `chat-personal-${actualUserId}-${otherUserId}`;
       const newChat: Chat = {
         id: chatId,
@@ -559,7 +560,7 @@ export function useChats({
     
     if (!actualToken || !actualUserId) {
       logger.warn('Cannot delete chat: no access');
-      throw new Error('Необходима авторизация');
+      throw new Error(t.events.authRequired);
     }
 
     try {

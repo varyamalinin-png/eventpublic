@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useLanguage } from '../context/LanguageContext';
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { createLogger } from '../utils/logger';
@@ -43,6 +44,7 @@ declare global {
 
 export default function SelectLocationScreen() {
   const router = useRouter();
+  const { t } = useLanguage();
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -123,8 +125,8 @@ export default function SelectLocationScreen() {
     const placemark = new window.ymaps.Placemark(coords, {
       balloonContentBody: [
         '<address>',
-        '<strong>Выбранное место</strong><br/>',
-        'Координаты: ' + coords[0].toPrecision(6) + ', ' + coords[1].toPrecision(6),
+        '<strong>' + t.map.selectedPlace + '</strong><br/>',
+        t.map.coordinates + coords[0].toPrecision(6) + ', ' + coords[1].toPrecision(6),
         '</address>'
       ].join('')
     }, {
@@ -191,7 +193,7 @@ export default function SelectLocationScreen() {
       const searchControl = new window.ymaps.control.SearchControl({
         options: {
           provider: 'yandex#search',
-          placeholderContent: 'Поиск адреса...',
+          placeholderContent: t.map.searchAddress,
           noPlacemark: false,
         },
       });
@@ -260,7 +262,7 @@ export default function SelectLocationScreen() {
   const handleConfirm = () => {
     if (!selectedLocation) {
       if (typeof window !== 'undefined') {
-        window.alert('Пожалуйста, выберите место на карте');
+        window.alert(t.map.pickPlaceOnMap);
       }
       return;
     }
@@ -304,7 +306,7 @@ export default function SelectLocationScreen() {
       <View style={styles.searchContainer}>
         <input
           type="text"
-          placeholder="Поиск адреса..."
+          placeholder={t.map.searchAddress}
           value={searchQuery}
           onChange={(e: any) => setSearchQuery(e.target.value)}
           onKeyPress={(e: any) => {

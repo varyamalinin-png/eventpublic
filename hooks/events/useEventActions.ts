@@ -1,4 +1,5 @@
 import { useCallback, useRef, useEffect } from 'react';
+import { useLanguage } from '../../context/LanguageContext';
 import { Platform } from 'react-native';
 import { apiRequest, ApiError, API_BASE_URL } from '../../services/api';
 import type { Event, EventProfile, EventRequest, Chat } from '../../types';
@@ -88,7 +89,7 @@ export function useEventActions({
       const actualUserId = currentUserIdRef.current;
       
       if (!actualToken || !actualUserId) {
-        throw new Error('Чтобы создавать события, необходимо авторизоваться');
+        throw new Error(t.events.signInToCreateEvents);
       }
 
       try {
@@ -1387,7 +1388,7 @@ export function useEventActions({
       // Организатор не единственный участник - показываем попап для передачи роли
       // Это обрабатывается в EventCard через модальное окно
       logger.warn('Cannot cancel event with multiple participants, use transfer organizer role instead');
-      throw new Error('Для отмены участия передайте роль организатора другому участнику');
+      throw new Error(t.events.transferRoleToLeave);
     }
   }, [accessToken, currentUserId, events, getEventParticipants, syncEventsFromServer, refreshPendingJoinRequests]);
 
@@ -1397,14 +1398,14 @@ export function useEventActions({
     
     if (!actualToken || !actualUserId) {
       logger.warn('Cannot transfer organizer role: no access');
-      throw new Error('Необходима авторизация');
+      throw new Error(t.events.authRequired);
     }
 
     // Проверяем, что пользователь является организатором события
     const event = events.find(e => e.id === eventId);
     if (!event) {
       logger.warn('Cannot transfer organizer role: event not found', eventId);
-      throw new Error('Событие не найдено');
+      throw new Error(t.events.eventNotFound);
     }
 
     if (event.organizerId !== actualUserId) {
@@ -1413,7 +1414,7 @@ export function useEventActions({
         organizerId: event.organizerId,
         currentUserId: actualUserId
       });
-      throw new Error('Только организатор события может передать роль');
+      throw new Error(t.events.onlyOrganizerCanTransfer);
     }
 
     try {
@@ -1530,7 +1531,7 @@ export function useEventActions({
     // cancelOrganizerParticipation больше не используется - вместо этого используется transferOrganizerRole
     // Оставляем для обратной совместимости, но перенаправляем на transferOrganizerRole
     logger.warn('cancelOrganizerParticipation is deprecated, use transferOrganizerRole instead');
-    throw new Error('Используйте передачу роли организатора вместо отмены участия');
+    throw new Error(t.events.useTransferInstead);
 
     try {
       await apiRequest(

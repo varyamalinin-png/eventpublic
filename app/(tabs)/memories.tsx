@@ -269,7 +269,7 @@ export default function MemoriesScreen() {
   return (
     <View style={styles.container}>
       <TopBar
-        searchPlaceholder="Поиск воспоминаний..."
+        searchPlaceholder={t.empty.searchMemories}
         onSearchChange={handleMemoriesSearch}
         searchQuery={searchQuery}
         showCalendar={true}
@@ -306,11 +306,11 @@ export default function MemoriesScreen() {
             return (
               <View style={styles.emptyContainer}>
                 <AppIcon name="camera" size={60} color="rgba(244,244,245,0.25)" />
-                <Text style={styles.emptyTitle}>{t.empty.noMemoriesTitle || 'Пока нет воспоминаний'}</Text>
+                <Text style={styles.emptyTitle}>{t.empty.noMemoriesTitle || t.empty.noMemoriesYet}</Text>
                 <Text style={styles.emptyText}>
                   {searchQuery
-                    ? (t.empty.searchNotFound || 'Ничего не найдено')
-                    : (t.empty.noPostsYouAndFriends || 'Они появятся после завершения событий')}
+                    ? (t.empty.searchNotFound || t.empty.nothingFound)
+                    : (t.empty.noPostsYouAndFriends || t.empty.appearAfterEvents)}
                 </Text>
               </View>
             );

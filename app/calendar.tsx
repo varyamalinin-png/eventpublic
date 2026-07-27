@@ -1114,7 +1114,7 @@ export default function CalendarScreen() {
                                 // Проверяем, является ли организатор бизнес-аккаунтом и требуется ли оплата
                                 const organizerData = getUserData(event.organizerId);
                                 const isBusinessAccount = organizerData?.accountType === 'business';
-                                const isPaidEvent = event.price && event.price !== 'Бесплатно' && event.price.toLowerCase() !== 'free';
+                                const isPaidEvent = event.price && event.price !== t.createEvent.free && event.price.toLowerCase() !== 'free';
                                 
                                 // Если это бизнес-аккаунт и событие платное - открываем страницу платежей
                                 if (isBusinessAccount && isPaidEvent) {
@@ -1141,8 +1141,8 @@ export default function CalendarScreen() {
                                   // Для бизнес-аккаунтов показываем сообщение об успешном присоединении
                                   if (isBusinessAccount) {
                                     Alert.alert(
-                                      'Успешно',
-                                      'Вы присоединились к событию!',
+                                      t.common.success,
+                                      t.events.joinedEvent,
                                       [{ text: 'OK' }]
                                     );
                                   }
@@ -1280,7 +1280,7 @@ export default function CalendarScreen() {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color="#FF8D32" />
-        <Text style={{ color: 'rgba(244,244,245,0.55)', marginTop: 12, fontSize: 14 }}>{t?.common?.loading ?? 'Загрузка…'}</Text>
+        <Text style={{ color: 'rgba(244,244,245,0.55)', marginTop: 12, fontSize: 14 }}>{t?.common?.loading ?? t.common.loading}</Text>
       </View>
     );
   }

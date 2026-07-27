@@ -463,6 +463,10 @@ export const en = {
 
   // Validation
   validation: {
+    usernameEmpty: 'Username cannot be empty',
+    usernameTooShort: 'Username must be at least 3 characters',
+    usernameTooLong: 'Username must be at most 30 characters',
+    usernameChars: 'Username may contain only latin letters, digits and underscore',
     googleSignInFailed: 'Could not sign in with Google',
     required: 'This field is required',
     emailInvalid: 'Invalid email format',
@@ -472,6 +476,13 @@ export const en = {
 
   // Events
   events: {
+    authRequired: 'Sign in required',
+    signInToCreateEvents: 'You need to sign in to create events',
+    transferRoleToLeave: 'To cancel participation, transfer the organizer role to another participant',
+    eventNotFound: 'Event not found',
+    onlyOrganizerCanTransfer: 'Only the event organizer can transfer the role',
+    useTransferInstead: 'Use organizer role transfer instead of cancelling participation',
+    joinedEvent: 'You have joined the event!',
     changePhotoForSelf: 'Change photo for myself',
     addToFolder: 'Add to folder',
     goToChat: 'Go to chat',
@@ -699,6 +710,12 @@ export const en = {
 
       // Chat
       chat: {
+        chatFallback: 'Chat',
+        authRequiredForChat: 'Sign in required to create a chat',
+        chatCreateFailed: 'Could not create the chat',
+        justNow: 'just now',
+        memory: 'Memory',
+        noMessages: 'No messages',
         writeMessage: 'Write a message...',
         noMicAccess: 'No access to microphone',
         comingSoon: 'Coming soon',
@@ -744,6 +761,9 @@ export const en = {
 
   // Empty states
   empty: {
+    searchMemories: 'Search memories...',
+    noMemoriesYet: 'No memories yet',
+    appearAfterEvents: 'They will appear after events finish',
     searchSaved: 'Search saved...',
     nothingFound: 'Nothing found',
     tryAnotherQuery: 'Try a different query',
@@ -815,6 +835,10 @@ export const en = {
 
   // Map
   map: {
+    selectedPlace: 'Selected place',
+    coordinates: 'Coordinates: ',
+    searchAddress: 'Search address...',
+    pickPlaceOnMap: 'Please pick a place on the map',
     back: 'Back',
     selectLocation: 'Select location',
     eventLocation: 'Event location',
