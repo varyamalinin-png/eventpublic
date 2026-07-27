@@ -543,7 +543,7 @@ export default function ChatScreen() {
               }
             }
           }}
-          placeholder="Написать сообщение..."
+          placeholder={t.chat.writeMessage}
           placeholderTextColor="rgba(244,244,245,0.35)"
           multiline
           editable={true}
@@ -577,9 +577,9 @@ export default function ChatScreen() {
               try {
                 const { Audio } = require('expo-av');
                 const { status } = await Audio.requestPermissionsAsync();
-                if (status !== 'granted') { Alert.alert('Нет доступа к микрофону'); return; }
-                Alert.alert('Скоро', 'Голосовые сообщения появятся в следующем обновлении');
-              } catch { Alert.alert('Скоро', 'Голосовые сообщения появятся в следующем обновлении'); }
+                if (status !== 'granted') { Alert.alert(t.chat.noMicAccess); return; }
+                Alert.alert(t.chat.comingSoon, t.chat.voiceMessagesSoon);
+              } catch { Alert.alert(t.chat.comingSoon, t.chat.voiceMessagesSoon); }
             }}
           >
             <AppIcon name="mic" size={17} color="rgba(244,244,245,0.6)" />

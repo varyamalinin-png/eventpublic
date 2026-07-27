@@ -29,6 +29,7 @@ export const ru = {
     cardHolderExample: 'Иван Иванов',
   },
   support: {
+    pendingReview: 'Ожидает рассмотрения',
     pending: 'Ожидает',
     reviewed: 'Рассмотрено',
     resolved: 'Решено',
@@ -699,6 +700,10 @@ export const ru = {
 
       // Chat
       chat: {
+        writeMessage: 'Написать сообщение...',
+        noMicAccess: 'Нет доступа к микрофону',
+        comingSoon: 'Скоро',
+        voiceMessagesSoon: 'Голосовые сообщения появятся в следующем обновлении',
         searchChats: 'Поиск чатов...',
         eventSent: 'Отправлено событие',
         chooseChatAction: 'Выберите действие для чата события:',

@@ -47,10 +47,10 @@ const STATUS_COLORS: Record<ComplaintStatus, string> = {
 };
 
 const STATUS_LABELS: Record<ComplaintStatus, string> = {
-  PENDING: 'Ожидает рассмотрения',
-  REVIEWED: 'Рассмотрено',
-  RESOLVED: 'Решено',
-  REJECTED: 'Отклонено',
+  PENDING: t.support.pendingReview,
+  REVIEWED: t.support.reviewed,
+  RESOLVED: t.support.resolved,
+  REJECTED: t.support.rejectedStatus,
 };
 
 export default function MyComplaintsScreen() {
@@ -127,7 +127,7 @@ export default function MyComplaintsScreen() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <AppIcon name={complaint.type === 'EVENT' ? 'calendar' : 'user'} size={13} color={Palette.textDim} />
                     <Text style={styles.complaintTypeText}>
-                      {complaint.type === 'EVENT' ? 'Событие' : 'Пользователь'}
+                      {complaint.type === 'EVENT' ? t.support.eventWord : 'Пользователь'}
                     </Text>
                   </View>
                 </View>

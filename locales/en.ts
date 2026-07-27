@@ -29,6 +29,7 @@ export const en = {
     cardHolderExample: 'John Smith',
   },
   support: {
+    pendingReview: 'Pending review',
     pending: 'Pending',
     reviewed: 'Reviewed',
     resolved: 'Resolved',
@@ -698,6 +699,10 @@ export const en = {
 
       // Chat
       chat: {
+        writeMessage: 'Write a message...',
+        noMicAccess: 'No access to microphone',
+        comingSoon: 'Coming soon',
+        voiceMessagesSoon: 'Voice messages will arrive in the next update',
         searchChats: 'Search chats...',
         eventSent: 'Event sent',
         chooseChatAction: 'Choose an action for the event chat:',
