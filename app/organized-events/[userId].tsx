@@ -1,6 +1,7 @@
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useState, useRef, useMemo } from 'react';
+import { useStableItemHandler } from '../../hooks/useStableItemHandler';
 import EventCard from '../../components/EventCard';
 import { useEvents, Event } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
@@ -86,6 +87,10 @@ export default function OrganizedEventsScreen() {
       }
     }, 200);
   };
+
+  // Одна ссылка на событие вместо новой стрелки на каждый рендер —
+  // иначе memo у EventCard не срабатывает
+  const getEventPressHandler = useStableItemHandler(organizedEvents, handleEventPress);
 
   // Если показываем ленту событий
   if (showEventFeed) {
@@ -195,7 +200,7 @@ export default function OrganizedEventsScreen() {
                     mediaAspectRatio={event.mediaAspectRatio}
                     participantsList={event.participantsList}
                     participantsData={event.participantsData}
-                    onMiniaturePress={() => handleEventPress(event)}
+                    onMiniaturePress={getEventPressHandler(event.id)}
                     viewerUserId={targetUserId}
                   />
                 </View>

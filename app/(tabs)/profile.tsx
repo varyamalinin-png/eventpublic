@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useStableItemHandler } from '../../hooks/useStableItemHandler';
 import { View, Text, ScrollView, FlatList, StyleSheet, Image, TouchableOpacity, Modal, Dimensions, TextInput, Alert, Platform, RefreshControl } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useRefresh } from '../../hooks/useRefresh';
@@ -579,6 +580,9 @@ export default function ProfileScreen() {
     setShowEventFeed(true);
   }, [isEventPast]);
 
+  // Стабильная ссылка вместо новой стрелки на каждый рендер сетки
+  const getFilteredPress = useStableItemHandler(filteredEvents, handleMiniaturePress);
+
   // Отладочная информация при каждом рендере (убрано для уменьшения логов)
   // useEffect(() => {
   //   logger.debug('useEffect showEventFeed', { showEventFeed });
@@ -996,7 +1000,7 @@ export default function ProfileScreen() {
                       mediaAspectRatio={event.mediaAspectRatio}
                       participantsList={event.participantsList}
                       participantsData={event.participantsData}
-                      onMiniaturePress={() => handleMiniaturePress(event)}
+                      onMiniaturePress={getFilteredPress(event.id)}
                     />
                   </View>
                 );

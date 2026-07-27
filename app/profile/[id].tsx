@@ -2,6 +2,7 @@ import { View, Text, ScrollView, StyleSheet, Image, TouchableOpacity, TextInput,
 import { Link, useLocalSearchParams } from 'expo-router';
 import { useSafeRouter } from '../../utils/safeRouter';
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useStableItemHandler } from '../../hooks/useStableItemHandler';
 import { useFocusEffect } from 'expo-router';
 import EventCard from '../../components/EventCard';
 import MemoryMiniCard from '../../components/MemoryMiniCard';
@@ -410,6 +411,12 @@ export default function OtherProfileScreen() {
     }, 200);
   }, [router, showEventFeed, userEvents]);
 
+  // Стабильные ссылки на секцию — инлайновая стрелка сбрасывала memo
+  // у всех карточек сетки при каждом рендере профиля
+  const getFilteredPress = useStableItemHandler(filteredEvents, handleMiniaturePress);
+  const getOrganizedPress = useStableItemHandler(organizedEvents, handleMiniaturePress);
+  const getParticipatedPress = useStableItemHandler(participatedEvents, handleMiniaturePress);
+
   const handleFolderToggle = (folderId: string) => {
     setSelectedFolders(prev => 
       prev.includes(folderId) 
@@ -773,7 +780,7 @@ export default function OtherProfileScreen() {
                       mediaAspectRatio={event.mediaAspectRatio}
                       participantsList={event.participantsList}
                       participantsData={event.participantsData}
-                      onMiniaturePress={() => handleMiniaturePress(event)}
+                      onMiniaturePress={getFilteredPress(event.id)}
                     />
                   </View>
                 );
@@ -827,7 +834,7 @@ export default function OtherProfileScreen() {
                       mediaAspectRatio={event.mediaAspectRatio}
                       participantsList={event.participantsList}
                       participantsData={event.participantsData}
-                      onMiniaturePress={() => handleMiniaturePress(event)}
+                      onMiniaturePress={getOrganizedPress(event.id)}
                       viewerUserId={userId}
                     />
                   </View>
@@ -880,7 +887,7 @@ export default function OtherProfileScreen() {
                       mediaAspectRatio={event.mediaAspectRatio}
                       participantsList={event.participantsList}
                       participantsData={event.participantsData}
-                      onMiniaturePress={() => handleMiniaturePress(event)}
+                      onMiniaturePress={getParticipatedPress(event.id)}
                       viewerUserId={userId}
                     />
                   </View>
