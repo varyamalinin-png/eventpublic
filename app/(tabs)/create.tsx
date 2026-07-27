@@ -207,7 +207,7 @@ export default function CreateEventScreen() {
     
     // "Регулярное" - если событие регулярное
     if (formData.isRecurring) {
-      tags.push('Регулярное');
+      tags.push(t.createEvent.regular);
     }
     
     return tags;
@@ -428,7 +428,7 @@ export default function CreateEventScreen() {
       // Определяем location - используем formData.location если есть, иначе проверяем coordinates
       let location = formData.location;
       if (!location) {
-        location = formData.coordinates ? 'Место проведения' : 'Онлайн';
+        location = formData.coordinates ? t.createEvent.venue : t.createEvent.online;
       }
       
       // КРИТИЧЕСКИ ВАЖНО: Создаем Date объект безопасно для избежания ошибки _construct
@@ -443,8 +443,8 @@ export default function CreateEventScreen() {
 
       const previewData = {
         id: previewEventId,
-        title: formData.title || t.createEvent.defaultEventTitle || 'Новое событие',
-        description: formData.description || t.createEvent.defaultEventDescription || 'Описание события',
+        title: formData.title || t.createEvent.defaultEventTitle || t.createEvent.defaultEventTitle,
+        description: formData.description || t.createEvent.defaultEventDescription || t.createEvent.eventDescriptionPlaceholder,
         date: eventDate,
         time: eventTime,
         displayDate: eventDisplayDate,
@@ -475,7 +475,7 @@ export default function CreateEventScreen() {
           
           // "массовое" - если событие массовое
           if (formData.isMassEvent) {
-            autoTags.push('массовое');
+            autoTags.push(t.createEvent.massEventTag);
           }
           
           // "18+" - если выбран age restriction с минимальным возрастом >= 18
@@ -490,7 +490,7 @@ export default function CreateEventScreen() {
           
           // "Регулярное" - если событие регулярное
           if (formData.isRecurring) {
-            autoTags.push('Регулярное');
+            autoTags.push(t.createEvent.regular);
           }
           
           return [...autoTags, ...customTags];
@@ -504,13 +504,13 @@ export default function CreateEventScreen() {
       // Возвращаем минимальный объект вместо null, чтобы превью не было пустым
       return {
         id: 'preview-event-temp',
-        title: formData.title || 'Новое событие',
+        title: formData.title || t.createEvent.defaultEventTitle,
         description: formData.description || '',
         date: formatDateForAPI(formData.date || new Date()),
         time: formatTime(formData.time || new Date()),
         displayDate: formatDisplayDate(formData.date || new Date()),
         displayTime: formatTime(formData.time || new Date()),
-        location: formData.location || 'Место проведения',
+        location: formData.location || t.createEvent.venue,
         price: formData.price || '0',
         participants: 0,
         maxParticipants: parseInt(String(formData.maxParticipants)) || 10,
@@ -535,7 +535,7 @@ export default function CreateEventScreen() {
         tags: (() => {
           const autoTags: string[] = [];
           if (formData.isMassEvent) {
-            autoTags.push('массовое');
+            autoTags.push(t.createEvent.massEventTag);
           }
           if (formData.ageRestriction && formData.ageRestriction.min >= 18) {
             autoTags.push('18+');
@@ -1016,7 +1016,7 @@ export default function CreateEventScreen() {
       }, 100);
     } catch (error: any) {
       logger.error('Ошибка при выборе изображения:', error);
-      Alert.alert('Ошибка', 'Не удалось выбрать изображение. Попробуйте еще раз.');
+      Alert.alert(t.common.error, t.createEvent.imagePickFailed);
     }
   };
 
@@ -1120,14 +1120,14 @@ export default function CreateEventScreen() {
     
     // На мобильных показываем Alert с опциями
     Alert.alert(
-      'Добавить медиа',
-      'Выберите тип медиа и источник:',
+      t.createEvent.addMedia,
+      t.createEvent.chooseMediaTypeSource,
       [
-        { text: 'Фото из галереи', onPress: pickImage },
-        { text: '🎥 Видео из галереи', onPress: pickVideo },
-        { text: 'Сделать фото', onPress: takePhoto },
-        { text: '🎬 Снять видео', onPress: takeVideo },
-        { text: 'Отмена', style: 'cancel' }
+        { text: t.createEvent.photoFromGallery, onPress: pickImage },
+        { text: `🎥 ${t.createEvent.videoFromGallery}`, onPress: pickVideo },
+        { text: t.createEvent.takePhoto, onPress: takePhoto },
+        { text: `🎬 ${t.createEvent.recordVideo}`, onPress: takeVideo },
+        { text: t.common.cancel, style: 'cancel' }
       ]
     );
   };
@@ -1208,7 +1208,7 @@ export default function CreateEventScreen() {
     }
 
     if (!currentUserId) {
-      Alert.alert('Требуется вход', 'Авторизуйтесь, чтобы создавать события.', [
+      Alert.alert(t.createEvent.loginRequired, t.createEvent.signInToCreate, [
         { text: 'OK', onPress: () => router.push('/(auth)') },
       ]);
       return;
@@ -1220,8 +1220,8 @@ export default function CreateEventScreen() {
     
     if (maxParticipants > 100 && !isBusinessAccount) {
       Alert.alert(
-        'Массовые события недоступны',
-        'Для создания событий с более чем 100 участниками требуется бизнес-аккаунт. Пожалуйста, зарегистрируйте бизнес-аккаунт.',
+        t.createEvent.massEventsUnavailable,
+        t.createEvent.massEventsBusinessOnly,
         [
           { text: 'OK' },
         ]
@@ -1239,12 +1239,12 @@ export default function CreateEventScreen() {
 
       // Показываем модальное окно оплаты
       Alert.alert(
-        'Оплата размещения события',
+        t.createEvent.eventPlacementPayment,
         `Размещение события: ${placementPrice} ₽\n${targetingPrice > 0 ? `Таргетинг: ${targetingPrice} ₽\n` : ''}Итого: ${totalPrice} ₽\n\nПерейти к оплате?`,
         [
-          { text: 'Отмена', style: 'cancel' },
+          { text: t.common.cancel, style: 'cancel' },
           {
-            text: 'Оплатить',
+            text: t.createEvent.pay,
             onPress: async () => {
               // Сохраняем данные формы для использования после оплаты
               // Открываем страницу оплаты
@@ -1263,7 +1263,7 @@ export default function CreateEventScreen() {
         date: formatDateForAPI(formData.date),
         time: formatTime(formData.time),
         // Используем formData.location если есть, иначе определяем по coordinates
-        location: formData.location || (formData.coordinates ? 'Место проведения' : 'Онлайн'),
+        location: formData.location || (formData.coordinates ? t.createEvent.venue : t.createEvent.online),
                     price: formData.price,
                     maxParticipants: maxParticipants,
                     mediaUrl: formData.mediaUrl,
@@ -1331,8 +1331,8 @@ export default function CreateEventScreen() {
         date: formatDateForAPI(formData.date),
         time: formatTime(formData.time),
         // Используем formData.location если есть, иначе определяем по coordinates
-        location: formData.location || (formData.coordinates ? 'Место проведения' : 'Онлайн'),
-        price: formData.price || 'Бесплатно',
+        location: formData.location || (formData.coordinates ? t.createEvent.venue : t.createEvent.online),
+        price: formData.price || t.createEvent.free,
         maxParticipants: maxParticipants,
         // КРИТИЧЕСКИ ВАЖНО: 
         // Для веба: отправляем только HTTP URL (уже загруженные на сервер)
@@ -1395,7 +1395,7 @@ export default function CreateEventScreen() {
           isMassEvent: payload.isMassEvent,
           tags: payload.tags,
         } as any);
-        Alert.alert('Сохранено', 'Изменения сохранены.', [
+        Alert.alert(t.createEvent.savedShort, t.createEvent.changesSavedShort, [
           { text: 'OK', onPress: () => router.back() },
         ]);
       } else {
@@ -1492,7 +1492,7 @@ export default function CreateEventScreen() {
             ) : (
               <TouchableOpacity style={styles.addImageButton} onPress={showMediaOptions}>
                 <AppIcon name="camera" size={26} color="rgba(244,244,245,0.4)" />
-                <Text style={styles.addImageText}>{t.createEvent.addPhoto || 'Добавить обложку'}</Text>
+                <Text style={styles.addImageText}>{t.createEvent.addPhoto || t.createEvent.addCover}</Text>
               </TouchableOpacity>
             )}
 
@@ -1576,7 +1576,7 @@ export default function CreateEventScreen() {
             {showMassEventTooltip && (
               <View style={styles.tooltipContainer}>
                 <Text style={styles.tooltipText}>
-                  Участники будут добавляться автоматически без вашего подтверждения. Событие получит метку "массовое".
+                  {t.createEvent.massEventHint}
                 </Text>
               </View>
             )}
@@ -1805,16 +1805,16 @@ export default function CreateEventScreen() {
                       <AppIcon name="map" size={16} color={Palette.text} />
                     </TouchableOpacity>
                     <TouchableOpacity 
-                      style={[styles.locationButton, formData.location === 'Онлайн' && styles.locationButtonActive]}
+                      style={[styles.locationButton, formData.location === t.createEvent.online && styles.locationButtonActive]}
                       onPress={() => {
                         setFormData(prev => ({ 
                           ...prev, 
                           location: prev.location === t.createEvent.online ? '' : t.createEvent.online,
-                          coordinates: prev.location === 'Онлайн' ? prev.coordinates : undefined
+                          coordinates: prev.location === t.createEvent.online ? prev.coordinates : undefined
                         }));
                       }}
                     >
-                      <AppIcon name="monitor" size={16} color={formData.location === 'Онлайн' ? Palette.accent : Palette.text} />
+                      <AppIcon name="monitor" size={16} color={formData.location === t.createEvent.online ? Palette.accent : Palette.text} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1879,7 +1879,7 @@ export default function CreateEventScreen() {
               style={styles.input}
               value={formData.maxParticipants}
               onChangeText={(value) => handleInputChange('maxParticipants', value)}
-              placeholder="Например: 10"
+              placeholder={t.createEvent.exampleTen}
               placeholderTextColor="#999"
               keyboardType="numeric"
             />
@@ -2136,7 +2136,7 @@ export default function CreateEventScreen() {
                           }
                         }));
                       }}
-                      placeholder="Например: 1000"
+                      placeholder={t.createEvent.exampleThousand}
                       placeholderTextColor="#999"
                       keyboardType="numeric"
                     />
@@ -2156,7 +2156,7 @@ export default function CreateEventScreen() {
                           }
                         }));
                       }}
-                      placeholder="Например: 50"
+                      placeholder={t.createEvent.exampleFifty}
                       placeholderTextColor="#999"
                       keyboardType="numeric"
                     />
@@ -2262,7 +2262,7 @@ export default function CreateEventScreen() {
             {!previewEventData ? (
               <View style={styles.previewEmptyContainer}>
                 <Text style={styles.previewEmptyText}>
-                  {t.createEvent.fillBasicFieldsForPreview || 'Заполните основные поля на первом шаге, чтобы увидеть превью'}
+                  {t.createEvent.fillBasicFieldsForPreview || t.createEvent.fillBasicFieldsForPreview}
                 </Text>
               </View>
             ) : (
