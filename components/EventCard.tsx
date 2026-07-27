@@ -1547,12 +1547,16 @@ function EventCard({
           {/* Первая кнопка (верхняя) */}
           <View style={{ alignItems: 'center' }}>
             <TouchableOpacity
-              style={styles.swipeButton}
+              style={[styles.swipeButton, !swipeButtons.primary.icon && styles.goButton]}
               onPress={handlePrimaryButtonPress}
+              activeOpacity={0.85}
             >
-              {renderSwipeIcon(swipeButtons.primary.icon, swipeButtons.primary.color)}
+              {/* У GO иконки нет — подпись живёт внутри круга, а не под ним */}
+              {swipeButtons.primary.icon
+                ? renderSwipeIcon(swipeButtons.primary.icon, swipeButtons.primary.color)
+                : <Text style={styles.goButtonText}>{swipeButtons.primary.label}</Text>}
             </TouchableOpacity>
-            {swipeButtons.primary.label && (
+            {swipeButtons.primary.icon && swipeButtons.primary.label && (
               <Text style={styles.swipeButtonLabel} numberOfLines={2}>{swipeButtons.primary.label}</Text>
             )}
           </View>
