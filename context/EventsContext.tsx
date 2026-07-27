@@ -832,10 +832,10 @@ export function EventsProvider({ children }: EventsProviderProps) {
   // getUserData теперь определен выше, перед вызовом useEventRequests
 
   // Функция для обновления данных пользователя
-  const updateUserData = (userId: string, updates: UserProfilePatch) => {
+  const updateUserData = useCallback((userId: string, updates: UserProfilePatch) => {
     setServerUserData(prev => mergeUserRecord(prev, userId, updates));
     setUserDataUpdates(prev => mergeUserRecord(prev, userId, updates));
-  };
+  }, []);
 
   // Эти функции теперь находятся в useEventActions hook
 
@@ -1104,9 +1104,9 @@ export function EventsProvider({ children }: EventsProviderProps) {
     });
   };
 
-  const isFriend = (userId: string): boolean => {
+  const isFriend = useCallback((userId: string): boolean => {
     return friends.includes(userId);
-  };
+  }, []);
 
   // Обновленная логика FRIENDS согласно новой системе
   const getFriendsForEvents = (): Event[] => {
@@ -1654,7 +1654,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
   };
 
   // НОВАЯ ФУНКЦИЯ: Определяет отношения пользователя к событию с приоритетом для приглашений
-  const getUserRelationship = (event: Event, userId: string | null): 'invited' | 'organizer' | 'accepted' | 'waiting' | 'rejected' | 'non_member' => {
+  const getUserRelationship = useCallback((event: Event, userId: string | null): 'invited' | 'organizer' | 'accepted' | 'waiting' | 'rejected' | 'non_member' => {
     if (!userId) return 'non_member';
     const resolvedUserId = resolveUserId(userId);
     
@@ -1743,7 +1743,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     
     // ПРИОРИТЕТ 6: Не член (non_member)
     return 'non_member';
-  };
+  }, []);
 
   // Персонализированные фото событий
   // Получить фото события для конкретного пользователя с учетом viewerUserId
@@ -1798,7 +1798,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
   // 2. ПРОИЗВОДНЫЕ АТРИБУТЫ (вычисляются)
   
   // Событие предстоящее
-  const isEventUpcoming = (event: Event): boolean => {
+  const isEventUpcoming = useCallback((event: Event): boolean => {
     // Для регулярных событий проверяем ближайшую будущую дату
     if (event.isRecurring) {
       const now = Date.now();
@@ -1835,10 +1835,10 @@ export function EventsProvider({ children }: EventsProviderProps) {
     // Для обычных событий проверяем дату события
     const eventDateTime = getEventDateTime(event);
     return eventDateTime.getTime() > Date.now();
-  };
+  }, []);
   
   // Событие прошедшее
-  const isEventPast = (event: Event): boolean => {
+  const isEventPast = useCallback((event: Event): boolean => {
     // Для регулярных событий проверяем ближайшую будущую дату
     if (event.isRecurring) {
       const now = Date.now();
@@ -1896,7 +1896,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     // Для обычных событий проверяем дату события
     const eventDateTime = new Date(event.date + 'T' + event.time + ':00');
     return eventDateTime.getTime() <= Date.now();
-  };
+  }, []);
   
   // Событие набрано (достигнут максимум участников)
   const isEventFull = (event: Event): boolean => {
@@ -1912,10 +1912,10 @@ export function EventsProvider({ children }: EventsProviderProps) {
   // 3. ОТНОШЕНИЕ ТЕКУЩЕГО ПОЛЬЗОВАТЕЛЯ К СОБЫТИЮ
   
   // Я организатор
-  const isUserOrganizer = (event: Event, userId: string): boolean => {
+  const isUserOrganizer = useCallback((event: Event, userId: string): boolean => {
     const resolvedUserId = resolveUserId(userId);
     return event.organizerId === resolvedUserId;
-  };
+  }, []);
   
   // Я участник (принятый, но не организатор)
   const isUserAttendee = (event: Event, userId: string): boolean => {
@@ -1950,12 +1950,12 @@ export function EventsProvider({ children }: EventsProviderProps) {
   // 4. ОТНОШЕНИЕ К ДРУГИМ ПОЛЬЗОВАТЕЛЯМ
   
   // Организатор события - мой друг
-  const isFriendOfOrganizer = (event: Event, userId: string | null): boolean => {
+  const isFriendOfOrganizer = useCallback((event: Event, userId: string | null): boolean => {
     if (!userId) return false;
     const resolvedUserId = resolveUserId(userId);
     const friendIds = userFriendsMap[resolvedUserId] ?? [];
     return friendIds.includes(event.organizerId);
-  };
+  }, []);
   
   // Универсальная функция для проверки участия пользователя в событии (для обратной совместимости)
   const isUserParticipant = (event: Event, userId: string): boolean => {
