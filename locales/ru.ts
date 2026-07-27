@@ -360,6 +360,7 @@ export const ru = {
 
   // Validation
   validation: {
+    googleSignInFailed: 'Не удалось войти через Google',
     required: 'Это поле обязательно',
     emailInvalid: 'Неверный формат email',
     passwordTooShort: 'Пароль слишком короткий',

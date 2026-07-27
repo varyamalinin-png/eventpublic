@@ -361,6 +361,7 @@ export const en = {
 
   // Validation
   validation: {
+    googleSignInFailed: 'Could not sign in with Google',
     required: 'This field is required',
     emailInvalid: 'Invalid email format',
     passwordTooShort: 'Password is too short',
