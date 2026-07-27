@@ -40,12 +40,24 @@ export default function ExploreScreen() {
   // Прогрессивный рендеринг: начинаем с PAGE_SIZE событий, добавляем при скролле к концу
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [eventHeights, setEventHeights] = useState<{[key: string]: number}>({});
-  const handleEventLayout = (eventId: string, height: number) => {
-    setEventHeights(prev => ({
-      ...prev,
-      [eventId]: height
-    }));
-  };
+  const handleEventLayout = useCallback((eventId: string, height: number) => {
+    // Без сравнения каждый layout писал в state и перерисовывал всю ленту,
+    // что вызывало новый layout — петля
+    setEventHeights(prev => (prev[eventId] === height ? prev : { ...prev, [eventId]: height }));
+  }, []);
+
+  // EventCard обёрнут в memo, но инлайновая стрелка в onLayout давала новую
+  // ссылку на каждый рендер ленты и сводила мемоизацию на нет. Держим по одному
+  // стабильному колбэку на событие.
+  const layoutHandlers = useRef<Map<string, (height: number) => void>>(new Map());
+  const getLayoutHandler = useCallback((eventId: string) => {
+    let handler = layoutHandlers.current.get(eventId);
+    if (!handler) {
+      handler = (height: number) => handleEventLayout(eventId, height);
+      layoutHandlers.current.set(eventId, handler);
+    }
+    return handler;
+  }, [handleEventLayout]);
   
   // Состояния для свайпа и ленты организаторов
   const [showOrganizers, setShowOrganizers] = useState(false);
@@ -948,7 +960,7 @@ export default function ExploreScreen() {
                       participantsData={event.participantsData}
                       context="explore"
                       tags={event.tags}
-                      onLayout={(height) => handleEventLayout(event.id, height)}
+                      onLayout={getLayoutHandler(event.id)}
                     />
                   </View>
                 </View>
@@ -986,7 +998,7 @@ export default function ExploreScreen() {
                 participantsData={event.participantsData}
                 context="explore"
                 tags={event.tags || []}
-                onLayout={(height) => handleEventLayout(event.id, height)}
+                onLayout={getLayoutHandler(event.id)}
               />
             ))
           ) : (
