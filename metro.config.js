@@ -20,8 +20,16 @@ if (!config.resolver.sourceExts) {
   config.resolver.sourceExts = ['jsx', 'js', 'ts', 'tsx', 'json'];
 }
 
+// client/web и client/server — устаревшие копии корневых проектов. Они не
+// импортируются ниоткуда, но лежат внутри projectRoot, поэтому Metro их
+// просматривал и держал в наблюдении (в web/ одних только node_modules сотни МБ).
+const deadTrees = new RegExp(
+  `^${projectRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/(web|server)/.*`
+);
+
 config.resolver = {
   ...config.resolver,
+  blockList: deadTrees,
   alias: {
     '@': workspaceRoot,
     '@/client': projectRoot,

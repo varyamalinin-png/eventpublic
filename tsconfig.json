@@ -11,5 +11,13 @@
   "include": [
     "**/*.ts",
     "**/*.tsx"
+  ],
+  "exclude": [
+    ".expo",
+    "android",
+    "ios",
+    "node_modules",
+    "server",
+    "web"
   ]
 }
