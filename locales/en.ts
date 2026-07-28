@@ -153,6 +153,7 @@ export const en = {
   },
       // Common
       common: {
+    searchPh: 'Search...',
     optional: '(optional)',
     tryAgain: 'Try again',
     descriptionLabel: 'Description',
@@ -885,6 +886,8 @@ export const en = {
 
   // Empty states
   empty: {
+    noSavedEvents: 'No saved events',
+    saveHint: 'Tap ♡ on an event to save it',
     searchMemories: 'Search memories...',
     noMemoriesYet: 'No memories yet',
     appearAfterEvents: 'They will appear after events finish',
@@ -966,6 +969,9 @@ export const en = {
 
   // Map
   map: {
+    filterGlob: 'Global',
+    filterFriends: 'Friends',
+    filterMine: 'Mine',
     mapTitle: 'Map',
     loadError: 'Map failed to load',
     selectOnMap: 'Pick a place on the map',

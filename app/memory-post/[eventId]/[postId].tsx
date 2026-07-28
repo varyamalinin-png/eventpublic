@@ -5,8 +5,10 @@ import { useSafeRouter } from '../../../utils/safeRouter';
 import { useEvents } from '../../../context/EventsContext';
 import MemoryPost from '../../../components/MemoryPost';
 import TopBar from '../../../components/TopBar';
+import { useLanguage } from '../../../context/LanguageContext';
 
 export default function MemoryPostScreen() {
+  const { t } = useLanguage();
   const { eventId, postId } = useLocalSearchParams<{ eventId: string; postId: string }>();
   const router = useSafeRouter();
   const { getEventProfile } = useEvents();
@@ -23,7 +25,7 @@ export default function MemoryPostScreen() {
     return (
       <View style={styles.container}>
         <TopBar 
-          searchPlaceholder="Поиск..."
+          searchPlaceholder={t.common.searchPh}
           onSearchChange={() => {}}
           searchQuery=""
         />

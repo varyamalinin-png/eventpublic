@@ -584,7 +584,7 @@ export default function MapScreen() {
         {showFilterTabs ? (
           <View style={styles.filterRow} pointerEvents="box-none">
             {(['GLOB', 'FRIENDS', 'MINE'] as FilterTab[]).map((f) => {
-              const labels: Record<FilterTab, string> = { GLOB: 'Глобал', FRIENDS: 'Друзья', MINE: 'Мои' };
+              const labels: Record<FilterTab, string> = { GLOB: t.map.filterGlob, FRIENDS: t.map.filterFriends, MINE: t.map.filterMine };
               const active = activeFilter === f;
               return (
                 <TouchableOpacity

@@ -153,6 +153,7 @@ export const ru = {
   },
       // Common
       common: {
+    searchPh: 'Поиск...',
     optional: '(необязательно)',
     tryAgain: 'Попробовать снова',
     descriptionLabel: 'Описание',
@@ -886,6 +887,8 @@ export const ru = {
 
   // Empty states
   empty: {
+    noSavedEvents: 'Нет сохранённых событий',
+    saveHint: 'Нажмите ♡ на событии чтобы сохранить',
     searchMemories: 'Поиск воспоминаний...',
     noMemoriesYet: 'Пока нет воспоминаний',
     appearAfterEvents: 'Они появятся после завершения событий',
@@ -966,6 +969,9 @@ export const ru = {
 
   // Map
   map: {
+    filterGlob: 'Глобал',
+    filterFriends: 'Друзья',
+    filterMine: 'Мои',
     mapTitle: 'Карта',
     loadError: 'Ошибка загрузки карты',
     selectOnMap: 'Выберите место на карте',

@@ -157,8 +157,8 @@ export default function SavedScreen() {
           filteredEvents.length === 0 ? (
             <EmptyState
               iconName="bookmark"
-              title={searchQuery ? t.empty.nothingFound : 'Нет сохранённых событий'}
-              subtitle={searchQuery ? t.empty.tryAnotherQuery : 'Нажмите ♡ на событии чтобы сохранить'}
+              title={searchQuery ? t.empty.nothingFound : t.empty.noSavedEvents}
+              subtitle={searchQuery ? t.empty.tryAnotherQuery : t.empty.saveHint}
             />
           ) : (
             <View style={styles.eventsList}>

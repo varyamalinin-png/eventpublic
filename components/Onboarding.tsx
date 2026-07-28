@@ -20,7 +20,7 @@ export default function Onboarding({ onDone }: Props) {
     {
       icon: 'calendar' as const,
       title: t.onboarding.createEventsTitle,
-      subtitle: 'Кино, прогулки, поездки — любое событие с кем угодно',
+      subtitle: t.onboarding.createEventsBody,
     },
     {
       icon: 'users' as const,
