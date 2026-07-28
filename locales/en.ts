@@ -213,6 +213,7 @@ export const en = {
     profile: 'Profile',
   },
   desktop: {
+    home: 'Home',
     messages: 'Messages',
     all: 'All',
     noChats: 'No conversations yet — start one from an event card or a profile.',
