@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, KeyboardAvoidingView, Platform, Dimensions, ActivityIndicator, Alert, Modal } from 'react-native';
+import { FlatList, View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, KeyboardAvoidingView, Platform, Dimensions, ActivityIndicator, Alert, Modal } from 'react-native';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useStableItemHandler } from '../../../hooks/useStableItemHandler';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -37,7 +37,13 @@ export default function ChatScreen() {
   const [isSending, setIsSending] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [reactionMessageId, setReactionMessageId] = useState<string | null>(null);
-  const scrollViewRef = useRef<ScrollView>(null);
+  const messagesListRef = useRef<FlatList<any>>(null);
+  // Прокрутка в конец по смещению, а не по индексу: scrollToIndex у FlatList
+  // бросает исключение, если нужный элемент ещё не отрисован, а при открытии
+  // чата это ровно тот случай.
+  const scrollToBottom = useCallback((animated = true) => {
+    messagesListRef.current?.scrollToOffset({ offset: Number.MAX_SAFE_INTEGER, animated });
+  }, []);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const QUICK_REACTIONS = ['\u{1F44D}', '\u{2764}\u{FE0F}', '\u{1F602}', '\u{1F62E}', '\u{1F622}', '\u{1F525}'];
@@ -132,7 +138,7 @@ export default function ChatScreen() {
     }
 
     const timer = setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: false });
+      scrollToBottom(false);
     }, 100);
     return () => clearTimeout(timer);
   }, [chatId, messages.length, currentUserId]);
@@ -150,7 +156,7 @@ export default function ChatScreen() {
       await sendChatMessage(chatId as string, inputText.trim());
       setInputText('');
       setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
+        scrollToBottom(true);
       }, 200);
     } catch (error) {
       logger.error('Failed to send chat message', error);
@@ -507,21 +513,27 @@ export default function ChatScreen() {
       {renderChatHeader()}
 
       {/* Messages */}
-      <ScrollView
-        ref={scrollViewRef}
+      {/* История чата не ограничена по длине, поэтому список виртуализирован.
+          scrollToEnd у FlatList нет — прокручиваем по индексу последнего элемента. */}
+      <FlatList
+        ref={messagesListRef}
+        data={messages}
+        keyExtractor={(item: any, index: number) => String(item?.id ?? index)}
+        renderItem={({ item, index }) => renderMessage(item, index)}
         style={styles.messagesContainer}
         contentContainerStyle={styles.messagesContent}
-        onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
-      >
-        {messages.length > 0 ? (
-          messages.map((message, index) => renderMessage(message, index))
-        ) : (
+        onContentSizeChange={() => scrollToBottom(true)}
+        initialNumToRender={20}
+        maxToRenderPerBatch={20}
+        windowSize={11}
+        removeClippedSubviews={false}
+        ListEmptyComponent={
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>{t.inbox.noMessages}</Text>
             <Text style={styles.emptySubtext}>{t.inbox.startChatting}</Text>
           </View>
-        )}
-      </ScrollView>
+        }
+      />
 
       {/* Typing indicator */}
       {typingUsers.length > 0 && (
