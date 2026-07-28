@@ -928,9 +928,14 @@ export function EventsProvider({ children }: EventsProviderProps) {
     }
 
     const start = serverEvent.startTime ? new Date(serverEvent.startTime) : null;
-    const date = start ? start.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-    // ВРЕМЯ: используем локальное время устройства, а не UTC,
-    // чтобы совпадало с тем, что пользователь выбирает при создании события.
+    // ДАТА И ВРЕМЯ — оба в локальном поясе устройства. Раньше дата бралась из UTC
+    // (toISOString), а время из локального (toTimeString): для вечерних событий в
+    // поясах восточнее UTC дата отставала на сутки, и восстановленный из этой пары
+    // момент уезжал на 24 часа. Из-за этого клиент и сервер по-разному отвечали на
+    // вопрос «событие уже прошло».
+    const localDate = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const date = start ? localDate(start) : localDate(new Date());
     const time = start ? start.toTimeString().slice(0, 5) : '00:00';
 
     // Фильтруем только ACCEPTED memberships - pending приглашения не должны показываться как участники
