@@ -212,6 +212,25 @@ export const en = {
     inbox: 'Inbox',
     profile: 'Profile',
   },
+  desktop: {
+    messages: 'Messages',
+    all: 'All',
+    noChats: 'No conversations yet — start one from an event card or a profile.',
+    eventPreview: 'Event',
+    memoryPreview: 'Memory',
+    noMessages: 'No messages',
+    quickActions: 'Quick actions',
+    createEvent: 'Create event',
+    eventsFeed: 'Events feed',
+    calendar: 'Calendar',
+    memories: 'Memories',
+    privacyPolicy: 'Privacy Policy',
+    settings: 'Settings',
+    justNow: 'just now',
+    minShort: 'min',
+    hourShort: 'h',
+    dayShort: 'd',
+  },
 
   // Inbox
   inbox: {

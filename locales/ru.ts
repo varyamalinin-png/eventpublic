@@ -212,6 +212,25 @@ export const ru = {
     inbox: 'Инбокс',
     profile: 'Профиль',
   },
+  desktop: {
+    messages: 'Сообщения',
+    all: 'Все',
+    noChats: 'Пока нет переписок — начните диалог из карточки события или профиля.',
+    eventPreview: 'Событие',
+    memoryPreview: 'Воспоминание',
+    noMessages: 'Нет сообщений',
+    quickActions: 'Быстрые действия',
+    createEvent: 'Создать событие',
+    eventsFeed: 'Лента событий',
+    calendar: 'Календарь',
+    memories: 'Воспоминания',
+    privacyPolicy: 'Политика конфиденциальности',
+    settings: 'Настройки',
+    justNow: 'только что',
+    minShort: 'мин',
+    hourShort: 'ч',
+    dayShort: 'дн',
+  },
 
   // Inbox
   inbox: {

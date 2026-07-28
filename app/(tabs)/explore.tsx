@@ -721,6 +721,9 @@ export default function ExploreScreen() {
   }, [SCREEN_W, currentUserId, eventHeights, getLayoutHandler, organizersForCurrentEvents, showOrganizers]);
 
   const renderFolderItem = useCallback(({ item: event }: { item: Event }) => (
+    // Контейнер ленты шире экрана на колонку организаторов и сдвинут влево:
+    // без этой обёртки карточка растягивалась на всю ширину строки и уезжала за край
+    <View style={{ width: SCREEN_W, paddingHorizontal: 20, marginLeft: ORGANIZER_WIDTH }}>
       <EventCard
           key={event.id}
           id={event.id}
@@ -746,7 +749,8 @@ export default function ExploreScreen() {
           tags={event.tags || EMPTY_TAGS}
           onLayout={getLayoutHandler(event.id)}
         />
-  ), [getLayoutHandler, showOrganizers]);
+    </View>
+  ), [SCREEN_W, ORGANIZER_WIDTH, getLayoutHandler, showOrganizers]);
 
   const listHeader = (
     <>
