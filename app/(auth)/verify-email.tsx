@@ -15,6 +15,8 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
 import { createLogger } from '../../utils/logger';
+import { OtpInput } from '../../components/auth/OtpInput';
+import { useResendCooldown } from '../../hooks/useResendCooldown';
 
 const logger = createLogger('VerifyEmail');
 
@@ -30,7 +32,8 @@ export default function VerifyEmailScreen() {
   const tokenFromUrl = params.token || '';
   
   const [email, setEmail] = useState(params.email || user?.email || '');
-  const [token, setToken] = useState(tokenFromUrl);
+  const [token, setToken] = useState(tokenFromUrl.replace(/\D/g, '').slice(0, 6));
+  const cooldown = useResendCooldown();
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -61,6 +64,8 @@ export default function VerifyEmailScreen() {
 
     try {
       await resendVerificationEmail(email.trim());
+      // Сервер разрешает не чаще раза в две минуты — блокируем кнопку на это время
+      cooldown.start();
       setStatusMessage(t.auth.verificationSent);
       Alert.alert(
         t.auth.emailSent,
@@ -69,13 +74,16 @@ export default function VerifyEmailScreen() {
       );
     } catch (error: any) {
       logger.error('Failed to resend verification email', error);
-      const message = error?.body?.message || error?.message || t.auth.sendFailed;
+      // Если отказ именно по частоте, сервер вернул остаток секунд — показываем его
+      if (error?.body?.retryAfterSeconds) cooldown.startFromError(error);
+      const raw = error?.body?.message;
+      const message = (typeof raw === 'string' ? raw : raw?.message) || error?.message || t.auth.sendFailed;
       setErrorMessage(message);
       Alert.alert(t.common.error, message);
     } finally {
       setResending(false);
     }
-  }, [email, resendVerificationEmail]);
+  }, [email, resendVerificationEmail, cooldown]);
 
   const handleVerifyToken = useCallback(async () => {
     if (!token.trim()) {
@@ -107,7 +115,7 @@ export default function VerifyEmailScreen() {
         tokenPreview: processedToken.substring(0, 20) + '...',
         containsPercent: token.trim().includes('%')
       });
-      const result = await verifyEmail(processedToken);
+      const result = await verifyEmail(email.trim(), processedToken);
       
       // Если сервер вернул токены, пользователь автоматически залогинен
       if (result && result.accessToken && result.user) {
@@ -211,14 +219,18 @@ export default function VerifyEmailScreen() {
               />
             </View>
             <TouchableOpacity
-              style={[styles.secondaryButton, resending && styles.disabledButton]}
+              style={[styles.secondaryButton, (resending || cooldown.isCoolingDown) && styles.disabledButton]}
               onPress={handleResendEmail}
-              disabled={resending}
+              disabled={resending || cooldown.isCoolingDown}
             >
               {resending ? (
                 <ActivityIndicator color="#f4f4f5" />
               ) : (
-                <Text style={styles.secondaryButtonText}>{t.auth.resendEmail}</Text>
+                <Text style={styles.secondaryButtonText}>
+                  {cooldown.isCoolingDown
+                    ? `${t.auth.resendEmail} (${cooldown.label})`
+                    : t.auth.resendEmail}
+                </Text>
               )}
             </TouchableOpacity>
           </View>
@@ -230,22 +242,18 @@ export default function VerifyEmailScreen() {
               Скопируйте токен из письма и вставьте его здесь
             </Text>
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>{t.auth.tokenLabel}</Text>
-              <TextInput
-                style={styles.input}
-                placeholder={t.auth.pasteToken}
-                placeholderTextColor="rgba(244,244,245,0.35)"
+              <OtpInput
                 value={token}
-                onChangeText={setToken}
-                autoCapitalize="none"
-                textContentType="none"
-                editable={!loading}
+                onChange={(code) => { setToken(code); if (errorMessage) setErrorMessage(null); }}
+                onComplete={handleVerifyToken}
+                disabled={loading}
+                hasError={!!errorMessage}
               />
             </View>
             <TouchableOpacity
-              style={[styles.primaryButton, loading && styles.disabledButton]}
+              style={[styles.primaryButton, (loading || token.length < 6) && styles.disabledButton]}
               onPress={handleVerifyToken}
-              disabled={loading}
+              disabled={loading || token.length < 6}
             >
               {loading ? (
                 <ActivityIndicator color="#f4f4f5" />

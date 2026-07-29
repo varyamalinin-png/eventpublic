@@ -99,7 +99,7 @@ export default function AddAccountVerifyScreen() {
     setErrorMessage(null);
 
     try {
-      const result = await verifyEmail(token.trim());
+      const result = await verifyEmail(email.trim(), token.trim());
       
       // Если сервер вернул токены, пользователь автоматически залогинен
       if (result && result.accessToken && result.user) {

@@ -66,7 +66,7 @@ interface AuthContextShape {
   login: (email: string, password: string) => Promise<void>;
   loginWithGoogle: (idToken: string) => Promise<void>;
   register: (payload: RegisterPayload) => Promise<AuthUser>;
-  verifyEmail: (token: string) => Promise<{ accessToken?: string; refreshToken?: string; user?: AuthUser; message?: string } | void>;
+  verifyEmail: (email: string, code: string) => Promise<{ accessToken?: string; refreshToken?: string; user?: AuthUser; message?: string } | void>;
   resendVerificationEmail: (email: string) => Promise<void>;
   requestPasswordReset: (email: string) => Promise<void>;
   resetPassword: (token: string, password: string) => Promise<void>;
@@ -1064,13 +1064,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [setSession, upsertAccount, fetchProfile],
   );
 
-  const verifyEmail = useCallback(async (token: string) => {
-    authLog('[Auth] verifyEmail called', { tokenLength: token?.length || 0, tokenPreview: token?.substring(0, 20) + '...' });
+  const verifyEmail = useCallback(async (email: string, code: string) => {
+    // Код проверяется только вместе с адресом: шестизначное значение само по себе
+    // не определяет, чей это аккаунт.
+    authLog('[Auth] verifyEmail called', { email, codeLength: code?.length || 0 });
     const data = await apiRequest(
       '/auth/verify-email',
       {
         method: 'POST',
-        body: JSON.stringify({ token: token.trim() }), // Убеждаемся что токен без пробелов
+        body: JSON.stringify({ email: email.trim(), code: code.replace(/\D/g, '') }),
       },
       null,
     );
