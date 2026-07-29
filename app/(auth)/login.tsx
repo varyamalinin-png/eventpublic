@@ -17,6 +17,7 @@ import { createLogger } from '../../utils/logger';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import { PASSWORD_RULES, checkPassword } from '../../utils/passwordRules';
 
 // Завершаем сессию OAuth для правильной работы на веб
 WebBrowser.maybeCompleteAuthSession();
@@ -79,6 +80,17 @@ export default function AuthScreen() {
   const [registerUsername, setRegisterUsername] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerName, setRegisterName] = useState('');
+  const [registerPhone, setRegisterPhone] = useState('');
+  // Подсвечиваем незаполненное только после первой попытки отправки —
+  // краснеть при открытии формы неприятно
+  const [registerAttempted, setRegisterAttempted] = useState(false);
+  const passwordCheck = checkPassword(registerPassword);
+  const missing = {
+    email: !registerEmail.trim(),
+    username: !registerUsername.trim(),
+    phone: !registerPhone.trim(),
+    password: !passwordCheck.isValid,
+  };
 
   const WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '1095670285353-5u0ap40ms4ccqmc8hbfh32pmudi54f1v.apps.googleusercontent.com';
   const googleClientId = WEB_CLIENT_ID;
@@ -182,12 +194,16 @@ export default function AuthScreen() {
 
   const handleRegister = async () => {
     setErrorMessage(null);
-    if (!registerEmail.trim() || !registerUsername.trim() || !registerPassword) {
+    // С этого момента незаполненные поля подсвечиваются
+    setRegisterAttempted(true);
+
+    if (missing.email || missing.username || missing.phone) {
       setErrorMessage(t.auth.fillRequiredFields);
       return;
     }
 
-    if (registerPassword.length < 6) {
+    // Те же правила, что проверит сервер, — см. utils/passwordRules.ts
+    if (!passwordCheck.isValid) {
       setErrorMessage(t.messages.passwordTooShort);
       return;
     }
@@ -196,6 +212,7 @@ export default function AuthScreen() {
       await register({
         email: registerEmail.trim(),
         username: registerUsername.trim(),
+        phone: registerPhone.trim(),
         password: registerPassword,
         name: registerName.trim() || undefined,
       });
@@ -366,7 +383,17 @@ export default function AuthScreen() {
               editable={!loading}
             />
             <TextInput
-              style={styles.input}
+              style={[styles.input, registerAttempted && missing.phone && styles.inputError]}
+              placeholder={t.auth.phoneLabel}
+              placeholderTextColor="rgba(244,244,245,0.35)"
+              keyboardType="phone-pad"
+              textContentType="telephoneNumber"
+              value={registerPhone}
+              onChangeText={setRegisterPhone}
+              editable={!loading}
+            />
+            <TextInput
+              style={[styles.input, registerAttempted && missing.password && styles.inputError]}
               placeholder={t.auth.password}
               placeholderTextColor="rgba(244,244,245,0.35)"
               secureTextEntry
@@ -374,6 +401,24 @@ export default function AuthScreen() {
               onChangeText={setRegisterPassword}
               editable={!loading}
             />
+            {registerPassword.length > 0 && (
+              <View style={styles.pwRules}>
+                {PASSWORD_RULES.map((rule) => {
+                  const ok = passwordCheck.passed.includes(rule.id);
+                  const label = {
+                    length: t.auth.pwLength,
+                    lower: t.auth.pwLower,
+                    upper: t.auth.pwUpper,
+                    digit: t.auth.pwDigit,
+                  }[rule.id];
+                  return (
+                    <Text key={rule.id} style={[styles.pwRule, ok && styles.pwRuleOk]}>
+                      {ok ? '✓' : '•'} {label}
+                    </Text>
+                  );
+                })}
+              </View>
+            )}
             <TouchableOpacity
               style={[styles.primaryButton, loading && styles.disabledButton]}
               onPress={handleRegister}
@@ -432,6 +477,10 @@ export default function AuthScreen() {
 }
 
 const styles = StyleSheet.create({
+  inputError: { borderColor: '#FF3B30' },
+  pwRules: { gap: 4, marginTop: -4, marginBottom: 4, paddingHorizontal: 4 },
+  pwRule: { color: 'rgba(244,244,245,0.45)', fontSize: 12.5 },
+  pwRuleOk: { color: '#4ADE80' },
   container: {
     flexGrow: 1,
     padding: 24,

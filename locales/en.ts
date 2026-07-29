@@ -79,6 +79,13 @@ export const en = {
     replyPlaceholder: 'Write a reply to the user...',
   },
   auth: {
+    phoneLabel: 'Phone',
+    phonePh: '+7 999 123-45-67',
+    pwLength: 'At least 8 characters',
+    pwLower: 'A lowercase letter',
+    pwUpper: 'An uppercase letter',
+    pwDigit: 'A digit',
+    requiredField: 'Required',
     verifyEmailTitle: 'Email verification',
     howToVerify: 'How to verify your email:',
     notReceived: 'Did not get the email?',

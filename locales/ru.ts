@@ -79,6 +79,13 @@ export const ru = {
     replyPlaceholder: 'Введите ответ пользователю...',
   },
   auth: {
+    phoneLabel: 'Телефон',
+    phonePh: '+7 999 123-45-67',
+    pwLength: 'Не менее 8 символов',
+    pwLower: 'Строчная буква',
+    pwUpper: 'Заглавная буква',
+    pwDigit: 'Цифра',
+    requiredField: 'Обязательное поле',
     verifyEmailTitle: 'Подтверждение Email',
     howToVerify: 'Как подтвердить email:',
     notReceived: 'Не получили письмо?',

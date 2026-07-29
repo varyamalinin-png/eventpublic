@@ -21,6 +21,8 @@ const ACTIVE_ACCOUNT_KEY = 'auth.activeAccountId.v1';
 interface RegisterPayload {
   email: string;
   username: string;
+  // Обязателен при регистрации; проверки владения номером пока нет
+  phone: string;
   password: string;
   name?: string;
   accountType?: 'personal' | 'business'; // Тип аккаунта: личный или бизнес

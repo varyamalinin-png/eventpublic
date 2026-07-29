@@ -98,6 +98,7 @@ export default function AddAccountScreen() {
   const [registerUsername, setRegisterUsername] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerName, setRegisterName] = useState('');
+  const [registerPhone, setRegisterPhone] = useState('');
 
   const handleLogin = async () => {
     setErrorMessage(null);
@@ -167,6 +168,7 @@ export default function AddAccountScreen() {
       const result = await register({
         email: registerEmail.trim(),
         username: registerUsername.trim(),
+        phone: registerPhone.trim(),
         password: registerPassword,
         name: registerName.trim() || undefined,
       });
@@ -304,6 +306,16 @@ export default function AddAccountScreen() {
               placeholderTextColor="rgba(244,244,245,0.35)"
               value={registerName}
               onChangeText={setRegisterName}
+              editable={!loading}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder={t.auth.phoneLabel}
+              placeholderTextColor="rgba(244,244,245,0.35)"
+              keyboardType="phone-pad"
+              textContentType="telephoneNumber"
+              value={registerPhone}
+              onChangeText={setRegisterPhone}
               editable={!loading}
             />
             <TextInput
