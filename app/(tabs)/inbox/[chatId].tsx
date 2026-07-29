@@ -465,6 +465,30 @@ export default function ChatScreen() {
           ) : (
             <Text style={styles.chatName}>{chat.name}</Text>
           )}
+
+          {/* В личном чате — аватар собеседника справа, по нажатию открывается его профиль */}
+          {chat.type === 'personal' && (() => {
+            const otherId = chat.participants.find((p: string) => p !== currentUserId);
+            if (!otherId) return null;
+            const other = getUserData(otherId);
+            return (
+              <TouchableOpacity
+                onPress={() => router.push(`/profile/${otherId}?from=inbox`)}
+                activeOpacity={0.8}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                {other?.avatar ? (
+                  <Image source={{ uri: other.avatar }} style={styles.headerAvatar} />
+                ) : (
+                  <View style={[styles.headerAvatar, styles.headerAvatarFallback]}>
+                    <Text style={styles.headerAvatarLetter}>
+                      {(other?.name || chat.name || '?').charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })()}
         </View>
         
         {/* Кликабельный список участников (только для событийных чатов) */}
@@ -666,6 +690,22 @@ const styles = StyleSheet.create({
   chatNameContainer: {
     flex: 1,
   },
+  headerAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    marginLeft: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  headerAvatarFallback: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerAvatarLetter: {
+    color: Palette.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
   participantsSection: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -704,7 +744,7 @@ const styles = StyleSheet.create({
   messagesContent: {
     paddingVertical: 20,
     // На вебе увеличиваем отступ, чтобы последние сообщения гарантированно были видны над полем ввода
-    paddingBottom: Platform.OS === 'web' ? 140 : 100,
+    paddingBottom: Platform.OS === 'web' ? 140 : 132,
   },
   messageWrapper: {
     flexDirection: 'row',
@@ -809,7 +849,9 @@ const styles = StyleSheet.create({
     // на вебе оставляем в естественном потоке, а отступ снизу даёт paddingBottom контейнера
     ...(Platform.OS !== 'web' && {
       position: 'absolute',
-      bottom: 50,
+      // высота таб-бара — 82 (см. app/(tabs)/_layout.tsx); при bottom: 50
+      // поле ввода уходило под панель на 32 пункта
+      bottom: 82,
       left: 0,
       right: 0,
     }),

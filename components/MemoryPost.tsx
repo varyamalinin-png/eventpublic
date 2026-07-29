@@ -197,6 +197,15 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState('');
+  // Список лайкнувших держим локально, чтобы кнопка отвечала мгновенно
+  const [likedBy, setLikedBy] = useState<string[]>(((post as any).likes ?? []) as string[]);
+  const [isLiking, setIsLiking] = useState(false);
+  const liked = !!authUser?.id && likedBy.includes(authUser.id);
+
+  // Пост может обновиться извне (перезагрузка профиля события) — подхватываем
+  useEffect(() => {
+    setLikedBy((((post as any).likes ?? []) as string[]));
+  }, [post]);
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [modalPhotoIndex, setModalPhotoIndex] = useState(0);
@@ -684,22 +693,34 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
             )}
           </TouchableOpacity>
         
-        {/* Лайк */}
+        {/* Лайк. Раньше запрос уходил, но состояние не обновлялось: сердце не
+            перекрашивалось и счётчик стоял на месте — со стороны выглядело так,
+            будто лайк не ставится. Обновляем сразу, при ошибке откатываем. */}
         <TouchableOpacity
           style={styles.commentsButtonInline}
           onPress={async () => {
+            if (!authUser?.id || isLiking) return;
+            const previous = likedBy;
+            const next = liked
+              ? previous.filter((id) => id !== authUser.id)
+              : [...previous, authUser.id];
+            setLikedBy(next);
+            setIsLiking(true);
             try {
               const { apiRequest } = require('../services/api');
               await apiRequest(`/events/${post.eventId}/profile/posts/${post.id}/like`, { method: 'POST' }, accessToken);
             } catch (e) {
+              setLikedBy(previous);
               logger.warn('Like failed', e);
+            } finally {
+              setIsLiking(false);
             }
           }}
           activeOpacity={0.7}
         >
-          <AppIcon name="heart" size={16} color={(post as any).likes?.includes(authUser?.id || '') ? '#FF3B30' : Palette.textDim} />
-          {(post as any).likes?.length > 0 && (
-            <Text style={styles.commentsCount}>{(post as any).likes.length}</Text>
+          <AppIcon name="heart" size={16} color={liked ? '#FF3B30' : Palette.textDim} />
+          {likedBy.length > 0 && (
+            <Text style={styles.commentsCount}>{likedBy.length}</Text>
           )}
         </TouchableOpacity>
 
