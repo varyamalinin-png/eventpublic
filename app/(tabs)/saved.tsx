@@ -1,14 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  RefreshControl,
-  Dimensions,
-  TouchableOpacity,
-  Image,
-} from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { FlatList, View, Text, ScrollView, StyleSheet, RefreshControl, Dimensions, TouchableOpacity, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import TopBar from '../../components/TopBar';
 import EventCard from '../../components/EventCard';
@@ -95,6 +86,92 @@ export default function SavedScreen() {
   const gridAvailable = SCREEN_WIDTH - GRID_H_PAD * 2;
   const cellSize = (gridAvailable - GRID_GAP * 2) / 3;
 
+  const renderSavedEvent = useCallback(({ item: event }: { item: any }) => (
+            <View key={event.id} style={styles.eventCardWrapper}>
+              <EventCard
+                id={event.id}
+                title={event.title}
+                description={event.description || ''}
+                date={event.date}
+                time={event.time}
+                displayDate={event.displayDate}
+                location={event.location || ''}
+                price={event.price || t.createEvent.free}
+                participants={event.participants || 0}
+                maxParticipants={event.maxParticipants || 10}
+                organizerAvatar={getUserData(event.organizerId)?.avatar || ''}
+                organizerId={event.organizerId}
+                variant="default"
+                showSwipeAction={false}
+                mediaUrl={event.mediaUrl}
+                mediaType={event.mediaType}
+                mediaAspectRatio={event.mediaAspectRatio}
+                participantsList={event.participantsList}
+                participantsData={event.participantsData}
+                context="other_profile"
+              />
+            </View>
+  ), [getUserData, t.createEvent.free]);
+
+  const renderSavedMemory = useCallback(({ item, index }: { item: any; index: number }) => {
+    const { post, eventId } = item;
+            const isLastInRow = (index + 1) % 3 === 0;
+            const effectiveType: 'photo' | 'video' | 'music' | 'text' = (() => {
+              if (post.photoUrl) return 'photo';
+              if (typeof post.content === 'string' && /\.(mp4|mov|m4v)$/i.test(post.content)) return 'video';
+              return (post as any).type ?? 'text';
+            })();
+
+            return (
+              <TouchableOpacity
+                key={`${eventId}-${post.id}`}
+                style={[
+                  styles.memoryCell,
+                  {
+                    width: cellSize,
+                    height: cellSize,
+                    marginRight: isLastInRow ? 0 : GRID_GAP,
+                    marginBottom: GRID_GAP,
+                  },
+                ]}
+                onPress={() => router.push(`/event-profile/${eventId}`)}
+                activeOpacity={0.85}
+              >
+                {(effectiveType === 'photo' || effectiveType === 'video' || effectiveType === 'music') ? (
+                  <>
+                    <Image
+                      source={{
+                        uri:
+                          effectiveType === 'music'
+                            ? (post as any).artwork_url || post.photoUrl || post.content
+                            : post.photoUrl || post.content,
+                      }}
+                      style={styles.memoryCellImage}
+                      resizeMode="cover"
+                    />
+                    {effectiveType === 'video' && (
+                      <View style={styles.playBadge}>
+                        <Text style={styles.playBadgeIcon}>▶</Text>
+                      </View>
+                    )}
+                    {effectiveType === 'music' && (
+                      <View style={styles.playBadge}>
+                        <Text style={styles.playBadgeIcon}>♪</Text>
+                      </View>
+                    )}
+                  </>
+                ) : (
+                  <View style={styles.memoryCellText}>
+                    <Text style={styles.memoryCellTextContent} numberOfLines={4}>
+                      {post.content}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+  }, [cellSize, router]);
+
+
   return (
     <View style={styles.container}>
       <TopBar
@@ -140,9 +217,19 @@ export default function SavedScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView
-        style={styles.scroll}
+      {/* Оба списка виртуализированы: при активном пользователе сохранённых
+          событий и воспоминаний могут быть сотни. numColumns у FlatList нельзя
+          менять на лету, поэтому key переключает список при смене вкладки. */}
+      <FlatList
+        key={activeTab}
+        data={activeTab === 'events' ? filteredEvents : filteredMemoryPosts}
+        keyExtractor={(item: any, index: number) =>
+          activeTab === 'events' ? String(item.id) : `${item.eventId}-${item.post.id}`
+        }
+        numColumns={activeTab === 'events' ? 1 : 3}
+        renderItem={activeTab === 'events' ? renderSavedEvent : renderSavedMemory}
         contentContainerStyle={styles.scrollContent}
+        columnWrapperStyle={activeTab === 'memories' ? styles.memoryGrid : undefined}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -152,113 +239,26 @@ export default function SavedScreen() {
           />
         }
         showsVerticalScrollIndicator={false}
-      >
-        {activeTab === 'events' ? (
-          filteredEvents.length === 0 ? (
+        initialNumToRender={activeTab === 'events' ? 6 : 18}
+        maxToRenderPerBatch={activeTab === 'events' ? 6 : 18}
+        windowSize={7}
+        removeClippedSubviews={false}
+        ListEmptyComponent={
+          activeTab === 'events' ? (
             <EmptyState
               iconName="bookmark"
               title={searchQuery ? t.empty.nothingFound : t.empty.noSavedEvents}
               subtitle={searchQuery ? t.empty.tryAnotherQuery : t.empty.saveHint}
             />
           ) : (
-            <View style={styles.eventsList}>
-              {filteredEvents.map(event => (
-                <View key={event.id} style={styles.eventCardWrapper}>
-                  <EventCard
-                    id={event.id}
-                    title={event.title}
-                    description={event.description || ''}
-                    date={event.date}
-                    time={event.time}
-                    displayDate={event.displayDate}
-                    location={event.location || ''}
-                    price={event.price || t.createEvent.free}
-                    participants={event.participants || 0}
-                    maxParticipants={event.maxParticipants || 10}
-                    organizerAvatar={getUserData(event.organizerId)?.avatar || ''}
-                    organizerId={event.organizerId}
-                    variant="default"
-                    showSwipeAction={false}
-                    mediaUrl={event.mediaUrl}
-                    mediaType={event.mediaType}
-                    mediaAspectRatio={event.mediaAspectRatio}
-                    participantsList={event.participantsList}
-                    participantsData={event.participantsData}
-                    context="other_profile"
-                  />
-                </View>
-              ))}
-            </View>
-          )
-        ) : (
-          filteredMemoryPosts.length === 0 ? (
             <EmptyState
               iconName="image"
               title={searchQuery ? t.empty.nothingFound : t.empty.noSavedMemories}
               subtitle={searchQuery ? t.empty.tryAnotherQuery : t.empty.saveFromMemories}
             />
-          ) : (
-            <View style={styles.memoryGrid}>
-              {filteredMemoryPosts.map(({ post, eventId }, index) => {
-                const isLastInRow = (index + 1) % 3 === 0;
-                const effectiveType: 'photo' | 'video' | 'music' | 'text' = (() => {
-                  if (post.photoUrl) return 'photo';
-                  if (typeof post.content === 'string' && /\.(mp4|mov|m4v)$/i.test(post.content)) return 'video';
-                  return (post as any).type ?? 'text';
-                })();
-
-                return (
-                  <TouchableOpacity
-                    key={`${eventId}-${post.id}`}
-                    style={[
-                      styles.memoryCell,
-                      {
-                        width: cellSize,
-                        height: cellSize,
-                        marginRight: isLastInRow ? 0 : GRID_GAP,
-                        marginBottom: GRID_GAP,
-                      },
-                    ]}
-                    onPress={() => router.push(`/event-profile/${eventId}`)}
-                    activeOpacity={0.85}
-                  >
-                    {(effectiveType === 'photo' || effectiveType === 'video' || effectiveType === 'music') ? (
-                      <>
-                        <Image
-                          source={{
-                            uri:
-                              effectiveType === 'music'
-                                ? (post as any).artwork_url || post.photoUrl || post.content
-                                : post.photoUrl || post.content,
-                          }}
-                          style={styles.memoryCellImage}
-                          resizeMode="cover"
-                        />
-                        {effectiveType === 'video' && (
-                          <View style={styles.playBadge}>
-                            <Text style={styles.playBadgeIcon}>▶</Text>
-                          </View>
-                        )}
-                        {effectiveType === 'music' && (
-                          <View style={styles.playBadge}>
-                            <Text style={styles.playBadgeIcon}>♪</Text>
-                          </View>
-                        )}
-                      </>
-                    ) : (
-                      <View style={styles.memoryCellText}>
-                        <Text style={styles.memoryCellTextContent} numberOfLines={4}>
-                          {post.content}
-                        </Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
           )
-        )}
-      </ScrollView>
+        }
+      />
     </View>
   );
 }

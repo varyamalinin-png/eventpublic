@@ -1,6 +1,6 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Image, Modal, ActivityIndicator, Animated, Alert, Platform, RefreshControl } from 'react-native';
+import { FlatList, View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Image, Modal, ActivityIndicator, Animated, Alert, Platform, RefreshControl } from 'react-native';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import MessageFolders from '../../../../components/MessageFolders';
 import { useEvents } from '../../../../context/EventsContext';
 import { useRefresh } from '../../../../hooks/useRefresh';
@@ -235,6 +235,239 @@ export default function MessagesTab() {
     });
   }, [allFolders, userChats]);
 
+  const renderChatRow = useCallback(({ item: chat }: { item: Chat }) => {
+    // Для личных чатов получаем данные другого участника
+    let avatar = chat.avatar;
+    if (chat.type === 'personal' && !avatar) {
+      const otherParticipantId = chat.participants.find((p: string) => p !== currentUserId);
+      if (otherParticipantId) {
+        const otherUserData = getUserData(otherParticipantId);
+        avatar = otherUserData.avatar;
+      }
+    }
+    if (!avatar) {
+      avatar = '';
+    }
+
+    const lastInteractionDate =
+      chat.lastMessage?.createdAt instanceof Date
+        ? chat.lastMessage.createdAt
+        : chat.lastActivity instanceof Date
+        ? chat.lastActivity
+        : new Date(chat.lastActivity);
+    const isCustomFolder = selectedFolderData?.type === 'custom' && (selectedFolderData.chatIds ?? []).includes(chat.id);
+    const isRemoving = removingChatIds.includes(chat.id);
+  
+    // Инициализируем анимации для свайпа
+    if (!swipeAnimations.current[chat.id]) {
+      swipeAnimations.current[chat.id] = {
+        translateX: new Animated.Value(0),
+        opacity: new Animated.Value(1),
+      };
+    }
+    const { translateX, opacity } = swipeAnimations.current[chat.id];
+    const isSwiped = swipedChatId === chat.id;
+  
+    const handleSwipeGesture = (event: any) => {
+      const { translationX, translationY, state, absoluteX } = event.nativeEvent;
+    
+      if (state === State.BEGAN) {
+        // Запоминаем начальную позицию жеста
+        gestureStartX.current[chat.id] = absoluteX;
+        isSwipeGesture.current[chat.id] = false;
+      } else if (state === State.ACTIVE) {
+        // Проверяем, что движение преимущественно горизонтальное
+        const isHorizontalSwipe = Math.abs(translationX) > Math.abs(translationY) * 1.5;
+      
+        // Если движение горизонтальное и достаточно большое - это свайп
+        if (isHorizontalSwipe && Math.abs(translationX) > 20) {
+          isSwipeGesture.current[chat.id] = true;
+        }
+      
+        // Если чат уже свайпнут, разрешаем обратный свайп вправо
+        if (isSwiped) {
+          // Обратный свайп вправо - возвращаем чат на место
+          // translationX будет положительным при свайпе вправо
+          if (translationX > 0) {
+            // Начальное значение -160, добавляем положительное translationX
+            // Ограничиваем от -160 до 0
+            const newValue = Math.min(0, -160 + translationX);
+            translateX.setValue(newValue);
+          } else if (translationX < 0) {
+            // Если свайпаем еще больше влево, ограничиваем -160
+            translateX.setValue(-160);
+          }
+        } else {
+          // Обычный свайп влево - показываем кнопки
+          if (isSwipeGesture.current[chat.id] && translationX < 0 && translationX >= -160) {
+          translateX.setValue(translationX);
+          }
+        }
+      } else if (state === State.END) {
+        if (isSwiped) {
+          // Если чат был свайпнут, проверяем обратный свайп вправо
+          const currentValue = (translateX as any)._value || -160;
+          // Если свайпнули вправо достаточно далеко (translationX > 0) или текущее значение близко к 0 - скрываем кнопки
+          if (translationX > 30 || currentValue > -80) {
+            setSwipedChatId(null);
+            Animated.spring(translateX, {
+              toValue: 0,
+              useNativeDriver: (Platform.OS as string) !== 'web',
+            }).start();
+          } else {
+            // Возвращаем обратно в свайпнутое состояние
+            Animated.spring(translateX, {
+              toValue: -160,
+              useNativeDriver: (Platform.OS as string) !== 'web',
+            }).start();
+          }
+        } else {
+          // Показываем кнопки только если это был свайп влево и движение достаточно большое
+          if (isSwipeGesture.current[chat.id] && translationX < -50) {
+          setSwipedChatId(chat.id);
+          Animated.spring(translateX, {
+              toValue: -160,
+            useNativeDriver: Platform.OS !== 'web',
+          }).start();
+        } else {
+          // Скрываем кнопки
+          setSwipedChatId(null);
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: Platform.OS !== 'web',
+          }).start();
+        }
+        }
+        // Очищаем состояние жеста
+        delete gestureStartX.current[chat.id];
+        delete isSwipeGesture.current[chat.id];
+      }
+    };
+  
+    const handleDeletePress = () => {
+      setChatToDelete(chat);
+      setShowDeleteChatModal(true);
+      // Закрываем свайп
+      setSwipedChatId(null);
+      Animated.spring(translateX, {
+        toValue: 0,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    };
+  
+    const handleFolderPress = () => {
+      setChatForFolder(chat);
+      setShowFolderSelectModal(true);
+      // Закрываем свайп
+      setSwipedChatId(null);
+      Animated.spring(translateX, {
+        toValue: 0,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    };
+  
+    return (
+      <View key={chat.id} style={styles.chatRowContainer}>
+        {/* Кнопки при свайпе - скрыты за чатом */}
+        <View style={styles.swipeButtonsContainer}>
+          <TouchableOpacity
+            style={[styles.swipeButton, styles.swipeButtonFolder]}
+            onPress={handleFolderPress}
+          >
+            <AppIcon name="folder" size={18} color={Palette.text} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.swipeButton, styles.swipeButtonDelete]}
+            onPress={handleDeletePress}
+          >
+            <AppIcon name="trash" size={18} color={Palette.text} />
+          </TouchableOpacity>
+        </View>
+      
+        <PanGestureHandler
+          onGestureEvent={handleSwipeGesture}
+          onHandlerStateChange={handleSwipeGesture}
+          activeOffsetX={isSwiped ? 30 : -30} // Порог для свайпа: вправо если свайпнут, влево если нет
+          failOffsetY={[-15, 15]}
+          minPointers={1}
+          shouldCancelWhenOutside={true}
+          enableTrackpadTwoFingerGesture={false}
+        >
+          <Animated.View
+            style={[
+              styles.chatRow,
+              {
+                transform: [{ translateX }],
+              },
+            ]}
+          >
+            <TouchableOpacity 
+              style={styles.chatItem}
+              activeOpacity={isSwiped ? 1 : 0.7}
+              delayPressIn={100}
+              onPress={() => {
+                // Закрываем свайп при клике, если он открыт
+                if (isSwiped) {
+                  setSwipedChatId(null);
+                  Animated.spring(translateX, {
+                    toValue: 0,
+                    useNativeDriver: (Platform.OS as string) !== 'web',
+                  }).start();
+                } else {
+                  handleChatPress(chat.id);
+                }
+              }}
+              disabled={isSwiped}
+            >
+              <Image source={{ uri: avatar }} style={styles.chatAvatar} />
+              {(() => {
+                const last = chat.lastMessage;
+                const isUnread = last && last.fromUserId !== currentUserId && !last.readBy?.includes(currentUserId || '');
+                return (
+                  <>
+                    <View style={styles.chatInfo}>
+                      <Text style={[styles.chatName, isUnread && { fontWeight: '700' }]}>{chat.name}</Text>
+                      {last && (
+                        <Text style={[styles.lastMessage, isUnread && { color: '#f4f4f5' }]} numberOfLines={1}>
+                          {last.text ?? t.chat.eventSent}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                      {lastInteractionDate && (
+                        <Text style={[styles.chatTime, isUnread && { color: '#FF8D32' }]}>
+                          {lastInteractionDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                      )}
+                      {isUnread && (
+                        <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#FF8D32' }} />
+                      )}
+                    </View>
+                  </>
+                );
+              })()}
+            </TouchableOpacity>
+          </Animated.View>
+        </PanGestureHandler>
+
+        {isCustomFolder && !isSwiped && (
+          <TouchableOpacity
+            style={styles.removeChatButton}
+            onPress={() => handleRemoveChatFromFolder(chat.id)}
+            disabled={isRemoving}
+          >
+            {isRemoving ? (
+              <ActivityIndicator color="#f4f4f5" size="small" />
+            ) : (
+              <Text style={styles.removeChatButtonText}>{t.chat.remove}</Text>
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  }, [currentUserId, getUserData, handleChatPress, handleRemoveChatFromFolder, removingChatIds, selectedFolderData?.chatIds, selectedFolderData?.type, swipedChatId, t.chat.eventSent, t.chat.remove]);
+
+
   return (
     <View style={styles.container}>
       <MessageFolders
@@ -266,246 +499,26 @@ export default function MessagesTab() {
         onChangeText={setSearchQuery}
       />
 
-      <ScrollView style={styles.chatsList} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF8D32" />}>
-        {filteredChats.length === 0 && (
+      {/* Список чатов виртуализирован: у активного пользователя накапливаются
+          десятки чатов событий, и все они висели смонтированными. */}
+      <FlatList
+        data={filteredChats}
+        keyExtractor={(chat: Chat) => String(chat.id)}
+        renderItem={renderChatRow}
+        style={styles.chatsList}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF8D32" />}
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={7}
+        removeClippedSubviews={false}
+        ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <AppIcon name="inbox" size={60} color="rgba(244,244,245,0.25)" />
             <Text style={styles.emptyTitle}>{t.inbox.noMessagesYet}</Text>
             <Text style={styles.emptyText}>{t.inbox.startViaEvents}</Text>
           </View>
-        )}
-        {filteredChats.map((chat: Chat) => {
-          // Для личных чатов получаем данные другого участника
-          let avatar = chat.avatar;
-          if (chat.type === 'personal' && !avatar) {
-            const otherParticipantId = chat.participants.find((p: string) => p !== currentUserId);
-            if (otherParticipantId) {
-              const otherUserData = getUserData(otherParticipantId);
-              avatar = otherUserData.avatar;
-            }
-          }
-          if (!avatar) {
-            avatar = '';
-          }
-
-          const lastInteractionDate =
-            chat.lastMessage?.createdAt instanceof Date
-              ? chat.lastMessage.createdAt
-              : chat.lastActivity instanceof Date
-              ? chat.lastActivity
-              : new Date(chat.lastActivity);
-          const isCustomFolder = selectedFolderData?.type === 'custom' && (selectedFolderData.chatIds ?? []).includes(chat.id);
-          const isRemoving = removingChatIds.includes(chat.id);
-          
-          // Инициализируем анимации для свайпа
-          if (!swipeAnimations.current[chat.id]) {
-            swipeAnimations.current[chat.id] = {
-              translateX: new Animated.Value(0),
-              opacity: new Animated.Value(1),
-            };
-          }
-          const { translateX, opacity } = swipeAnimations.current[chat.id];
-          const isSwiped = swipedChatId === chat.id;
-          
-          const handleSwipeGesture = (event: any) => {
-            const { translationX, translationY, state, absoluteX } = event.nativeEvent;
-            
-            if (state === State.BEGAN) {
-              // Запоминаем начальную позицию жеста
-              gestureStartX.current[chat.id] = absoluteX;
-              isSwipeGesture.current[chat.id] = false;
-            } else if (state === State.ACTIVE) {
-              // Проверяем, что движение преимущественно горизонтальное
-              const isHorizontalSwipe = Math.abs(translationX) > Math.abs(translationY) * 1.5;
-              
-              // Если движение горизонтальное и достаточно большое - это свайп
-              if (isHorizontalSwipe && Math.abs(translationX) > 20) {
-                isSwipeGesture.current[chat.id] = true;
-              }
-              
-              // Если чат уже свайпнут, разрешаем обратный свайп вправо
-              if (isSwiped) {
-                // Обратный свайп вправо - возвращаем чат на место
-                // translationX будет положительным при свайпе вправо
-                if (translationX > 0) {
-                  // Начальное значение -160, добавляем положительное translationX
-                  // Ограничиваем от -160 до 0
-                  const newValue = Math.min(0, -160 + translationX);
-                  translateX.setValue(newValue);
-                } else if (translationX < 0) {
-                  // Если свайпаем еще больше влево, ограничиваем -160
-                  translateX.setValue(-160);
-                }
-              } else {
-                // Обычный свайп влево - показываем кнопки
-                if (isSwipeGesture.current[chat.id] && translationX < 0 && translationX >= -160) {
-                translateX.setValue(translationX);
-                }
-              }
-            } else if (state === State.END) {
-              if (isSwiped) {
-                // Если чат был свайпнут, проверяем обратный свайп вправо
-                const currentValue = (translateX as any)._value || -160;
-                // Если свайпнули вправо достаточно далеко (translationX > 0) или текущее значение близко к 0 - скрываем кнопки
-                if (translationX > 30 || currentValue > -80) {
-                  setSwipedChatId(null);
-                  Animated.spring(translateX, {
-                    toValue: 0,
-                    useNativeDriver: (Platform.OS as string) !== 'web',
-                  }).start();
-                } else {
-                  // Возвращаем обратно в свайпнутое состояние
-                  Animated.spring(translateX, {
-                    toValue: -160,
-                    useNativeDriver: (Platform.OS as string) !== 'web',
-                  }).start();
-                }
-              } else {
-                // Показываем кнопки только если это был свайп влево и движение достаточно большое
-                if (isSwipeGesture.current[chat.id] && translationX < -50) {
-                setSwipedChatId(chat.id);
-                Animated.spring(translateX, {
-                    toValue: -160,
-                  useNativeDriver: Platform.OS !== 'web',
-                }).start();
-              } else {
-                // Скрываем кнопки
-                setSwipedChatId(null);
-                Animated.spring(translateX, {
-                  toValue: 0,
-                  useNativeDriver: Platform.OS !== 'web',
-                }).start();
-              }
-              }
-              // Очищаем состояние жеста
-              delete gestureStartX.current[chat.id];
-              delete isSwipeGesture.current[chat.id];
-            }
-          };
-          
-          const handleDeletePress = () => {
-            setChatToDelete(chat);
-            setShowDeleteChatModal(true);
-            // Закрываем свайп
-            setSwipedChatId(null);
-            Animated.spring(translateX, {
-              toValue: 0,
-              useNativeDriver: Platform.OS !== 'web',
-            }).start();
-          };
-          
-          const handleFolderPress = () => {
-            setChatForFolder(chat);
-            setShowFolderSelectModal(true);
-            // Закрываем свайп
-            setSwipedChatId(null);
-            Animated.spring(translateX, {
-              toValue: 0,
-              useNativeDriver: Platform.OS !== 'web',
-            }).start();
-          };
-          
-          return (
-            <View key={chat.id} style={styles.chatRowContainer}>
-              {/* Кнопки при свайпе - скрыты за чатом */}
-              <View style={styles.swipeButtonsContainer}>
-                <TouchableOpacity
-                  style={[styles.swipeButton, styles.swipeButtonFolder]}
-                  onPress={handleFolderPress}
-                >
-                  <AppIcon name="folder" size={18} color={Palette.text} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.swipeButton, styles.swipeButtonDelete]}
-                  onPress={handleDeletePress}
-                >
-                  <AppIcon name="trash" size={18} color={Palette.text} />
-                </TouchableOpacity>
-              </View>
-              
-              <PanGestureHandler
-                onGestureEvent={handleSwipeGesture}
-                onHandlerStateChange={handleSwipeGesture}
-                activeOffsetX={isSwiped ? 30 : -30} // Порог для свайпа: вправо если свайпнут, влево если нет
-                failOffsetY={[-15, 15]}
-                minPointers={1}
-                shouldCancelWhenOutside={true}
-                enableTrackpadTwoFingerGesture={false}
-              >
-                <Animated.View
-                  style={[
-                    styles.chatRow,
-                    {
-                      transform: [{ translateX }],
-                    },
-                  ]}
-                >
-                  <TouchableOpacity 
-                    style={styles.chatItem}
-                    activeOpacity={isSwiped ? 1 : 0.7}
-                    delayPressIn={100}
-                    onPress={() => {
-                      // Закрываем свайп при клике, если он открыт
-                      if (isSwiped) {
-                        setSwipedChatId(null);
-                        Animated.spring(translateX, {
-                          toValue: 0,
-                          useNativeDriver: (Platform.OS as string) !== 'web',
-                        }).start();
-                      } else {
-                        handleChatPress(chat.id);
-                      }
-                    }}
-                    disabled={isSwiped}
-                  >
-                    <Image source={{ uri: avatar }} style={styles.chatAvatar} />
-                    {(() => {
-                      const last = chat.lastMessage;
-                      const isUnread = last && last.fromUserId !== currentUserId && !last.readBy?.includes(currentUserId || '');
-                      return (
-                        <>
-                          <View style={styles.chatInfo}>
-                            <Text style={[styles.chatName, isUnread && { fontWeight: '700' }]}>{chat.name}</Text>
-                            {last && (
-                              <Text style={[styles.lastMessage, isUnread && { color: '#f4f4f5' }]} numberOfLines={1}>
-                                {last.text ?? t.chat.eventSent}
-                              </Text>
-                            )}
-                          </View>
-                          <View style={{ alignItems: 'flex-end', gap: 6 }}>
-                            {lastInteractionDate && (
-                              <Text style={[styles.chatTime, isUnread && { color: '#FF8D32' }]}>
-                                {lastInteractionDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                              </Text>
-                            )}
-                            {isUnread && (
-                              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#FF8D32' }} />
-                            )}
-                          </View>
-                        </>
-                      );
-                    })()}
-                  </TouchableOpacity>
-                </Animated.View>
-              </PanGestureHandler>
-
-              {isCustomFolder && !isSwiped && (
-                <TouchableOpacity
-                  style={styles.removeChatButton}
-                  onPress={() => handleRemoveChatFromFolder(chat.id)}
-                  disabled={isRemoving}
-                >
-                  {isRemoving ? (
-                    <ActivityIndicator color="#f4f4f5" size="small" />
-                  ) : (
-                    <Text style={styles.removeChatButtonText}>{t.chat.remove}</Text>
-                  )}
-                </TouchableOpacity>
-              )}
-            </View>
-          );
-        })}
-      </ScrollView>
+        }
+      />
 
       {/* Модальное окно создания папки */}
       <Modal
