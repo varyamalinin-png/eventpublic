@@ -93,6 +93,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   cell: {
     flex: 1,
+    minWidth: 0,
     height: 56,
     borderRadius: Radius.md ?? 14,
     borderWidth: 1,
