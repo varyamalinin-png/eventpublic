@@ -24,9 +24,11 @@ WebBrowser.maybeCompleteAuthSession();
 
 const logger = createLogger('Auth');
 
-/** Вход и регистрация через Google временно скрыты.
- *  Вся логика (OAuth, loginWithGoogle) сохранена — вернуть можно флагом. */
+/** Вход и регистрация через Google и Apple временно скрыты.
+ *  Вся логика (OAuth, loginWithGoogle, AppleAuthentication) сохранена —
+ *  вернуть можно флагом, без переписывания экрана. */
 const SHOW_GOOGLE_AUTH = false;
+const SHOW_APPLE_AUTH = false;
 
 type Mode = 'login' | 'register';
 
@@ -307,7 +309,7 @@ export default function AuthScreen() {
               )}
             </TouchableOpacity>
 
-            {(SHOW_GOOGLE_AUTH || Platform.OS === 'ios') && (
+            {(SHOW_GOOGLE_AUTH || (SHOW_APPLE_AUTH && Platform.OS === 'ios')) && (
               <View style={styles.divider}>
                 <View style={styles.dividerLine} />
                 <Text style={styles.dividerText}>{t.auth.or}</Text>
@@ -325,7 +327,7 @@ export default function AuthScreen() {
               </TouchableOpacity>
             )}
 
-            {Platform.OS === 'ios' && (
+            {SHOW_APPLE_AUTH && Platform.OS === 'ios' && (
               <TouchableOpacity
                 style={[styles.googleButton, { backgroundColor: '#000', marginTop: 10 }]}
                 onPress={async () => {
@@ -431,21 +433,25 @@ export default function AuthScreen() {
               )}
             </TouchableOpacity>
 
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>{t.auth.or}</Text>
-              <View style={styles.dividerLine} />
-            </View>
+            {(SHOW_GOOGLE_AUTH || (SHOW_APPLE_AUTH && Platform.OS === 'ios')) && (
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>{t.auth.or}</Text>
+                <View style={styles.dividerLine} />
+              </View>
+            )}
 
-            <TouchableOpacity
-              style={[styles.googleButton, loading && styles.disabledButton]}
-              onPress={Platform.OS === 'web' ? handleGoogleSignInWeb : () => promptAsync()}
-              disabled={loading || !googleClientId}
-            >
-              <Text style={styles.googleButtonText}>{t.auth.signUpWithGoogle}</Text>
-            </TouchableOpacity>
+            {SHOW_GOOGLE_AUTH && (
+              <TouchableOpacity
+                style={[styles.googleButton, loading && styles.disabledButton]}
+                onPress={Platform.OS === 'web' ? handleGoogleSignInWeb : () => promptAsync()}
+                disabled={loading || !googleClientId}
+              >
+                <Text style={styles.googleButtonText}>{t.auth.signUpWithGoogle}</Text>
+              </TouchableOpacity>
+            )}
 
-            {Platform.OS === 'ios' && (
+            {SHOW_APPLE_AUTH && Platform.OS === 'ios' && (
               <TouchableOpacity
                 style={[styles.googleButton, { backgroundColor: '#000', marginTop: 10 }]}
                 onPress={async () => {

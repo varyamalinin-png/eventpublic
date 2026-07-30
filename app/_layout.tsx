@@ -1,5 +1,5 @@
 import React from 'react';
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { ActivityIndicator, View, Platform, StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { EventsProvider } from '../context/EventsContext';
@@ -71,6 +71,22 @@ if (typeof global !== 'undefined') {
 
 function RouterGate() {
   const { isAuthenticated, initializing } = useAuth();
+  const router = useRouter();
+  const segments = useSegments();
+
+  // Раньше при обрыве сессии (выход, истёкший токен) index.tsx уже не
+  // перевызывался — он редиректит один раз при первом заходе. RouterGate
+  // просто убирал защищённые экраны из стека, поэтому человек оставался на
+  // текущем маршруте и видел пустые "Авторизуйтесь"/"Нет событий" вместо
+  // формы входа. Здесь ловим именно переход в разлогин и толкаем на /login,
+  // если человек всё ещё стоит вне (auth).
+  React.useEffect(() => {
+    if (initializing || isAuthenticated) return;
+    const inAuthGroup = segments[0] === '(auth)';
+    if (!inAuthGroup) {
+      router.replace('/(auth)/login');
+    }
+  }, [isAuthenticated, initializing, segments, router]);
 
   if (initializing) {
     return (

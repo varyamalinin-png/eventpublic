@@ -44,3 +44,4 @@ server/YANDEX_KEYS.md
 *.key
 
 app-example
+.metro-cache/
