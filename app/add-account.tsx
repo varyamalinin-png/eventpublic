@@ -15,6 +15,10 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
 import { createLogger } from '../utils/logger';
 import { Ionicons } from '@expo/vector-icons';
+import { PASSWORD_RULES, checkPassword } from '../utils/passwordRules';
+import { validateEmail, validateUsername, validatePhoneDigits, ValidationKey } from '../utils/validation';
+import { PhoneField } from '../components/auth/PhoneField';
+import { Country, DEFAULT_COUNTRY } from '../constants/countries';
 
 const logger = createLogger('AddAccount');
 
@@ -98,7 +102,23 @@ export default function AddAccountScreen() {
   const [registerUsername, setRegisterUsername] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerName, setRegisterName] = useState('');
-  const [registerPhone, setRegisterPhone] = useState('');
+  const [registerPhoneDigits, setRegisterPhoneDigits] = useState('');
+  const [phoneCountry, setPhoneCountry] = useState<Country>(DEFAULT_COUNTRY);
+  const [registerAttempted, setRegisterAttempted] = useState(false);
+  const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({});
+  const touch = (field: string) => setTouchedFields((prev) => ({ ...prev, [field]: true }));
+  const shows = (field: string) => touchedFields[field] || registerAttempted;
+
+  const passwordCheck = checkPassword(registerPassword);
+  const emailErrorKey = validateEmail(registerEmail);
+  const usernameErrorKey = validateUsername(registerUsername);
+  const phoneErrorKey = validatePhoneDigits(registerPhoneDigits);
+  const missing = {
+    email: !!emailErrorKey,
+    username: !!usernameErrorKey,
+    phone: !!phoneErrorKey,
+  };
+  const fieldError = (key: ValidationKey | null) => (key ? t.validation[key] : null);
 
   const handleLogin = async () => {
     setErrorMessage(null);
@@ -152,12 +172,15 @@ export default function AddAccountScreen() {
 
   const handleRegister = async () => {
     setErrorMessage(null);
-    if (!registerEmail.trim() || !registerUsername.trim() || !registerPassword) {
+    setRegisterAttempted(true);
+
+    if (missing.email || missing.username || missing.phone) {
       setErrorMessage(t.auth.fillRequiredFields);
       return;
     }
 
-    if (registerPassword.length < 6) {
+    // Те же правила, что проверит сервер, — см. utils/passwordRules.ts
+    if (!passwordCheck.isValid) {
       setErrorMessage(t.messages.passwordTooShort);
       return;
     }
@@ -168,7 +191,7 @@ export default function AddAccountScreen() {
       const result = await register({
         email: registerEmail.trim(),
         username: registerUsername.trim(),
-        phone: registerPhone.trim(),
+        phone: `${phoneCountry.dial} ${registerPhoneDigits}`,
         password: registerPassword,
         name: registerName.trim() || undefined,
       });
@@ -281,25 +304,37 @@ export default function AddAccountScreen() {
         {/* Форма регистрации */}
         {mode === 'register' && (
           <View style={styles.formBlock}>
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              placeholderTextColor="rgba(244,244,245,0.35)"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={registerEmail}
-              onChangeText={setRegisterEmail}
-              editable={!loading}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder={t.auth.username}
-              placeholderTextColor="rgba(244,244,245,0.35)"
-              autoCapitalize="none"
-              value={registerUsername}
-              onChangeText={setRegisterUsername}
-              editable={!loading}
-            />
+            <View>
+              <TextInput
+                style={[styles.input, shows('email') && missing.email && styles.inputError]}
+                placeholder="Email"
+                placeholderTextColor="rgba(244,244,245,0.35)"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                value={registerEmail}
+                onChangeText={setRegisterEmail}
+                onBlur={() => touch('email')}
+                editable={!loading}
+              />
+              {shows('email') && emailErrorKey && (
+                <Text style={styles.fieldErrorText}>{fieldError(emailErrorKey)}</Text>
+              )}
+            </View>
+            <View>
+              <TextInput
+                style={[styles.input, shows('username') && missing.username && styles.inputError]}
+                placeholder={t.auth.username}
+                placeholderTextColor="rgba(244,244,245,0.35)"
+                autoCapitalize="none"
+                value={registerUsername}
+                onChangeText={setRegisterUsername}
+                onBlur={() => touch('username')}
+                editable={!loading}
+              />
+              {shows('username') && usernameErrorKey && (
+                <Text style={styles.fieldErrorText}>{fieldError(usernameErrorKey)}</Text>
+              )}
+            </View>
             <TextInput
               style={styles.input}
               placeholder={t.auth.nameOptional}
@@ -308,25 +343,48 @@ export default function AddAccountScreen() {
               onChangeText={setRegisterName}
               editable={!loading}
             />
+            <View>
+              <PhoneField
+                country={phoneCountry}
+                onChangeCountry={setPhoneCountry}
+                nationalNumber={registerPhoneDigits}
+                onChangeNationalNumber={setRegisterPhoneDigits}
+                onBlur={() => touch('phone')}
+                hasError={shows('phone') && missing.phone}
+                disabled={loading}
+              />
+              {shows('phone') && phoneErrorKey && (
+                <Text style={styles.fieldErrorText}>{fieldError(phoneErrorKey)}</Text>
+              )}
+            </View>
             <TextInput
-              style={styles.input}
-              placeholder={t.auth.phoneLabel}
-              placeholderTextColor="rgba(244,244,245,0.35)"
-              keyboardType="phone-pad"
-              textContentType="telephoneNumber"
-              value={registerPhone}
-              onChangeText={setRegisterPhone}
-              editable={!loading}
-            />
-            <TextInput
-              style={styles.input}
+              style={[styles.input, shows('password') && !passwordCheck.isValid && styles.inputError]}
               placeholder={t.auth.password}
               placeholderTextColor="rgba(244,244,245,0.35)"
               secureTextEntry
               value={registerPassword}
               onChangeText={setRegisterPassword}
+              onBlur={() => touch('password')}
               editable={!loading}
             />
+            {registerPassword.length > 0 && (
+              <View style={styles.pwRules}>
+                {PASSWORD_RULES.map((rule) => {
+                  const ok = passwordCheck.passed.includes(rule.id);
+                  const label = {
+                    length: t.auth.pwLength,
+                    lower: t.auth.pwLower,
+                    upper: t.auth.pwUpper,
+                    digit: t.auth.pwDigit,
+                  }[rule.id];
+                  return (
+                    <Text key={rule.id} style={[styles.pwRule, ok && styles.pwRuleOk]}>
+                      {ok ? '✓' : '•'} {label}
+                    </Text>
+                  );
+                })}
+              </View>
+            )}
             <TouchableOpacity
               style={[styles.primaryButton, loading && styles.disabledButton]}
               onPress={handleRegister}
@@ -346,6 +404,16 @@ export default function AddAccountScreen() {
 }
 
 const styles = StyleSheet.create({
+  inputError: { borderColor: '#FF3B30' },
+  fieldErrorText: {
+    color: '#FF6B6B',
+    fontSize: 12.5,
+    marginTop: 6,
+    marginLeft: 4,
+  },
+  pwRules: { gap: 4, marginTop: -4, marginBottom: 4, paddingHorizontal: 4 },
+  pwRule: { color: 'rgba(244,244,245,0.45)', fontSize: 12.5 },
+  pwRuleOk: { color: '#4ADE80' },
   container: {
     flexGrow: 1,
     padding: 24,

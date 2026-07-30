@@ -126,7 +126,7 @@ export const ru = {
     signUpWithGoogle: 'Регистрация через Google',
     signUpWithApple: 'Регистрация через Apple',
     password: 'Пароль',
-    username: 'Имя пользователя',
+    username: 'Юзернейм',
     nameOptional: 'Имя (необязательно)',
     enterEmailAndPassword: 'Введите email и пароль',
     signInFailed: 'Не удалось войти',
@@ -581,13 +581,15 @@ export const ru = {
   validation: {
     usernameEmpty: 'Юзернейм не может быть пустым',
     usernameTooShort: 'Юзернейм должен быть не менее 3 символов',
-    usernameTooLong: 'Юзернейм должен быть не более 30 символов',
-    usernameChars: 'Юзернейм может содержать только латинские буквы, цифры и подчёркивание',
+    usernameTooLong: 'Юзернейм должен быть не более 32 символов',
+    usernameChars: 'Только латинские буквы, цифры, точка и подчёркивание',
     googleSignInFailed: 'Не удалось войти через Google',
     required: 'Это поле обязательно',
     emailInvalid: 'Неверный формат email',
     passwordTooShort: 'Пароль слишком короткий',
     passwordsNotMatch: 'Пароли не совпадают',
+    phoneRequired: 'Введите номер телефона',
+    phoneTooShort: 'Номер телефона слишком короткий',
   },
 
   // Events

@@ -581,13 +581,15 @@ export const en = {
   validation: {
     usernameEmpty: 'Username cannot be empty',
     usernameTooShort: 'Username must be at least 3 characters',
-    usernameTooLong: 'Username must be at most 30 characters',
-    usernameChars: 'Username may contain only latin letters, digits and underscore',
+    usernameTooLong: 'Username must be at most 32 characters',
+    usernameChars: 'Only latin letters, digits, dot and underscore',
     googleSignInFailed: 'Could not sign in with Google',
     required: 'This field is required',
     emailInvalid: 'Invalid email format',
     passwordTooShort: 'Password is too short',
     passwordsNotMatch: "Passwords don't match",
+    phoneRequired: 'Enter a phone number',
+    phoneTooShort: 'Phone number is too short',
   },
 
   // Events

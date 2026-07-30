@@ -18,6 +18,9 @@ import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { PASSWORD_RULES, checkPassword } from '../../utils/passwordRules';
+import { validateEmail, validateUsername, validatePhoneDigits, ValidationKey } from '../../utils/validation';
+import { PhoneField } from '../../components/auth/PhoneField';
+import { Country, DEFAULT_COUNTRY } from '../../constants/countries';
 
 // Завершаем сессию OAuth для правильной работы на веб
 WebBrowser.maybeCompleteAuthSession();
@@ -82,17 +85,32 @@ export default function AuthScreen() {
   const [registerUsername, setRegisterUsername] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerName, setRegisterName] = useState('');
-  const [registerPhone, setRegisterPhone] = useState('');
+  const [registerPhoneDigits, setRegisterPhoneDigits] = useState('');
+  const [phoneCountry, setPhoneCountry] = useState<Country>(DEFAULT_COUNTRY);
   // Подсвечиваем незаполненное только после первой попытки отправки —
   // краснеть при открытии формы неприятно
   const [registerAttempted, setRegisterAttempted] = useState(false);
+  // ...или как только пользователь ушёл с конкретного поля — так ошибка
+  // видна сразу, не дожидаясь клика по кнопке (как у большинства форм регистрации).
+  const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({});
+  const touch = (field: string) => setTouchedFields((prev) => ({ ...prev, [field]: true }));
+  const shows = (field: string) => touchedFields[field] || registerAttempted;
+
+  // На логине не ругаемся "обязательное поле", пока не начали печатать —
+  // формат проверяем только когда есть что проверять.
+  const loginEmailErrorKey = loginEmail.trim() ? validateEmail(loginEmail) : null;
+
   const passwordCheck = checkPassword(registerPassword);
+  const emailErrorKey = validateEmail(registerEmail);
+  const usernameErrorKey = validateUsername(registerUsername);
+  const phoneErrorKey = validatePhoneDigits(registerPhoneDigits);
   const missing = {
-    email: !registerEmail.trim(),
-    username: !registerUsername.trim(),
-    phone: !registerPhone.trim(),
+    email: !!emailErrorKey,
+    username: !!usernameErrorKey,
+    phone: !!phoneErrorKey,
     password: !passwordCheck.isValid,
   };
+  const fieldError = (key: ValidationKey | null) => (key ? t.validation[key] : null);
 
   const WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '1095670285353-5u0ap40ms4ccqmc8hbfh32pmudi54f1v.apps.googleusercontent.com';
   const googleClientId = WEB_CLIENT_ID;
@@ -214,7 +232,7 @@ export default function AuthScreen() {
       await register({
         email: registerEmail.trim(),
         username: registerUsername.trim(),
-        phone: registerPhone.trim(),
+        phone: `${phoneCountry.dial} ${registerPhoneDigits}`,
         password: registerPassword,
         name: registerName.trim() || undefined,
       });
@@ -278,16 +296,22 @@ export default function AuthScreen() {
         {/* Форма входа */}
         {mode === 'login' && (
           <View style={styles.formBlock}>
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              placeholderTextColor="rgba(244,244,245,0.35)"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={loginEmail}
-              onChangeText={setLoginEmail}
-              editable={!loading}
-            />
+            <View>
+              <TextInput
+                style={[styles.input, shows('loginEmail') && loginEmailErrorKey && styles.inputError]}
+                placeholder="Email"
+                placeholderTextColor="rgba(244,244,245,0.35)"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                value={loginEmail}
+                onChangeText={setLoginEmail}
+                onBlur={() => touch('loginEmail')}
+                editable={!loading}
+              />
+              {shows('loginEmail') && loginEmailErrorKey && (
+                <Text style={styles.fieldErrorText}>{fieldError(loginEmailErrorKey)}</Text>
+              )}
+            </View>
             <TextInput
               style={styles.input}
               placeholder={t.auth.password}
@@ -357,25 +381,37 @@ export default function AuthScreen() {
         {/* Форма регистрации */}
         {mode === 'register' && (
           <View style={styles.formBlock}>
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              placeholderTextColor="rgba(244,244,245,0.35)"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={registerEmail}
-              onChangeText={setRegisterEmail}
-              editable={!loading}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder={t.auth.username}
-              placeholderTextColor="rgba(244,244,245,0.35)"
-              autoCapitalize="none"
-              value={registerUsername}
-              onChangeText={setRegisterUsername}
-              editable={!loading}
-            />
+            <View>
+              <TextInput
+                style={[styles.input, shows('email') && missing.email && styles.inputError]}
+                placeholder="Email"
+                placeholderTextColor="rgba(244,244,245,0.35)"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                value={registerEmail}
+                onChangeText={setRegisterEmail}
+                onBlur={() => touch('email')}
+                editable={!loading}
+              />
+              {shows('email') && emailErrorKey && (
+                <Text style={styles.fieldErrorText}>{fieldError(emailErrorKey)}</Text>
+              )}
+            </View>
+            <View>
+              <TextInput
+                style={[styles.input, shows('username') && missing.username && styles.inputError]}
+                placeholder={t.auth.username}
+                placeholderTextColor="rgba(244,244,245,0.35)"
+                autoCapitalize="none"
+                value={registerUsername}
+                onChangeText={setRegisterUsername}
+                onBlur={() => touch('username')}
+                editable={!loading}
+              />
+              {shows('username') && usernameErrorKey && (
+                <Text style={styles.fieldErrorText}>{fieldError(usernameErrorKey)}</Text>
+              )}
+            </View>
             <TextInput
               style={styles.input}
               placeholder={t.auth.nameOptional}
@@ -384,23 +420,28 @@ export default function AuthScreen() {
               onChangeText={setRegisterName}
               editable={!loading}
             />
+            <View>
+              <PhoneField
+                country={phoneCountry}
+                onChangeCountry={setPhoneCountry}
+                nationalNumber={registerPhoneDigits}
+                onChangeNationalNumber={setRegisterPhoneDigits}
+                onBlur={() => touch('phone')}
+                hasError={shows('phone') && missing.phone}
+                disabled={loading}
+              />
+              {shows('phone') && phoneErrorKey && (
+                <Text style={styles.fieldErrorText}>{fieldError(phoneErrorKey)}</Text>
+              )}
+            </View>
             <TextInput
-              style={[styles.input, registerAttempted && missing.phone && styles.inputError]}
-              placeholder={t.auth.phoneLabel}
-              placeholderTextColor="rgba(244,244,245,0.35)"
-              keyboardType="phone-pad"
-              textContentType="telephoneNumber"
-              value={registerPhone}
-              onChangeText={setRegisterPhone}
-              editable={!loading}
-            />
-            <TextInput
-              style={[styles.input, registerAttempted && missing.password && styles.inputError]}
+              style={[styles.input, shows('password') && missing.password && styles.inputError]}
               placeholder={t.auth.password}
               placeholderTextColor="rgba(244,244,245,0.35)"
               secureTextEntry
               value={registerPassword}
               onChangeText={setRegisterPassword}
+              onBlur={() => touch('password')}
               editable={!loading}
             />
             {registerPassword.length > 0 && (
@@ -484,6 +525,12 @@ export default function AuthScreen() {
 
 const styles = StyleSheet.create({
   inputError: { borderColor: '#FF3B30' },
+  fieldErrorText: {
+    color: '#FF6B6B',
+    fontSize: 12.5,
+    marginTop: 6,
+    marginLeft: 4,
+  },
   pwRules: { gap: 4, marginTop: -4, marginBottom: 4, paddingHorizontal: 4 },
   pwRule: { color: 'rgba(244,244,245,0.45)', fontSize: 12.5 },
   pwRuleOk: { color: '#4ADE80' },
