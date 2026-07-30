@@ -16,6 +16,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
 import { createLogger } from '../utils/logger';
 import { Ionicons } from '@expo/vector-icons';
+import { OtpInput } from '../components/auth/OtpInput';
+import { useResendCooldown } from '../hooks/useResendCooldown';
 
 const logger = createLogger('AddAccountVerify');
 
@@ -29,6 +31,7 @@ export default function AddAccountVerifyScreen() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
+  const cooldown = useResendCooldown();
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
@@ -72,6 +75,8 @@ export default function AddAccountVerifyScreen() {
 
     try {
       await resendVerificationEmail(email.trim());
+      // Сервер разрешает не чаще раза в две минуты — блокируем кнопку на это время
+      cooldown.start();
       setStatusMessage(t.auth.verificationSent);
       Alert.alert(
         t.auth.emailSent,
@@ -80,16 +85,20 @@ export default function AddAccountVerifyScreen() {
       );
     } catch (error: any) {
       logger.error('Failed to resend verification email', error);
-      const message = error?.body?.message || error?.message || t.auth.sendFailed;
+      // Если отказ именно по частоте, сервер вернул остаток секунд — показываем его
+      if (error?.body?.retryAfterSeconds) cooldown.startFromError(error);
+      const raw = error?.body?.message;
+      const message = (typeof raw === 'string' ? raw : raw?.message) || error?.message || t.auth.sendFailed;
       setErrorMessage(message);
       Alert.alert(t.common.error, message);
     } finally {
       setResending(false);
     }
-  }, [email, resendVerificationEmail]);
+  }, [email, resendVerificationEmail, cooldown]);
 
-  const handleVerifyToken = useCallback(async () => {
-    if (!token.trim()) {
+  const handleVerifyToken = useCallback(async (code?: string) => {
+    const value = (code ?? token).trim();
+    if (value.length < 6) {
       setErrorMessage(t.auth.enterToken);
       return;
     }
@@ -99,8 +108,8 @@ export default function AddAccountVerifyScreen() {
     setErrorMessage(null);
 
     try {
-      const result = await verifyEmail(email.trim(), token.trim());
-      
+      const result = await verifyEmail(email.trim(), value);
+
       // Если сервер вернул токены, пользователь автоматически залогинен
       if (result && result.accessToken && result.user) {
         hasVerifiedOnThisPage.current = true; // Отмечаем, что verify был успешным на этой странице
@@ -161,7 +170,7 @@ export default function AddAccountVerifyScreen() {
                     3. Найдите письмо от нашего сервиса
                   </Text>
                   <Text style={styles.instructionItem}>
-                    4. Скопируйте токен из письма и вставьте его ниже
+                    4. Введите 6-значный код из письма ниже
                   </Text>
                 </View>
               </View>
@@ -201,41 +210,38 @@ export default function AddAccountVerifyScreen() {
               />
             </View>
             <TouchableOpacity
-              style={[styles.secondaryButton, resending && styles.disabledButton]}
+              style={[styles.secondaryButton, (resending || cooldown.isCoolingDown) && styles.disabledButton]}
               onPress={handleResendEmail}
-              disabled={resending}
+              disabled={resending || cooldown.isCoolingDown}
             >
               {resending ? (
                 <ActivityIndicator color="#f4f4f5" />
               ) : (
-                <Text style={styles.secondaryButtonText}>{t.auth.resendEmail}</Text>
+                <Text style={styles.secondaryButtonText}>
+                  {cooldown.isCoolingDown
+                    ? `${t.auth.resendEmail} (${cooldown.label})`
+                    : t.auth.resendEmail}
+                </Text>
               )}
             </TouchableOpacity>
           </View>
 
-          {/* Ввод токена */}
+          {/* Ввод кода */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t.auth.enterToken}</Text>
-            <Text style={styles.sectionDescription}>
-              Скопируйте токен из письма и вставьте его здесь
-            </Text>
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>{t.auth.tokenLabel}</Text>
-              <TextInput
-                style={styles.input}
-                placeholder={t.auth.pasteToken}
-                placeholderTextColor="rgba(244,244,245,0.35)"
+              <OtpInput
                 value={token}
-                onChangeText={setToken}
-                autoCapitalize="none"
-                textContentType="none"
-                editable={!loading}
+                onChange={(code) => { setToken(code); if (errorMessage) setErrorMessage(null); }}
+                onComplete={handleVerifyToken}
+                disabled={loading}
+                hasError={!!errorMessage}
               />
             </View>
             <TouchableOpacity
-              style={[styles.primaryButton, loading && styles.disabledButton]}
-              onPress={handleVerifyToken}
-              disabled={loading}
+              style={[styles.primaryButton, (loading || token.length < 6) && styles.disabledButton]}
+              onPress={() => handleVerifyToken()}
+              disabled={loading || token.length < 6}
             >
               {loading ? (
                 <ActivityIndicator color="#f4f4f5" />

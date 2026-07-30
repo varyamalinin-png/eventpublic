@@ -179,7 +179,7 @@ export default function VerifyEmailScreen() {
                     3. Найдите письмо от нашего сервиса
                   </Text>
                   <Text style={styles.instructionItem}>
-                    4. Скопируйте токен из письма и вставьте его ниже
+                    4. Введите 6-значный код из письма ниже
                   </Text>
                 </View>
               </View>
@@ -235,12 +235,9 @@ export default function VerifyEmailScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Ввод токена */}
+          {/* Ввод кода */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t.auth.enterToken}</Text>
-            <Text style={styles.sectionDescription}>
-              Скопируйте токен из письма и вставьте его здесь
-            </Text>
             <View style={styles.inputContainer}>
               <OtpInput
                 value={token}
