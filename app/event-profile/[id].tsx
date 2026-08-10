@@ -129,21 +129,12 @@ export default function EventProfileScreen() {
   
   // Состояния для добавления контента
   const [showAddContentModal, setShowAddContentModal] = useState(false);
-  const [contentType, setContentType] = useState<'photo' | 'music' | 'text' | null>(null);
-  const [musicUrl, setMusicUrl] = useState('');
-  const [musicTitle, setMusicTitle] = useState('');
-  const [musicArtist, setMusicArtist] = useState('');
+  const [contentType, setContentType] = useState<'photo' | 'text' | null>(null);
   const [contentCaption, setContentCaption] = useState('');
   const [selectedPhotos, setSelectedPhotos] = useState<Array<{ uri: string; index: number; id: string; caption?: string; file?: File }>>([]);
   const [isUploadingPhotos, setIsUploadingPhotos] = useState(false);
   const [combineIntoOnePost, setCombineIntoOnePost] = useState(false); // Чекбокс "объединить в один пост"
-  
-  // Состояния для поиска музыки
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [selectedTrack, setSelectedTrack] = useState<any>(null);
-  
+
   // Состояние для попапа просмотра фото
   const [showImageModal, setShowImageModal] = useState(false);
   const [fullImageUrl, setFullImageUrl] = useState<string | null>(null);
@@ -813,103 +804,6 @@ export default function EventProfileScreen() {
     });
   };
 
-  // Функция поиска треков через SoundCloud API
-  const searchTracks = async (query: string) => {
-    if (!query.trim()) {
-      setSearchResults([]);
-      return;
-    }
-
-    setIsSearching(true);
-    
-    // Пока используем только моковые данные, так как нужен реальный SoundCloud API ключ
-    // В будущем можно заменить на реальный API вызов
-    setTimeout(() => {
-      const mockTracks = [
-        {
-          id: 1,
-          title: `${query} - Remix`,
-          user: { username: 'DJ Artist' },
-          artwork_url: '',
-          stream_url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'
-        },
-        {
-          id: 2,
-          title: `${query} - Original Mix`,
-          user: { username: 'Producer Name' },
-          artwork_url: '',
-          stream_url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3'
-        },
-        {
-          id: 3,
-          title: `${query} - Acoustic Version`,
-          user: { username: 'Singer Name' },
-          artwork_url: 'https://via.placeholder.com/300x300/45B7D1/fff?text=🎤',
-          stream_url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3'
-        },
-        {
-          id: 4,
-          title: `${query} - Instrumental`,
-          user: { username: 'Band Name' },
-          artwork_url: 'https://via.placeholder.com/300x300/96CEB4/fff?text=🎸',
-          stream_url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3'
-        },
-        {
-          id: 5,
-          title: `${query} - Live Performance`,
-          user: { username: 'Live Artist' },
-          artwork_url: 'https://via.placeholder.com/300x300/FFEAA7/fff?text=🎭',
-          stream_url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3'
-        }
-      ];
-      
-      setSearchResults(mockTracks);
-      setIsSearching(false);
-    }, 1000); // Имитируем задержку API
-  };
-
-  const handleTrackSelect = (track: any) => {
-    setSelectedTrack(track);
-    setMusicTitle(track.title);
-    setMusicArtist(track.user.username);
-    setMusicUrl(track.stream_url);
-    setSearchResults([]);
-    setSearchQuery('');
-  };
-
-  const handleAddMusic = () => {
-    if (!musicUrl || !musicTitle || !musicArtist) {
-      Alert.alert(t.common.error, t.eventProfile.fillAllMusicFields);
-      return;
-    }
-
-    if (!currentUserId) {
-      Alert.alert(t.eventProfile.authorization, t.eventProfile.signInToAddContent);
-      return;
-    }
-
-    addEventProfilePost(eventId, {
-      authorId: currentUserId,
-      type: 'music',
-      content: musicUrl,
-      title: musicTitle,
-      artist: musicArtist,
-      artwork_url: selectedTrack?.artwork_url,
-      caption: contentCaption || t.eventProfile.trackAssociated
-    });
-    
-    // НЕ закрываем модальное окно и НЕ сбрасываем состояние, чтобы можно было добавить еще
-    // setShowAddContentModal(false);
-    setMusicUrl('');
-    setMusicTitle('');
-    setMusicArtist('');
-    setContentCaption('');
-    setSelectedTrack(null);
-    setSearchResults([]);
-    setSearchQuery('');
-    // setContentType(null);
-  };
-
   // Функции для воспроизведения музыки
   const playTrack = async (trackUrl: string, trackId: string) => {
     try {
@@ -1287,12 +1181,6 @@ export default function EventProfileScreen() {
                 setContentCaption('');
                 setSelectedPhotos([]);
                 setCombineIntoOnePost(false);
-                setMusicUrl('');
-                setMusicTitle('');
-                setMusicArtist('');
-                setSelectedTrack(null);
-                setSearchQuery('');
-                setSearchResults([]);
                 setShowAddContentModal(true);
               }}
             >
@@ -1546,12 +1434,6 @@ export default function EventProfileScreen() {
                   setContentType(null);
                   setContentCaption('');
                   setSelectedPhotos([]);
-                  setMusicUrl('');
-                  setMusicTitle('');
-                  setMusicArtist('');
-                  setSelectedTrack(null);
-                  setSearchResults([]);
-                  setSearchQuery('');
                 }}
               >
                 <Text style={styles.closeButtonText}>✕</Text>
@@ -1569,17 +1451,6 @@ export default function EventProfileScreen() {
                     <AppIcon name="image" size={24} color="#f4f4f5" />
                   </View>
                   <Text style={styles.contentTypeText}>{t.eventProfile.photo}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.contentTypeButton}
-                  onPress={() => setContentType('music')}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.contentTypeIconWrap}>
-                    <AppIcon name="heart" size={24} color="#f4f4f5" />
-                  </View>
-                  <Text style={styles.contentTypeText}>{t.eventProfile.music}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1726,130 +1597,6 @@ export default function EventProfileScreen() {
                   </TouchableOpacity>
                 </View>
               </ScrollView>
-            ) : contentType === 'music' ? (
-              <View>
-                {/* Поиск треков */}
-                <Text style={styles.demoLabel}>{t.eventProfile.demoTrackSearch}</Text>
-                <TextInput
-                  style={styles.editInput}
-                  placeholder={t.eventProfile.trackSearchPh}
-                  placeholderTextColor="#999"
-                  value={searchQuery}
-                  onChangeText={(text) => {
-                    setSearchQuery(text);
-                    if (text.length > 2) {
-                      searchTracks(text);
-                    } else {
-                      setSearchResults([]);
-                    }
-                  }}
-                />
-                
-                {/* Результаты поиска */}
-                {searchResults.length > 0 && (
-                  <ScrollView style={styles.searchResults} showsVerticalScrollIndicator={false}>
-                    {searchResults.map((track) => (
-                      <TouchableOpacity
-                        key={track.id}
-                        style={styles.searchResultItem}
-                        onPress={() => handleTrackSelect(track)}
-                      >
-                        <Image 
-                          source={{ uri: track.artwork_url || '' }} 
-                          style={styles.searchResultImage}
-                        />
-                        <View style={styles.searchResultInfo}>
-                          <Text style={styles.searchResultTitle} numberOfLines={1}>
-                            {track.title}
-                          </Text>
-                          <Text style={styles.searchResultArtist} numberOfLines={1}>
-                            {track.user.username}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                )}
-                
-                {/* Индикатор загрузки */}
-                {isSearching && (
-                  <View style={styles.loadingContainer}>
-                    <Text style={styles.loadingText}>{t.eventProfile.searchingTracks}</Text>
-                  </View>
-                )}
-                
-                {/* Выбранный трек */}
-                {selectedTrack && (
-                  <View style={styles.selectedTrackContainer}>
-                    <Image 
-                      source={{ uri: selectedTrack.artwork_url || '' }} 
-                      style={styles.selectedTrackImage}
-                    />
-                    <View style={styles.selectedTrackInfo}>
-                      <Text style={styles.selectedTrackTitle}>{selectedTrack.title}</Text>
-                      <Text style={styles.selectedTrackArtist}>{selectedTrack.user.username}</Text>
-                    </View>
-                  </View>
-                )}
-                
-                {/* Ручной ввод (если не выбран трек из поиска) */}
-                {!selectedTrack && (
-                  <>
-                    <TextInput
-                      style={styles.editInput}
-                      placeholder={t.eventProfile.trackLink}
-                      placeholderTextColor="#999"
-                      value={musicUrl}
-                      onChangeText={setMusicUrl}
-                    />
-                    
-                    <TextInput
-                      style={styles.editInput}
-                      placeholder={t.eventProfile.trackName}
-                      placeholderTextColor="#999"
-                      value={musicTitle}
-                      onChangeText={setMusicTitle}
-                    />
-                    
-                    <TextInput
-                      style={styles.editInput}
-                      placeholder={t.eventProfile.artist}
-                      placeholderTextColor="#999"
-                      value={musicArtist}
-                      onChangeText={setMusicArtist}
-                    />
-                  </>
-                )}
-                
-                <TextInput
-                  style={[styles.editInput, styles.editTextArea]}
-                  placeholder={t.eventProfile.descriptionOptional || 'Description (optional)'}
-                  placeholderTextColor="#999"
-                  value={contentCaption}
-                  onChangeText={setContentCaption}
-                  multiline
-                  numberOfLines={3}
-                />
-                
-                <View style={styles.modalActions}>
-                  <TouchableOpacity style={styles.cancelButton} onPress={() => {
-                    setContentType(null);
-                    setMusicUrl('');
-                    setMusicTitle('');
-                    setMusicArtist('');
-                    setContentCaption('');
-                    setSelectedTrack(null);
-                    setSearchResults([]);
-                    setSearchQuery('');
-                  }}>
-                    <Text style={styles.cancelButtonText}>{t.eventProfile.back}</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity style={styles.saveButton} onPress={handleAddMusic}>
-                    <Text style={styles.saveButtonText}>{t.common.add || 'Add'}</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
             ) : (
               <View>
                 <TextInput

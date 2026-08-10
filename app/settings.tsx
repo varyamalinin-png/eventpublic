@@ -970,9 +970,9 @@ const removeAvatarFromServer = async () => {
             })}
             {renderSettingItem(t.settings.support.terms, undefined, () => {
               if (Platform.OS === 'web') {
-                router.push('/privacy');
+                router.push('/terms');
               } else {
-                Linking.openURL('https://iwent.ru/privacy');
+                Linking.openURL('https://iwent.ru/terms');
               }
             })}
             {renderSettingItem(t.settings.support.privacy, undefined, () => {

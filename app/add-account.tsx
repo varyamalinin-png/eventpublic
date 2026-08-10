@@ -19,6 +19,7 @@ import { PASSWORD_RULES, checkPassword } from '../utils/passwordRules';
 import { validateEmail, validateUsername, validatePhoneDigits, ValidationKey } from '../utils/validation';
 import { PhoneField } from '../components/auth/PhoneField';
 import { Country, DEFAULT_COUNTRY } from '../constants/countries';
+import { LegalDocumentModal, LegalDocKind, openLegalDoc } from '../components/auth/LegalDocumentModal';
 
 const logger = createLogger('AddAccount');
 
@@ -104,6 +105,8 @@ export default function AddAccountScreen() {
   const [registerName, setRegisterName] = useState('');
   const [registerPhoneDigits, setRegisterPhoneDigits] = useState('');
   const [phoneCountry, setPhoneCountry] = useState<Country>(DEFAULT_COUNTRY);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [legalModalKind, setLegalModalKind] = useState<LegalDocKind | null>(null);
   const [registerAttempted, setRegisterAttempted] = useState(false);
   const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({});
   const touch = (field: string) => setTouchedFields((prev) => ({ ...prev, [field]: true }));
@@ -117,6 +120,7 @@ export default function AddAccountScreen() {
     email: !!emailErrorKey,
     username: !!usernameErrorKey,
     phone: !!phoneErrorKey,
+    terms: !agreedToTerms,
   };
   const fieldError = (key: ValidationKey | null) => (key ? t.validation[key] : null);
 
@@ -182,6 +186,11 @@ export default function AddAccountScreen() {
     // Те же правила, что проверит сервер, — см. utils/passwordRules.ts
     if (!passwordCheck.isValid) {
       setErrorMessage(t.messages.passwordTooShort);
+      return;
+    }
+
+    if (!agreedToTerms) {
+      setErrorMessage(t.validation.mustAgreeToTerms);
       return;
     }
 
@@ -386,6 +395,28 @@ export default function AddAccountScreen() {
               </View>
             )}
             <TouchableOpacity
+              style={styles.termsRow}
+              onPress={() => setAgreedToTerms((v) => !v)}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.checkbox, agreedToTerms && styles.checkboxChecked, shows('terms') && missing.terms && styles.checkboxError]}>
+                {agreedToTerms && <Text style={styles.checkboxMark}>✓</Text>}
+              </View>
+              <Text style={styles.termsText}>
+                {t.auth.agreeToTermsPrefix}
+                <Text style={styles.termsLink} onPress={() => openLegalDoc('terms', setLegalModalKind)}>
+                  {t.auth.termsLink}
+                </Text>
+                {t.auth.agreeToTermsMiddle}
+                <Text style={styles.termsLink} onPress={() => openLegalDoc('privacy', setLegalModalKind)}>
+                  {t.auth.privacyLink}
+                </Text>
+              </Text>
+            </TouchableOpacity>
+            {shows('terms') && missing.terms && (
+              <Text style={styles.fieldErrorText}>{t.validation.mustAgreeToTerms}</Text>
+            )}
+            <TouchableOpacity
               style={[styles.primaryButton, loading && styles.disabledButton]}
               onPress={handleRegister}
               disabled={loading}
@@ -399,6 +430,7 @@ export default function AddAccountScreen() {
           </View>
         )}
       </ScrollView>
+      <LegalDocumentModal kind={legalModalKind} onClose={() => setLegalModalKind(null)} />
     </KeyboardAvoidingView>
   );
 }
@@ -410,6 +442,38 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     marginTop: 6,
     marginLeft: 4,
+  },
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 4,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: 'rgba(244,244,245,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  checkboxChecked: {
+    backgroundColor: '#FF8D32',
+    borderColor: '#FF8D32',
+  },
+  checkboxError: { borderColor: '#FF3B30' },
+  checkboxMark: { color: '#0A0A0A', fontSize: 13, fontWeight: '700' },
+  termsText: {
+    flex: 1,
+    color: 'rgba(244,244,245,0.75)',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  termsLink: {
+    color: '#FF8D32',
+    fontWeight: '600',
   },
   pwRules: { gap: 4, marginTop: -4, marginBottom: 4, paddingHorizontal: 4 },
   pwRule: { color: 'rgba(244,244,245,0.45)', fontSize: 12.5 },

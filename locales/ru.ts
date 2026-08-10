@@ -136,6 +136,10 @@ export const ru = {
     googleSignInFailed: 'Не удалось войти через Google',
     appleSignInFailed: 'Не удалось войти через Apple',
     verified: 'подтвержден',
+    agreeToTermsPrefix: 'Я согласен с ',
+    termsLink: 'Условиями использования',
+    agreeToTermsMiddle: ' и ',
+    privacyLink: 'Политикой конфиденциальности',
   },
   complaint: {
     complaintAboutUser: 'Жалоба на пользователя',
@@ -590,6 +594,7 @@ export const ru = {
     passwordsNotMatch: 'Пароли не совпадают',
     phoneRequired: 'Введите номер телефона',
     phoneTooShort: 'Номер телефона слишком короткий',
+    mustAgreeToTerms: 'Нужно принять условия использования и политику конфиденциальности',
   },
 
   // Events

@@ -136,6 +136,10 @@ export const en = {
     googleSignInFailed: 'Could not sign in with Google',
     appleSignInFailed: 'Could not sign in with Apple',
     verified: 'verified',
+    agreeToTermsPrefix: 'I agree to the ',
+    termsLink: 'Terms of Use',
+    agreeToTermsMiddle: ' and ',
+    privacyLink: 'Privacy Policy',
   },
   complaint: {
     complaintAboutUser: 'Report a user',
@@ -590,6 +594,7 @@ export const en = {
     passwordsNotMatch: "Passwords don't match",
     phoneRequired: 'Enter a phone number',
     phoneTooShort: 'Phone number is too short',
+    mustAgreeToTerms: 'You must accept the Terms of Use and Privacy Policy',
   },
 
   // Events

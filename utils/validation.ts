@@ -15,7 +15,8 @@ export type ValidationKey =
   | 'usernameTooLong'
   | 'usernameChars'
   | 'phoneRequired'
-  | 'phoneTooShort';
+  | 'phoneTooShort'
+  | 'mustAgreeToTerms';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME_RE = /^[a-zA-Z0-9_.]+$/;
