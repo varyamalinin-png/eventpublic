@@ -1217,7 +1217,7 @@ export default function EventProfileScreen() {
             style={styles.backToProfileButton}
             onPress={handleBackToProfile}
           >
-            <Text style={styles.backToProfileText}>← {t.eventProfile.backToProfile}</Text>
+            <Text style={styles.backToProfileText}>{t.eventProfile.backToProfile}</Text>
           </TouchableOpacity>
           
           <ScrollView 

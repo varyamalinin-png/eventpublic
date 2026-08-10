@@ -478,7 +478,7 @@ export default function OtherProfileScreen() {
             }
           }}
         >
-          <Text style={styles.backText}>← {t.profile.backToProfile}</Text>
+          <Text style={styles.backText}>{t.profile.backToProfile}</Text>
         </TouchableOpacity>
         <ScrollView 
           ref={scrollViewRef} 
