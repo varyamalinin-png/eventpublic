@@ -927,6 +927,7 @@ export const ru = {
 
   // Explore
   explore: {
+    friendsTab: 'ДРУЗЬЯ',
     createFolder: 'Создать папку',
     filters: 'Фильтры',
     filterLabelParticipants: 'Участники:',

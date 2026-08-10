@@ -934,7 +934,7 @@ export default function ExploreScreen() {
         }}
         {...(Platform.OS === 'web' ? { dataSet: { active: activeTab === 'FRIENDS' ? 'true' : 'false' } } : {})}
       >
-        <Text style={[styles.tabText, activeTab === 'FRIENDS' && styles.activeTabText]}>FRIENDS</Text>
+        <Text style={[styles.tabText, activeTab === 'FRIENDS' && styles.activeTabText]}>{t.explore.friendsTab}</Text>
       </TouchableOpacity>
 
     </View>

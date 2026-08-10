@@ -926,6 +926,7 @@ export const en = {
 
   // Explore
   explore: {
+    friendsTab: 'FRIENDS',
     createFolder: 'Create folder',
     filters: 'Filters',
     filterLabelParticipants: 'Participants:',
