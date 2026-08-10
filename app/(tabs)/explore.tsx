@@ -425,9 +425,11 @@ export default function ExploreScreen() {
     },
   });
 
-  const ORGANIZER_WIDTH = 300;
   const rawScreenW = Dimensions.get('window').width;
   const SCREEN_W = Platform.OS === 'web' ? Math.min(rawScreenW, 500) : rawScreenW;
+  // На узких экранах (или совсем маленьких вьюпортах) фиксированные 300 не влезают —
+  // панель организатора вылезает за край. Ограничиваем шириной экрана с отступом.
+  const ORGANIZER_WIDTH = Math.min(300, SCREEN_W - 20);
   const ROW_WIDTH = SCREEN_W + ORGANIZER_WIDTH;
 
   // Получаем все уникальные метки из событий

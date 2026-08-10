@@ -646,10 +646,13 @@ export default function OtherProfileScreen() {
               <Text style={styles.statLabel}>{t.profile.statsFriends}</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.statItem} onPress={() => router.push(`/my-complaints/${userId}`)}>
+            {/* Число жалоб, поданных на этого пользователя, — не тапабельно:
+                своей страницы "чужие жалобы против X" не существует и не должно,
+                это модерационные данные, а /my-complaints — это МОИ поданные жалобы. */}
+            <View style={styles.statItem}>
               <Text style={styles.statNumber}>{organizerStats?.complaints ?? 0}</Text>
               <Text style={styles.statLabel}>{t.profile.statsComplaints}</Text>
-            </TouchableOpacity>
+            </View>
           </View>
           
           {/* Второй ряд: Organized/Participated скрыты флагом SHOW_ORG_PART,

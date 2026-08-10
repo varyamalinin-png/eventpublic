@@ -112,10 +112,6 @@ function OrganizerCard({
     router.push(`/friends-list/${organizerId}`);
   };
   
-  const handleComplaintsPress = () => {
-    router.push(`/my-complaints/${organizerId}`);
-  };
-  
   const handleOrganizedPress = () => {
     router.push(`/organized-events/${organizerId}`);
   };
@@ -188,10 +184,13 @@ function OrganizerCard({
                 <Text style={styles.statLabel}>{t.profile.statsFriends}</Text>
               </TouchableOpacity>
               
-              <TouchableOpacity style={styles.statItem} onPress={handleComplaintsPress}>
+              {/* Число жалоб, поданных на этого пользователя, — не тапабельно:
+                  своей страницы "чужие жалобы против X" не существует и не должно,
+                  это модерационные данные, а /my-complaints — это МОИ поданные жалобы. */}
+              <View style={styles.statItem}>
                 <Text style={styles.statNumber}>{stats.complaints}</Text>
                 <Text style={styles.statLabel}>{t.profile.statsComplaints}</Text>
-              </TouchableOpacity>
+              </View>
             </View>
             
             {/* Второй ряд: Organized/Participated скрыты флагом SHOW_ORG_PART,
