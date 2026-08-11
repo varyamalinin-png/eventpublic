@@ -80,7 +80,7 @@ export const createEventStyles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
-    paddingBottom: 40,
+    paddingBottom: 100, // Достаточно, чтобы Next/Back не перекрывались абсолютным таб-баром (82px)
   },
   stepContent: {
     flex: 1,
@@ -124,7 +124,7 @@ export const createEventStyles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 16,
-    paddingBottom: 50, // Отступ снизу для таб-бара
+    paddingBottom: 92, // Отступ снизу для таб-бара (высота таб-бара 82px + запас)
     backgroundColor: '#0a0a0c',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.07)',
