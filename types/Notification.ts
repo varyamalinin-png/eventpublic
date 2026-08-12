@@ -7,7 +7,9 @@ export type NotificationType =
   | 'EVENT_UPDATED'
   | 'EVENT_PARTICIPANT_JOINED'
   | 'EVENT_PARTICIPANT_LEFT'
-  | 'EVENT_POST_ADDED';
+  | 'EVENT_POST_ADDED'
+  | 'EVENT_JOIN_REQUEST'
+  | 'EVENT_REQUEST_ACCEPTED';
 
 export interface Notification {
   id: string;

@@ -785,10 +785,10 @@ const removeAvatarFromServer = async () => {
                   </View>
                 )}
                 <View style={styles.accountTextColumn}>
-                  <Text style={styles.accountName}>
+                  <Text style={styles.accountName} numberOfLines={1} ellipsizeMode="tail">
                     {authUser?.name ?? authUser?.username ?? authUser?.email ?? t.settings.accounts.currentAccount}
                   </Text>
-                  <Text style={styles.accountMeta}>
+                  <Text style={styles.accountMeta} numberOfLines={1} ellipsizeMode="tail">
                     {authUser?.email ?? activeStoredAccount?.email ?? '—'}
                   </Text>
                   <View style={styles.accountBadge}>
@@ -812,10 +812,10 @@ const removeAvatarFromServer = async () => {
                         </View>
                       )}
                       <View style={styles.accountTextColumn}>
-                        <Text style={styles.accountName}>
+                        <Text style={styles.accountName} numberOfLines={1} ellipsizeMode="tail">
                           {account.name || account.username || account.email || t.settings.accounts.currentAccount}
                         </Text>
-                        <Text style={styles.accountMeta}>{account.email || account.username}</Text>
+                        <Text style={styles.accountMeta} numberOfLines={1} ellipsizeMode="tail">{account.email || account.username}</Text>
                       </View>
                     </View>
                     <View style={styles.accountActions}>

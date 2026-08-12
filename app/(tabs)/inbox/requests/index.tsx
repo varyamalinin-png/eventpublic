@@ -47,8 +47,8 @@ export default function RequestsTab() {
 
   // Фильтруем уведомления по типу (только уведомления о событиях, не запросы)
   const eventNotifications = useMemo(() => {
-    return notifications.filter(n => 
-      ['EVENT_CANCELLED', 'EVENT_UPDATED', 'EVENT_PARTICIPANT_JOINED', 'EVENT_PARTICIPANT_LEFT', 'EVENT_POST_ADDED'].includes(n.type)
+    return notifications.filter(n =>
+      ['EVENT_CANCELLED', 'EVENT_UPDATED', 'EVENT_PARTICIPANT_JOINED', 'EVENT_PARTICIPANT_LEFT', 'EVENT_POST_ADDED', 'EVENT_JOIN_REQUEST', 'EVENT_REQUEST_ACCEPTED'].includes(n.type)
     );
   }, [notifications]);
 

@@ -280,6 +280,8 @@ export const en = {
     posted: 'posted',
     post: 'post',
     newNotification: 'New notification',
+    requestedToJoin: 'requested to join',
+    acceptedYourRequest: 'accepted your request to join',
   },
 
   // Profile
@@ -721,6 +723,7 @@ export const en = {
     signInToCreate: 'Sign in to create events.',
     changesSavedShort: 'Changes saved.',
     massEventHint: 'Participants will be added automatically without your approval. The event will be labelled as mass.',
+    massEventCheckbox: 'Mass event',
     addMedia: 'Add media',
     chooseMediaTypeSource: 'Choose media type and source:',
     photoFromGallery: 'Photo from gallery',

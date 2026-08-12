@@ -631,6 +631,9 @@ export function useEventActions({
         if (input.targeting) {
           payload.targeting = input.targeting;
         }
+        if (input.visibility) {
+          payload.visibility = input.visibility;
+        }
 
         // Поле для массового события - КРИТИЧЕСКИ ВАЖНО
         // Отправляем только если значение явно установлено (true или false), но не undefined или null
@@ -909,6 +912,7 @@ export function useEventActions({
       if (updates.price) updateData.price = updates.price;
       if (updates.maxParticipants) updateData.maxParticipants = updates.maxParticipants;
       if (updates.mediaUrl) updateData.mediaUrl = updates.mediaUrl;
+      if (updates.visibility) updateData.visibility = updates.visibility;
       if (updates.date && updates.time) {
         // КРИТИЧЕСКИ ВАЖНО: Создаем дату в локальном часовом поясе, а не UTC
         const [year, month, day] = updates.date.split('-').map(Number);

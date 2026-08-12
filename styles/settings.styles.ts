@@ -129,6 +129,7 @@ export const settingsStyles = StyleSheet.create(
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
+    minWidth: 0,
   },
   accountAvatar: {
     width: 44,
@@ -143,6 +144,7 @@ export const settingsStyles = StyleSheet.create(
   },
   accountTextColumn: {
     flex: 1,
+    minWidth: 0,
   },
   accountName: {
     color: '#f4f4f5',
@@ -172,6 +174,7 @@ export const settingsStyles = StyleSheet.create(
     alignItems: 'center',
     gap: 8,
     marginLeft: 12,
+    flexShrink: 0,
   },
   accountActionButton: {
     paddingHorizontal: 12,

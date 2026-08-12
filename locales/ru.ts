@@ -280,6 +280,8 @@ export const ru = {
     posted: 'опубликовал',
     post: 'пост',
     newNotification: 'Новое уведомление',
+    requestedToJoin: 'запросил(а) участие в',
+    acceptedYourRequest: 'принял(а) вашу заявку на участие в',
   },
 
   // Profile
@@ -722,6 +724,7 @@ export const ru = {
     signInToCreate: 'Авторизуйтесь, чтобы создавать события.',
     changesSavedShort: 'Изменения сохранены.',
     massEventHint: 'Участники будут добавляться автоматически без вашего подтверждения. Событие получит метку «массовое».',
+    massEventCheckbox: 'Массовое событие',
     addMedia: 'Добавить медиа',
     chooseMediaTypeSource: 'Выберите тип медиа и источник:',
     photoFromGallery: 'Фото из галереи',

@@ -834,7 +834,7 @@ export default function CreateEventScreen() {
     
     setFormData(prev => ({
       ...prev,
-      location: suggestion.description,
+      location: suggestion.name,
       coordinates: newCoordinates
     }));
     setShowSuggestions(false);
@@ -1394,6 +1394,7 @@ export default function CreateEventScreen() {
           recurringCustomDates: payload.recurringCustomDates,
           isMassEvent: payload.isMassEvent,
           tags: payload.tags,
+          visibility: payload.visibility,
         } as any);
         Alert.alert(t.createEvent.savedShort, t.createEvent.changesSavedShort, [
           { text: 'OK', onPress: () => router.back() },
@@ -1561,7 +1562,7 @@ export default function CreateEventScreen() {
                 }}
               >
                 <Text style={[styles.checkboxText, formData.isMassEvent && styles.checkboxTextActive]}>
-                  {formData.isMassEvent ? '✓ ' : ''}Массовое событие
+                  {formData.isMassEvent ? '✓ ' : ''}{t.createEvent.massEventCheckbox}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1785,7 +1786,7 @@ export default function CreateEventScreen() {
               </View>
             )}
 
-            <Text style={styles.label}>{t.createEvent.location} {formData.location === t.createEvent.online ? `(${t.createEvent.locationOptional})` : '*'}</Text>
+            <Text style={styles.label}>{t.createEvent.location} {formData.location === t.createEvent.online ? t.createEvent.locationOptional : '*'}</Text>
             
             {formData.location !== t.createEvent.online ? (
               <View>

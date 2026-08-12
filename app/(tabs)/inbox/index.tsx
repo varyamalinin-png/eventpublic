@@ -31,9 +31,9 @@ export default function InboxScreen() {
         // если пользователь был на вкладке "Notifications"
         const currentTab = activeTabRef.current;
         if (currentTab === 'requests' || wasOnRequestsTabRef.current) {
-          const unreadNotifications = notifications.filter(n => 
-            !n.readAt && 
-            ['EVENT_CANCELLED', 'EVENT_UPDATED', 'EVENT_PARTICIPANT_JOINED', 'EVENT_PARTICIPANT_LEFT', 'EVENT_POST_ADDED'].includes(n.type)
+          const unreadNotifications = notifications.filter(n =>
+            !n.readAt &&
+            ['EVENT_CANCELLED', 'EVENT_UPDATED', 'EVENT_PARTICIPANT_JOINED', 'EVENT_PARTICIPANT_LEFT', 'EVENT_POST_ADDED', 'EVENT_JOIN_REQUEST', 'EVENT_REQUEST_ACCEPTED'].includes(n.type)
           );
           if (unreadNotifications.length > 0) {
             // Используем logger если нужно (пока оставляем простой лог для отладки)

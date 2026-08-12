@@ -474,8 +474,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             // Если ошибка 401 и есть refresh token, пытаемся обновить
             // Но только если это не сетьевая ошибка
-            const isNetworkError = error?.message?.includes('Network request failed') || 
-                                   error?.message?.includes('Failed to fetch');
+            const isNetworkError = error?.message?.includes('Network request failed') ||
+                                   error?.message?.includes('Failed to fetch') ||
+                                   error?.message?.includes('No connection');
             
             if (!isNetworkError && (error?.status === 401 || error?.status === 403) && fallbackAccount.refreshToken && fallbackAccount.refreshToken.trim() !== '') {
               try {
@@ -688,9 +689,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           await fetchProfile(targetAccount.accessToken);
         } catch (error: any) {
-          const isNetworkError = error?.message?.includes('Network request failed') || 
-                                 error?.message?.includes('Failed to fetch');
-          
+          const isNetworkError = error?.message?.includes('Network request failed') ||
+                                 error?.message?.includes('Failed to fetch') ||
+                                 error?.message?.includes('No connection');
+
           if (isNetworkError) {
             // При сетевой ошибке не пытаемся обновлять токен
             console.warn('[Auth] Network error during profile fetch, using cached user data');
@@ -732,9 +734,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           await fetchProfile(storedAccess);
         } catch (error: any) {
-          const isNetworkError = error?.message?.includes('Network request failed') || 
-                                 error?.message?.includes('Failed to fetch');
-          
+          const isNetworkError = error?.message?.includes('Network request failed') ||
+                                 error?.message?.includes('Failed to fetch') ||
+                                 error?.message?.includes('No connection');
+
           if (isNetworkError) {
             // При сетевой ошибке не пытаемся обновлять токен
             console.warn('[Auth] Offline mode: session restored without profile');

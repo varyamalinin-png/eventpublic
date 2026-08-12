@@ -21,6 +21,8 @@ function getTypeConfig(type: string) {
     case 'EVENT_UPDATED':           return { emoji: '✏', color: '#FF8D32' };
     case 'EVENT_CANCELLED':         return { emoji: '✕', color: '#FF3B30' };
     case 'EVENT_POST_ADDED':        return { emoji: '📷', color: '#AF52DE' };
+    case 'EVENT_JOIN_REQUEST':      return { emoji: '🙋', color: '#FF8D32' };
+    case 'EVENT_REQUEST_ACCEPTED':  return { emoji: '✓', color: '#34C759' };
     default:                        return { emoji: '🔔', color: '#FF8D32' };
   }
 }
@@ -53,6 +55,10 @@ function NotificationItem({ notification, onPress, onDelete }: NotificationItemP
         return { actor: actorName, action: `${t.notifications.left || 'left'} ${t.notifications.event || 'event'}`, eventName: event?.title || payload.eventTitle };
       case 'EVENT_POST_ADDED':
         return { actor: actorName, action: `${t.notifications.posted || 'posted'} ${t.notifications.post || 'post'} ${t.notifications.in || 'in'}`, eventName: event?.title || payload.eventTitle };
+      case 'EVENT_JOIN_REQUEST':
+        return { actor: actorName, action: `${t.notifications.requestedToJoin || 'requested to join'}`, eventName: event?.title || payload.eventTitle };
+      case 'EVENT_REQUEST_ACCEPTED':
+        return { actor: actorName, action: `${t.notifications.acceptedYourRequest || 'accepted your request to join'}`, eventName: event?.title || payload.eventTitle };
       default:
         return { actor: '', action: t.notifications.newNotification || 'New notification' };
     }
