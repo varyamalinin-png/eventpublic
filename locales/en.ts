@@ -319,6 +319,7 @@ export const en = {
     statsEvents: 'Events',
     statsFriends: 'Friends',
     statsComplaints: 'Compl',
+    complaintsInDevelopment: 'In development',
     statsOrganized: 'Org',
     statsParticipated: 'Part',
     statsShared: 'Shared',

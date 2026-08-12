@@ -52,6 +52,23 @@ export const settingsStyles = StyleSheet.create(
   scrollView: {
     flex: 1,
   },
+  complaintsToast: {
+    position: 'absolute',
+    top: 100,
+    alignSelf: 'center',
+    zIndex: 20,
+    backgroundColor: 'rgba(28,28,32,0.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  complaintsToastText: {
+    color: '#f4f4f5',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   scrollContent: {
     paddingBottom: 40,
   },

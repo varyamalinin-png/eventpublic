@@ -319,6 +319,7 @@ export const ru = {
     statsEvents: 'Событий',
     statsFriends: 'Друзей',
     statsComplaints: 'Жалобы',
+    complaintsInDevelopment: 'В разработке',
     statsOrganized: 'Орг',
     statsParticipated: 'Уч',
     statsShared: 'Общие',

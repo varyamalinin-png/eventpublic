@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useStableItemHandler } from '../../hooks/useStableItemHandler';
-import { View, Text, ScrollView, FlatList, StyleSheet, Image, TouchableOpacity, Modal, Dimensions, TextInput, Alert, Platform, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, FlatList, StyleSheet, Image, TouchableOpacity, Modal, Dimensions, TextInput, Alert, Platform, RefreshControl, Animated } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useRefresh } from '../../hooks/useRefresh';
 import * as ImagePicker from 'expo-image-picker';
@@ -64,6 +64,19 @@ export default function ProfileScreen() {
   const [showCreateFolderModal, setShowCreateFolderModal] = useState(false);
   const [showAddToFolderModal, setShowAddToFolderModal] = useState(false);
   const [selectedFolderIds, setSelectedFolderIds] = useState<Set<string>>(new Set());
+  const [showComplaintsToast, setShowComplaintsToast] = useState(false);
+  const complaintsToastOpacity = useRef(new Animated.Value(0)).current;
+
+  // Страница /my-complaints временно заморожена: вместо перехода показываем
+  // мигающий тост "в разработке" (переход намеренно отключён, не баг).
+  const handleComplaintsPress = useCallback(() => {
+    setShowComplaintsToast(true);
+    Animated.sequence([
+      Animated.timing(complaintsToastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.delay(1400),
+      Animated.timing(complaintsToastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start(() => setShowComplaintsToast(false));
+  }, [complaintsToastOpacity]);
 
   const currentUserId = authUser?.id;
   const userData = currentUserId ? getUserData(currentUserId) : null;
@@ -838,6 +851,15 @@ export default function ProfileScreen() {
         showMap={true}
       />
 
+      {showComplaintsToast && (
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.complaintsToast, { opacity: complaintsToastOpacity }]}
+        >
+          <Text style={styles.complaintsToastText}>{t.profile.complaintsInDevelopment}</Text>
+        </Animated.View>
+      )}
+
       <View style={{ flex: 1 }}>
       <ScrollView
         style={styles.scrollContainer}
@@ -948,13 +970,7 @@ export default function ProfileScreen() {
               <Text style={styles.statLabel}>{t.profile.statsFriends}</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.statItem} onPress={() => {
-              try {
-                expoRouter.push('/my-complaints');
-              } catch (error) {
-                logger.error('Failed to navigate to my-complaints:', error);
-              }
-            }}>
+            <TouchableOpacity style={styles.statItem} onPress={handleComplaintsPress}>
               <Text style={styles.statNumber}>{organizerStats?.complaints ?? 0}</Text>
               <Text style={styles.statLabel}>{t.profile.statsComplaints}</Text>
             </TouchableOpacity>

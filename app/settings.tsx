@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Platform,
   Linking,
+  Animated,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSafeRouter } from '../utils/safeRouter';
@@ -138,6 +139,19 @@ export default function SettingsScreen() {
   const [showCityModal, setShowCityModal] = useState(false);
   const [showBioModal, setShowBioModal] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
+  const [showComplaintsToast, setShowComplaintsToast] = useState(false);
+  const complaintsToastOpacity = useRef(new Animated.Value(0)).current;
+
+  // Страница /my-complaints временно заморожена: вместо перехода показываем
+  // мигающий тост "в разработке" (переход намеренно отключён, не баг).
+  const handleComplaintsPress = useCallback(() => {
+    setShowComplaintsToast(true);
+    Animated.sequence([
+      Animated.timing(complaintsToastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.delay(1400),
+      Animated.timing(complaintsToastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start(() => setShowComplaintsToast(false));
+  }, [complaintsToastOpacity]);
   const [newEmail, setNewEmail] = useState('');
   const [emailPassword, setEmailPassword] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -745,7 +759,16 @@ const removeAvatarFromServer = async () => {
         <Text style={styles.headerTitle}>{t.settings.title}</Text>
         <View style={{ width: 24 }} />
       </View>
-      
+
+      {showComplaintsToast && (
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.complaintsToast, { opacity: complaintsToastOpacity }]}
+        >
+          <Text style={styles.complaintsToastText}>{t.profile.complaintsInDevelopment}</Text>
+        </Animated.View>
+      )}
+
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         {/* БЫСТРАЯ СМЕНА АВАТАРКИ */}
         {renderSection('camera', t.settings.profileVisibility.profilePhoto, (
@@ -982,7 +1005,7 @@ const removeAvatarFromServer = async () => {
                 Linking.openURL('https://iwent.ru/privacy');
               }
             })}
-            {renderSettingItem(t.settings.support.myComplaints, undefined, () => router.push('/my-complaints'))}
+            {renderSettingItem(t.settings.support.myComplaints, undefined, handleComplaintsPress)}
             {(() => {
               logger.debug('Checking admin panel visibility:', { 
                 hasUserProfile: !!userProfile, 
