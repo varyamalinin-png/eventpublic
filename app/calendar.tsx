@@ -852,7 +852,10 @@ export default function CalendarScreen() {
     );
   };
 
-  const monthHeightRef = useRef(0);
+  // Высота каждого месяца своя (зависит от числа недель), поэтому нельзя
+  // экстраполировать смещение по высоте одного месяца — копим реальные
+  // высоты и считаем точную сумму до текущего месяца.
+  const monthHeightsRef = useRef<number[]>([]);
   const hasScrolledRef = useRef(false);
 
   const currentMonthIndex = useMemo(() => {
@@ -864,16 +867,19 @@ export default function CalendarScreen() {
   }, [months]);
 
   const handleMonthLayout = useCallback((e: any, index: number) => {
-    if (index === 0 && e.nativeEvent.layout.height > 0) {
-      monthHeightRef.current = e.nativeEvent.layout.height;
+    if (hasScrolledRef.current || currentMonthIndex <= 0) return;
+    monthHeightsRef.current[index] = e.nativeEvent.layout.height;
+
+    if (index < currentMonthIndex - 1) return;
+    for (let i = 0; i < currentMonthIndex; i++) {
+      if (!monthHeightsRef.current[i]) return; // ещё не все высоты собраны
     }
-    if (index === 1 && !hasScrolledRef.current && monthHeightRef.current > 0) {
-      hasScrolledRef.current = true;
-      const offset = currentMonthIndex * monthHeightRef.current;
-      setTimeout(() => {
-        scrollViewRef.current?.scrollTo({ y: offset, animated: false });
-      }, 50);
-    }
+
+    hasScrolledRef.current = true;
+    const offset = monthHeightsRef.current.slice(0, currentMonthIndex).reduce((sum, h) => sum + h, 0);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: offset, animated: false });
+    }, 50);
   }, [currentMonthIndex]);
 
   const renderMonthView = () => {
