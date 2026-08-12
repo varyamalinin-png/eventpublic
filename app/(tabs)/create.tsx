@@ -1195,7 +1195,7 @@ export default function CreateEventScreen() {
       logger.warn('⚠️ handleSubmit уже выполняется (state), игнорируем повторный вызов');
       return;
     }
-    if (!formData.title || !formData.description || !formData.location) {
+    if (!formData.title || !formData.location) {
       Alert.alert(t.createEvent.error, t.createEvent.fillRequiredFields);
       return;
     }

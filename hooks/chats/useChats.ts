@@ -496,10 +496,17 @@ export function useChats({
           });
         }
       } catch (error) {
-        loadedChatMessages.current.delete(chatId);
         if (await handleUnauthorizedError(error)) {
+          loadedChatMessages.current.delete(chatId);
           return;
         }
+        // Намеренно НЕ снимаем флаг "загружено" здесь: этот вызов идёт из
+        // фонового эффекта, который пере-запрашивает сообщения для всех
+        // чатов при каждом изменении ссылки на массив chats. Если снимать
+        // флаг при ошибке, стабильно падающий чат ретраится на каждый
+        // ре-рендер chats (в том числе не связанный с чатами) — бесконечный
+        // цикл. Явный повторный запрос всё ещё доступен через force=true
+        // (используется при открытии/фокусе конкретного чата).
         logger.error(`Failed to load messages for chat ${chatId}`, error);
       }
     },
