@@ -663,7 +663,7 @@ const styles = StyleSheet.create({
     zIndex: 100,
     // subtle gradient so controls are readable over the map
     ...(Platform.OS === 'web' && typeof window !== 'undefined' ? ({
-      background: 'linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 100%)',
+      backgroundImage: 'linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 100%)',
     } as unknown as ViewStyle) : {}),
   },
   backBtn: {

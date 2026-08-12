@@ -254,9 +254,8 @@ export const calendarStyles = StyleSheet.create({
     width: '100%',
     maxWidth: 500,
     alignSelf: 'center',
-    ...(Platform.OS === 'web' ? ({ 
+    ...(Platform.OS === 'web' ? ({
       boxSizing: 'border-box',
-      margin: '0 auto',
     } as unknown as ViewStyle) : {}),
   },
   monthHeader: {

@@ -681,27 +681,51 @@ export function EventsProvider({ children }: EventsProviderProps) {
   // Кэш для количества жалоб по пользователям (ref — без ре-рендеров при обновлении)
   const complaintsCountCache = useRef<Record<string, number>>({});
 
-  // Загружаем статистику жалоб для пользователя
-  const loadComplaintsCount = useCallback(async (userId: string) => {
+  // Очередь загрузки жалоб: лента может одновременно отрендерить карточки
+  // десятков разных организаторов, и без ограничения одновременных запросов
+  // это упирается в rate-limit прод-сервера (429 на /complaints/count/:id).
+  const complaintsQueueRef = useRef<string[]>([]);
+  const complaintsInFlightRef = useRef(0);
+  const COMPLAINTS_MAX_CONCURRENT = 2;
+  const COMPLAINTS_STAGGER_MS = 150;
+
+  const processComplaintsQueue = useCallback(() => {
+    if (complaintsInFlightRef.current >= COMPLAINTS_MAX_CONCURRENT) return;
+    const userId = complaintsQueueRef.current.shift();
+    if (!userId) return;
     if (complaintsCountCache.current[userId] !== undefined) {
-      return complaintsCountCache.current[userId];
-    }
-    
-    if (!accessToken) {
-      complaintsCountCache.current[userId] = 0;
-      return 0;
+      processComplaintsQueue();
+      return;
     }
 
-    try {
-      const response = await apiRequest(`/complaints/count/${userId}`, {}, accessToken);
-      const count = response.count || 0;
-      complaintsCountCache.current[userId] = count;
-      return count;
-    } catch (error) {
-      complaintsCountCache.current[userId] = 0;
-      return 0;
-    }
+    complaintsInFlightRef.current++;
+    apiRequest(`/complaints/count/${userId}`, {}, accessToken)
+      .then((response) => {
+        complaintsCountCache.current[userId] = response.count || 0;
+      })
+      .catch(() => {
+        complaintsCountCache.current[userId] = 0;
+      })
+      .finally(() => {
+        complaintsInFlightRef.current--;
+        setTimeout(processComplaintsQueue, COMPLAINTS_STAGGER_MS);
+      });
   }, [accessToken]);
+
+  // Загружаем статистику жалоб для пользователя (ставит в очередь, не ждёт результата)
+  const loadComplaintsCount = useCallback((userId: string) => {
+    if (complaintsCountCache.current[userId] !== undefined) {
+      return;
+    }
+    if (!accessToken) {
+      complaintsCountCache.current[userId] = 0;
+      return;
+    }
+    if (!complaintsQueueRef.current.includes(userId)) {
+      complaintsQueueRef.current.push(userId);
+    }
+    processComplaintsQueue();
+  }, [accessToken, processComplaintsQueue]);
 
   const getOrganizerStats = useCallback((organizerId: string) => {
     // КРИТИЧЕСКИ ВАЖНО: Используем ту же логику фильтрации, что и в профиле
