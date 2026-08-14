@@ -43,7 +43,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0a0a0c"
+        "backgroundColor": "#FFA500"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -72,7 +72,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Приложение использует ваше местоположение для отображения событий на карте."
+          "locationWhenInUsePermission": "Приложение использует ваше местоположение для отображения событий на карте рядом с вами."
         }
       ],
       [
