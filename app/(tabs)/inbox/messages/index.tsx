@@ -17,7 +17,8 @@ const logger = createLogger('MessagesTab');
 export default function MessagesTab() {
   const router = useRouter();
   const { user } = useAuth();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const dateLocale = language === 'ru' ? 'ru-RU' : 'en-US';
   const { refreshing, onRefresh } = useRefresh();
   const {
     getUserData,
@@ -436,7 +437,7 @@ export default function MessagesTab() {
                     <View style={{ alignItems: 'flex-end', gap: 6 }}>
                       {lastInteractionDate && (
                         <Text style={[styles.chatTime, isUnread && { color: '#FF8D32' }]}>
-                          {lastInteractionDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                          {lastInteractionDate.toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' })}
                         </Text>
                       )}
                       {isUnread && (

@@ -21,7 +21,8 @@ export default function ChatScreen() {
   const { chatId } = useLocalSearchParams();
   const router = useRouter();
   const { user, accessToken } = useAuth();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const dateLocale = language === 'ru' ? 'ru-RU' : 'en-US';
   const {
     getChat,
     sendChatMessage,
@@ -263,7 +264,7 @@ export default function ChatScreen() {
                 <MemoryMiniCard post={post} />
               </TouchableOpacity>
               <Text style={styles.messageTime}>
-                {message.createdAt.toLocaleTimeString('ru-RU', {
+                {message.createdAt.toLocaleTimeString(dateLocale, {
                   hour: '2-digit',
                   minute: '2-digit'
                 })}
@@ -309,7 +310,7 @@ export default function ChatScreen() {
                 <Text style={styles.eventPlaceholderSubtext}>{t.inbox.pressToOpen}</Text>
               </View>
               <Text style={styles.messageTime}>
-                {message.createdAt.toLocaleTimeString('ru-RU', {
+                {message.createdAt.toLocaleTimeString(dateLocale, {
                   hour: '2-digit',
                   minute: '2-digit'
                 })}
@@ -368,7 +369,7 @@ export default function ChatScreen() {
                 />
               </View>
               <Text style={styles.messageTime}>
-                {message.createdAt.toLocaleTimeString('ru-RU', {
+                {message.createdAt.toLocaleTimeString(dateLocale, {
                   hour: '2-digit',
                   minute: '2-digit'
                 })}
@@ -410,7 +411,7 @@ export default function ChatScreen() {
               <Text style={styles.messageText}>{message.text}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 4 }}>
                 <Text style={styles.messageTime}>
-                  {message.createdAt.toLocaleTimeString('ru-RU', {
+                  {message.createdAt.toLocaleTimeString(dateLocale, {
                     hour: '2-digit',
                     minute: '2-digit'
                   })}
@@ -870,7 +871,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
     // Стили для веб-версии
     ...(Platform.OS === 'web' && {
-      outline: 'none',
+      outlineStyle: 'none',
       border: 'none',
       resize: 'none',
       WebkitAppearance: 'none',

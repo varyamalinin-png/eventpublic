@@ -57,7 +57,12 @@ export const validateUsername = (username: string): { isValid: boolean; errorMes
   if (!usernameRegex.test(clean)) {
     return { isValid: false, errorMessage: 'Юзернейм может содержать только латинские буквы, цифры и подчеркивания' };
   }
-  
+
+  // Юзернейм не может состоять из одних подчёркиваний — нужна хотя бы одна буква или цифра
+  if (!/[a-zA-Z0-9]/.test(clean)) {
+    return { isValid: false, errorMessage: 'Юзернейм должен содержать хотя бы одну букву или цифру' };
+  }
+
   return { isValid: true };
 };
 

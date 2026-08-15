@@ -157,7 +157,7 @@ function OrganizerCard({
           <Text style={styles.nameAndAge}>{name}, {age}</Text>
 
           {/* О себе — длинный текст в одну строку, «Ещё» сразу справа от него */}
-          {bio && (
+          {!!bio && (
             isBioLong ? (
               <View style={styles.bioRow}>
                 <Text style={[styles.bio, styles.bioInline]} numberOfLines={1}>{bio}</Text>

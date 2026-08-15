@@ -107,7 +107,8 @@ const darkMapStyle = [
 export default function MapScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const dateLocale = language === 'ru' ? 'ru-RU' : 'en-US';
   const { events, isUserEventMember, isEventUpcoming, isEventNotFull, isEventPast, getEventPhotoForUser, getGlobalEvents, getFriendsForEvents, isUserOrganizer, isEventFull, isFriendOfOrganizer, getUserData } = useEvents();
   const { eventId, selectLocation, userId, exploreTab } = useLocalSearchParams();
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
@@ -480,7 +481,7 @@ export default function MapScreen() {
                 )}
                 <View style={styles.bottomSheetMeta}>
                   <Text style={styles.bottomSheetDate}>
-                    {selectedEvent.displayDate || new Date(selectedEvent.startTime).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
+                    {selectedEvent.displayDate || new Date(selectedEvent.startTime).toLocaleDateString(dateLocale, { day: 'numeric', month: 'short' })}
                   </Text>
                   {selectedEvent.participants !== undefined && (
                     <Text style={styles.bottomSheetParticipants}>

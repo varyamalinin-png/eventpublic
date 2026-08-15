@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Platform } from 'react-native';
 
 /** Стили экрана профиля. Вынесены из app/(tabs)/profile.tsx без изменений. */
 export const profileStyles = StyleSheet.create({
@@ -158,9 +158,17 @@ export const profileStyles = StyleSheet.create({
     fontSize: 14,
     color: 'rgba(244,244,245,0.65)',
     textAlign: 'center',
-    marginBottom: 22,
+    marginBottom: 4,
     paddingHorizontal: 28,
     lineHeight: 20,
+    ...(Platform.OS === 'web' && { overflowWrap: 'anywhere', wordBreak: 'break-word' } as object),
+  },
+  bioMore: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FF8D32',
+    textAlign: 'center',
+    marginBottom: 22,
   },
   statsContainer: {
     alignItems: 'center',

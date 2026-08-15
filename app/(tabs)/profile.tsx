@@ -48,6 +48,7 @@ export default function ProfileScreen() {
   const { events, eventProfiles, getOrganizerStats, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember, getUserData, getUserRequestStatus, eventFolders, createEventFolder, deleteEvent, addEventToFolder, fetchEventProfile, refreshEventFolders } = useEvents();
   const { user: authUser, loading: authLoading, initializing: authInitializing } = useAuth();
   const { t } = useLanguage();
+  const [bioExpanded, setBioExpanded] = useState(false);
   const [showEventFeed, setShowEventFeed] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<EventFolder | null>(null);
@@ -939,9 +940,21 @@ export default function ProfileScreen() {
         {/* Имя и возраст */}
         <Text style={styles.nameAndAge}>{userData.name}, {userData.age}</Text>
         
-        {/* О себе */}
-        {userData.bio && (
-          <Text style={styles.bio}>{userData.bio}</Text>
+        {/* О себе — длинные био сворачиваем, чтобы не ломать вёрстку (см. OrganizerCard) */}
+        {!!userData.bio && (
+          bioExpanded ? (
+            <TouchableOpacity onPress={() => setBioExpanded(false)} activeOpacity={0.7}>
+              <Text style={styles.bio}>{userData.bio}</Text>
+              <Text style={styles.bioMore}>{t.common.showLess}</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity onPress={() => setBioExpanded(true)} activeOpacity={0.7}>
+              <Text style={styles.bio} numberOfLines={3}>{userData.bio}</Text>
+              {userData.bio.length > 80 && (
+                <Text style={styles.bioMore}>{t.common.showMore}</Text>
+              )}
+            </TouchableOpacity>
+          )
         )}
         
         {/* Статистика - все сразу без раскрытия */}

@@ -72,7 +72,8 @@ export default function CreateEventScreen() {
   const params = useLocalSearchParams();
   const { createEvent, updateEvent, deleteEvent, events, getFriendsList, eventRequests, user: eventsAuthUser } = useEvents() as any;
   const { user: authUser, accessToken } = useAuth();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const dateLocale = language === 'ru' ? 'ru-RU' : 'en-US';
   const [currentStep, setCurrentStep] = useState(1);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
@@ -389,19 +390,19 @@ export default function CreateEventScreen() {
 
   const formatTime = useCallback((date: Date | undefined) => {
     if (!date) return '12:00';
-    return date.toLocaleTimeString('ru-RU', {
+    return date.toLocaleTimeString(dateLocale, {
       hour: '2-digit',
       minute: '2-digit'
     });
-  }, []);
+  }, [dateLocale]);
 
   const formatDisplayDate = useCallback((date: Date | undefined) => {
-    if (!date) return new Date().toLocaleDateString('ru-RU');
-    return date.toLocaleDateString('ru-RU', {
+    if (!date) return new Date().toLocaleDateString(dateLocale);
+    return date.toLocaleDateString(dateLocale, {
       day: 'numeric',
       month: 'long'
     });
-  }, []);
+  }, [dateLocale]);
 
   // Создаем preview-событие через useMemo для синхронного доступа
   const previewEventData = useMemo(() => {
@@ -861,7 +862,7 @@ export default function CreateEventScreen() {
 
   // Функции форматирования дат - определяем ДО использования в useMemo
   const formatDate = (date: Date) => {
-    return date.toLocaleDateString('ru-RU', {
+    return date.toLocaleDateString(dateLocale, {
       day: 'numeric',
       month: 'long'
     });

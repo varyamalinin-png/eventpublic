@@ -175,7 +175,8 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
     throw new Error('Contexts are null after successful hook calls');
   }
   
-  const { t } = languageContext;
+  const { t, language } = languageContext;
+  const dateLocale = language === 'ru' ? 'ru-RU' : 'en-US';
   const { getUserData, events, updateEventProfilePost, deleteEventProfilePost, saveMemoryPost, removeSavedMemoryPost, isMemoryPostSaved, reportMemoryPost, sendMemoryPostToChats, getChatsForUser, getFriendsList, createPersonalChat, addPostComment } = eventsContext;
   const { user: authUser, accessToken } = authContext;
   
@@ -426,7 +427,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
                       <Text style={styles.carouselIndicatorText}>{index + 1} / {photos.length}</Text>
                     </View>
                     {/* Описание для текущего фото, если есть */}
-                    {post.captions && post.captions[index] && (
+                    {!!post.captions?.[index] && (
                       <View style={styles.carouselCaption}>
                         <Text style={styles.carouselCaptionText}>{post.captions[index]}</Text>
                       </View>
@@ -548,7 +549,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
       {renderContent()}
         
         {/* Название события в верхнем левом углу с оверлеем - кликабельное, ведет на профиль события */}
-        {event?.title && (
+        {!!event?.title && (
           <TouchableOpacity 
             onPress={() => {
               handleNavigate(`/event-profile/${post.eventId}`);
@@ -586,7 +587,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
       </TouchableOpacity>
 
       {/* Описание/подпись (для одиночного фото или общее описание) */}
-      {post.caption && !hasCarousel && (
+      {!!post.caption && !hasCarousel && (
         <View style={styles.captionContainer}>
           <Text style={styles.caption}>{post.caption}</Text>
         </View>
@@ -679,7 +680,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
         
         <View style={styles.dateAndOptionsContainer}>
           <Text style={styles.eventDate}>
-            {post.createdAt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+            {post.createdAt.toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit', year: '2-digit' })}
           </Text>
           
           {/* Кнопка комментариев - на одной линии с датой */}
@@ -779,7 +780,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
                     <Text style={styles.photoModalIndicatorText}>{index + 1} / {photos.length}</Text>
                   </View>
                   {/* Описание для текущего фото, если есть */}
-                  {post.captions && post.captions[index] && (
+                  {!!post.captions?.[index] && (
                     <View style={styles.photoModalCaption}>
                       <Text style={styles.photoModalCaptionText}>{post.captions[index]}</Text>
                     </View>
@@ -796,7 +797,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
                 resizeMode="contain"
               />
               {/* Описание, если есть */}
-              {post.caption && (
+              {!!post.caption && (
                 <View style={styles.photoModalCaption}>
                   <Text style={styles.photoModalCaptionText}>{post.caption}</Text>
                 </View>

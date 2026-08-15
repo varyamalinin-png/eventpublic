@@ -67,6 +67,20 @@ export default function ExploreScreen() {
   }
 
   const { t } = useLanguage();
+  const getTagLabel = useCallback((tag: string): string => {
+    const labels: Record<string, string> = {
+      'age_18_plus': '18+',
+      'age_21_plus': '21+',
+      'age_16_plus': '16+',
+      'women_only': 'women only',
+      'men_only': 'men only',
+      'recurring': t.events.recurringEvent,
+      'starting_soon': 'starting soon',
+      'массовое': t.events.massEvent,
+      'регулярное': t.events.recurringEvent,
+    };
+    return labels[tag] || tag;
+  }, [t]);
   const [activeTab, setActiveTab] = useState<'GLOB' | 'FRIENDS'>('GLOB');
   const [searchQuery, setSearchQuery] = useState('');
   const [eventHeights, setEventHeights] = useState<{[key: string]: number}>({});
@@ -1058,7 +1072,7 @@ export default function ExploreScreen() {
             {getAppliedFilters().map((filter, index) => (
               <View key={`${filter.type}-${index}`} style={styles.appliedFilterTag}>
                 <Text style={styles.appliedFilterText}>
-                  {filter.type === 'selectedTags' ? ({ 'age_18_plus': '18+', 'age_21_plus': '21+', 'women_only': 'women only', 'men_only': 'men only', 'recurring': 'recurring', 'starting_soon': 'starting soon', 'массовое': 'массовое' }[filter.value as string] || filter.value) : `${filter.label.replace(/:\s*$/, '')}: ${filter.value}`}
+                  {filter.type === 'selectedTags' ? getTagLabel(filter.value as string) : `${filter.label.replace(/:\s*$/, '')}: ${filter.value}`}
                 </Text>
                 <TouchableOpacity
                   style={styles.removeFilterButton}
@@ -1192,7 +1206,7 @@ export default function ExploreScreen() {
                         styles.tagButtonText,
                         isSelected && styles.tagButtonTextSelected
                       ]}>
-                        {{ 'age_18_plus': '18+', 'age_21_plus': '21+', 'age_16_plus': '16+', 'women_only': 'women only', 'men_only': 'men only', 'recurring': 'recurring', 'starting_soon': 'starting soon', 'массовое': 'массовое', 'регулярное': 'recurring' }[tag] || tag}
+                        {getTagLabel(tag)}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -1223,7 +1237,7 @@ export default function ExploreScreen() {
         renderItem={activeTab === 'GLOB' ? renderGlobItem : renderFolderItem}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={listEmpty}
-        contentContainerStyle={{ paddingBottom: 24 }}
+        contentContainerStyle={{ paddingBottom: 100 }}
         removeClippedSubviews={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF8D32" />}
         initialNumToRender={PAGE_SIZE}
