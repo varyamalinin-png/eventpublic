@@ -23,9 +23,9 @@ export class FoldersService {
           include: {
             chat: {
               include: {
-                participants: { include: { user: true } },
-                lastMessage: { include: { sender: true } },
-                event: { include: { organizer: true } },
+                participants: { include: { user: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
+                lastMessage: { include: { sender: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
+                event: { include: { organizer: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
               },
             },
           },

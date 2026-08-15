@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
+import { APP_GUARD } from '@nestjs/core';
 import configuration from './config/configuration';
 import { validationSchema } from './config/validation';
 import { PrismaModule } from './prisma/prisma.module';
@@ -19,6 +22,8 @@ import { StatisticsModule } from './statistics/statistics.module';
 import { ModerationModule } from './moderation/moderation.module';
 import { SearchModule } from './search/search.module';
 import { WSModule } from './ws/ws.module';
+import { VkMiniAppsModule } from './vk-mini-apps/vk-mini-apps.module';
+import { TasksModule } from './tasks/tasks.module';
 
 @Module({
   imports: [
@@ -28,6 +33,8 @@ import { WSModule } from './ws/ws.module';
       envFilePath: ['.env', '.env.local'],
       validationSchema,
     }),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+    ScheduleModule.forRoot(),
     PrismaModule,
     RedisModule,
     WSModule, // Глобальный WebSocket модуль должен быть первым
@@ -45,6 +52,11 @@ import { WSModule } from './ws/ws.module';
     StatisticsModule,
     ModerationModule,
     SearchModule,
+    VkMiniAppsModule,
+    TasksModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

@@ -1,19 +1,23 @@
-import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
-import { EventRole, MembershipStatus, NotificationType } from '@prisma/client';
+import { EventRole, MembershipStatus, NotificationType, Prisma } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ChatsService } from '../chats/chats.service';
 import { WebSocketService } from '../ws/websocket.service';
 import { RecurringEventsService } from './recurring-events.service';
 import { TagsService } from './tags.service';
 import { createLogger } from '../shared/utils/logger';
+import { normalizePublicMediaUrl } from '../shared/public-site';
 
 const logger = createLogger('EventsService');
 
 @Injectable()
 export class EventsService {
+  private normalizeMediaUrl(url: string | null | undefined): string | null {
+    return normalizePublicMediaUrl(url);
+  }
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
@@ -53,6 +57,7 @@ export class EventsService {
       mediaAspectRatio,
       targeting,
       originalMediaUrl,
+      visibility,
       ...eventData
     } = dto;
     
@@ -103,6 +108,7 @@ export class EventsService {
           mediaType: mediaType || null,
           mediaAspectRatio: mediaAspectRatio || null,
           targeting: targeting || null,
+          visibility: visibility ? { type: visibility.type, excludedUsers: visibility.excludedUsers || [] } : null,
           memberships: {
             create: [
               {
@@ -250,35 +256,94 @@ export class EventsService {
     }
   }
 
-  findAll(params: { upcoming?: boolean; organizerId?: string; currentUserId?: string }) {
-    // Если organizerId не указан, но указан currentUserId, возвращаем события где пользователь организатор или участник
-    const whereCondition: any = {};
-    
+  async findAll(params: { upcoming?: boolean; organizerId?: string; currentUserId?: string; limit?: number; cursor?: string }) {
+    // ВАЖНО: этот метод — единственный источник данных для клиентской ленты
+    // (GLOB и FRIENDS вкладки, календарь, профильные сетки — всё фильтруется
+    // из одного и того же полного списка на клиенте). Поэтому наличие
+    // currentUserId само по себе НЕ должно сужать выборку до "мои события" —
+    // единственный параметр, сужающий по организатору, это organizerId.
+    const andConditions: any[] = [];
+
     if (params.organizerId) {
-      // Если указан конкретный organizerId, фильтруем по нему
-      whereCondition.organizerId = params.organizerId;
-    } else if (params.currentUserId) {
-      // Если organizerId не указан, но есть currentUserId, возвращаем события где пользователь организатор или участник
-      whereCondition.OR = [
-        { organizerId: params.currentUserId },
-        {
-          memberships: {
-            some: {
-              userId: params.currentUserId,
-            },
-          },
-        },
-      ];
+      andConditions.push({ organizerId: params.organizerId });
     }
-    
-    // Добавляем фильтр по времени для upcoming
+
     if (params.upcoming) {
-      whereCondition.startTime = { gte: new Date() };
+      andConditions.push({ startTime: { gte: new Date() } });
     }
-    
+
+    // Видимость (visibility) применяем только когда смотрим не свой профиль —
+    // свои и уже присоединённые события всегда видны, вне зависимости от настройки.
+    const viewerId = params.currentUserId;
+    const isOwnProfile = !!(params.organizerId && params.organizerId === viewerId);
+    if (!isOwnProfile) {
+      let friendIds: string[] = [];
+      if (viewerId) {
+        const friendships = await this.prisma.friendship.findMany({
+          where: {
+            OR: [
+              { requesterId: viewerId, status: 'ACCEPTED' },
+              { addresseeId: viewerId, status: 'ACCEPTED' },
+            ],
+          },
+          select: { requesterId: true, addresseeId: true },
+        });
+        friendIds = friendships.map(f =>
+          f.requesterId === viewerId ? f.addresseeId : f.requesterId,
+        );
+      }
+
+      const visibilityOr: any[] = [
+        { visibility: { equals: Prisma.AnyNull } },
+        { visibility: { path: ['type'], equals: 'all' } },
+      ];
+      if (viewerId) {
+        // Свои и уже присоединённые события видны всегда.
+        visibilityOr.push({ organizerId: viewerId });
+        visibilityOr.push({ memberships: { some: { userId: viewerId } } });
+        if (friendIds.length > 0) {
+          visibilityOr.push({
+            AND: [
+              { visibility: { path: ['type'], equals: 'friends' } },
+              { organizerId: { in: friendIds } },
+            ],
+          });
+        }
+        visibilityOr.push({
+          AND: [
+            { visibility: { path: ['type'], equals: 'all_except_friends' } },
+            { organizerId: { notIn: [...friendIds, viewerId] } },
+          ],
+        });
+        visibilityOr.push({
+          AND: [
+            { visibility: { path: ['type'], equals: 'all_except_excluded' } },
+            { NOT: { visibility: { path: ['excludedUsers'], array_contains: viewerId } } },
+          ],
+        });
+        visibilityOr.push({
+          AND: [
+            { visibility: { path: ['type'], equals: 'me_and_excluded' } },
+            { visibility: { path: ['excludedUsers'], array_contains: viewerId } },
+          ],
+        });
+      } else {
+        // Анонимный зритель точно не друг организатора и не может быть в
+        // списке-исключении по id — эти два режима остаются для него видимы.
+        visibilityOr.push({ visibility: { path: ['type'], equals: 'all_except_friends' } });
+        visibilityOr.push({ visibility: { path: ['type'], equals: 'all_except_excluded' } });
+      }
+
+      andConditions.push({ OR: visibilityOr });
+    }
+
+    const whereCondition: any = andConditions.length > 0 ? { AND: andConditions } : {};
+
     return this.prisma.event.findMany({
       where: whereCondition,
       orderBy: { startTime: 'asc' },
+      ...(params.limit ? { take: params.limit } : {}),
+      ...(params.cursor ? { skip: 1, cursor: { id: params.cursor } } : {}),
       include: {
         organizer: {
           select: {
@@ -398,7 +463,47 @@ export class EventsService {
       });
     }
 
+    if (event && !(await this.isEventVisibleToViewer(event, currentUserId))) {
+      // Не отличаем "не найдено" от "нет доступа" — иначе прямой ID
+      // раскрывал бы сам факт существования приватного события.
+      throw new NotFoundException('Event not found');
+    }
+
     return event;
+  }
+
+  // Та же логика видимости, что и в findAll(), но для одного уже
+  // загруженного события — используется findOne(), чтобы прямой переход
+  // по ссылке/ID не обходил настройку visibility (карта, диплинки, шаринг).
+  private async isEventVisibleToViewer(event: { organizerId: string; visibility: any; memberships?: { userId: string }[] }, viewerId?: string): Promise<boolean> {
+    const visibility = event.visibility as { type?: string; excludedUsers?: string[] } | null;
+    if (!visibility || !visibility.type || visibility.type === 'all') return true;
+    if (viewerId && viewerId === event.organizerId) return true;
+    if (viewerId && event.memberships?.some(m => m.userId === viewerId)) return true;
+
+    if (visibility.type === 'only_me') return false;
+    if (visibility.type === 'all_except_excluded') {
+      return !viewerId || !(visibility.excludedUsers || []).includes(viewerId);
+    }
+    if (visibility.type === 'me_and_excluded') {
+      return !!viewerId && (visibility.excludedUsers || []).includes(viewerId);
+    }
+    if (visibility.type === 'friends' || visibility.type === 'all_except_friends') {
+      if (!viewerId) return visibility.type === 'all_except_friends';
+      const friendship = await this.prisma.friendship.findFirst({
+        where: {
+          status: 'ACCEPTED',
+          OR: [
+            { requesterId: viewerId, addresseeId: event.organizerId },
+            { requesterId: event.organizerId, addresseeId: viewerId },
+          ],
+        },
+        select: { id: true },
+      });
+      const isFriend = !!friendship;
+      return visibility.type === 'friends' ? isFriend : !isFriend;
+    }
+    return true;
   }
 
   async update(id: string, userId: string, dto: UpdateEventDto) {
@@ -424,9 +529,10 @@ export class EventsService {
       mediaType,
       mediaAspectRatio,
       targeting,
+      visibility,
       ...eventData
     } = dto;
-    
+
     // Определяем, какие поля изменились
     const changedFields: string[] = [];
     if (dto.location && dto.location !== event.location) {
@@ -471,6 +577,7 @@ export class EventsService {
         ...(mediaType !== undefined ? { mediaType } : {}),
         ...(mediaAspectRatio !== undefined ? { mediaAspectRatio } : {}),
         ...(targeting !== undefined ? { targeting } : {}),
+        ...(visibility !== undefined ? { visibility: { type: visibility.type, excludedUsers: visibility.excludedUsers || [] } } : {}),
       },
       include: {
         organizer: {
@@ -644,6 +751,14 @@ export class EventsService {
     const event = await this.prisma.event.findUnique({ where: { id: eventId } });
     if (!event) throw new BadRequestException('Event not found');
 
+    // Check event capacity before allowing join
+    const currentCount = await this.prisma.eventMembership.count({
+      where: { eventId, status: { in: [MembershipStatus.ACCEPTED, MembershipStatus.PENDING] } },
+    });
+    if (event.maxParticipants && currentCount >= event.maxParticipants) {
+      throw new BadRequestException('Event is full');
+    }
+
     const existing = await this.prisma.eventMembership.findUnique({
       where: { userId_eventId: { userId, eventId } },
     });
@@ -764,6 +879,21 @@ export class EventsService {
         membershipId: membership.id,
       });
     } else {
+      // Персистентное уведомление организатору о новой заявке — раньше для
+      // обычных (не массовых) событий уходил только WebSocket-евент, и если
+      // организатор не был online в этот момент, заявка терялась бесследно.
+      await this.notificationsService.createNotification({
+        userId: event.organizerId,
+        type: NotificationType.EVENT_JOIN_REQUEST,
+        payload: {
+          eventId,
+          actorId: userId,
+          actorName: user.name || user.username,
+          eventTitle: event.title,
+          eventMediaUrl: event.mediaUrl || undefined,
+        },
+      });
+
       // Отправляем WebSocket событие о создании нового запроса на участие
       // Отправляем организатору события
       this.websocketService.emitToUser(event.organizerId, 'event:request:new', {
@@ -868,6 +998,27 @@ export class EventsService {
       }
     }
 
+    // Персистентное уведомление участнику о принятии заявки — раньше уходил
+    // только WebSocket-евент ('event:request:status'), и если участник не
+    // был online в момент принятия, он никогда не узнавал об этом.
+    if (accept) {
+      const organizer = await this.prisma.user.findUnique({
+        where: { id: organizerId },
+        select: { name: true, username: true },
+      });
+      await this.notificationsService.createNotification({
+        userId: membership.userId,
+        type: NotificationType.EVENT_REQUEST_ACCEPTED,
+        payload: {
+          eventId,
+          actorId: organizerId,
+          actorName: organizer?.name || organizer?.username,
+          eventTitle: event.title,
+          eventMediaUrl: event.mediaUrl || undefined,
+        },
+      });
+    }
+
     // Отправляем WebSocket событие об обновлении статуса запроса
     await this.websocketService.emitToEventParticipants(
       eventId,
@@ -881,7 +1032,7 @@ export class EventsService {
         type: 'request',
       },
     );
-    
+
     // Отправляем пользователю, который отправил запрос
     this.websocketService.emitToUser(membership.userId, 'event:request:status', {
       eventId,
@@ -1776,7 +1927,7 @@ export class EventsService {
   listMembers(eventId: string) {
     return this.prisma.eventMembership.findMany({
       where: { eventId, status: MembershipStatus.ACCEPTED },
-      include: { user: true },
+      include: { user: { select: { id: true, name: true, username: true, avatarUrl: true } } },
     });
   }
 
@@ -1923,6 +2074,115 @@ export class EventsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async getRecommendedEvents(userId: string) {
+    // 1. Get user's past events to understand their interests (tags, locations)
+    const userMemberships = await this.prisma.eventMembership.findMany({
+      where: { userId, status: MembershipStatus.ACCEPTED },
+      select: { eventId: true },
+    });
+    const userEventIds = userMemberships.map(m => m.eventId);
+
+    const userEvents = userEventIds.length > 0
+      ? await this.prisma.event.findMany({
+          where: { id: { in: userEventIds } },
+          select: { customTags: true, autoTags: true, location: true },
+        })
+      : [];
+
+    // Collect user's preferred tags
+    const userTags = new Set<string>();
+    userEvents.forEach(e => {
+      (e.customTags || []).forEach(t => userTags.add(t));
+      (e.autoTags || []).forEach(t => userTags.add(t));
+    });
+
+    // 2. Get user's friends
+    const friendships = await this.prisma.friendship.findMany({
+      where: {
+        OR: [
+          { requesterId: userId, status: 'ACCEPTED' },
+          { addresseeId: userId, status: 'ACCEPTED' },
+        ],
+      },
+      select: { requesterId: true, addresseeId: true },
+    });
+    const friendIds = friendships.map(f =>
+      f.requesterId === userId ? f.addresseeId : f.requesterId,
+    );
+
+    // 3. Get upcoming events
+    const upcomingEvents = await this.prisma.event.findMany({
+      where: {
+        startTime: { gte: new Date() },
+        id: { notIn: userEventIds }, // Exclude events user already joined
+      },
+      include: {
+        organizer: {
+          select: {
+            id: true,
+            name: true,
+            username: true,
+            avatarUrl: true,
+          },
+        },
+        memberships: {
+          where: { status: MembershipStatus.ACCEPTED },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                username: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { startTime: 'asc' },
+      take: 100, // Limit candidate pool
+    });
+
+    // 4. Score each event
+    const scoredEvents = upcomingEvents.map(event => {
+      let score = 0;
+
+      // Check if friends are attending (highest signal)
+      const friendsAttending = event.memberships.filter(m => friendIds.includes(m.userId));
+      score += friendsAttending.length * 10;
+
+      // Check if organizer is a friend
+      if (friendIds.includes(event.organizerId)) {
+        score += 5;
+      }
+
+      // Check tag overlap
+      const eventTags = [...(event.customTags || []), ...(event.autoTags || [])];
+      const tagOverlap = eventTags.filter(t => userTags.has(t)).length;
+      score += tagOverlap * 3;
+
+      // Check location overlap
+      if (event.location) {
+        const locationMatch = userEvents.some(ue => ue.location && ue.location === event.location);
+        if (locationMatch) score += 2;
+      }
+
+      return { event, score, friendsAttending: friendsAttending.map(m => m.user) };
+    });
+
+    // 5. Sort by score and return top 10
+    scoredEvents.sort((a, b) => b.score - a.score);
+
+    return scoredEvents
+      .filter(s => s.score > 0)
+      .slice(0, 10)
+      .map(s => ({
+        ...s.event,
+        recommendationScore: s.score,
+        friendsAttending: s.friendsAttending,
+      }));
   }
 
   async setPersonalPhoto(eventId: string, userId: string, photoUrl: string) {
@@ -2159,7 +2419,7 @@ export class EventsService {
           senderId: userId,
           content: `${userName} покинул(а) событие`,
         },
-        include: { sender: true },
+        include: { sender: { select: { id: true, name: true, username: true, avatarUrl: true } } },
       });
 
       await this.prisma.chat.update({

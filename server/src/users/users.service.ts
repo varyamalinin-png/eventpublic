@@ -14,8 +14,13 @@ export class UsersService {
     private readonly storage: StorageService,
   ) {}
 
-  findById(id: string) {
-    return this.prisma.user.findUnique({
+  private normalizeLegacyPublicUrl(url: string | null) {
+    if (!url) return url;
+    return url.replace('://www.iventapp.ru', '://iwent.ru').replace('://iventapp.ru', '://iwent.ru');
+  }
+
+  async findById(id: string) {
+    const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
         id: true,
@@ -37,6 +42,9 @@ export class UsersService {
         updatedAt: true,
       },
     });
+
+    if (!user) return user;
+    return { ...user, avatarUrl: this.normalizeLegacyPublicUrl(user.avatarUrl) };
   }
 
   findByEmail(email: string) {
@@ -75,6 +83,7 @@ export class UsersService {
   async createUser(data: {
     email: string;
     username: string;
+    phone?: string | null;
     passwordHash?: string | null;
     name?: string;
     avatarUrl?: string;
@@ -117,6 +126,9 @@ export class UsersService {
   async updateProfile(id: string, data: UpdateUserDto) {
     try {
       const updateData: any = { ...data };
+      if ('avatarUrl' in updateData) {
+        updateData.avatarUrl = this.normalizeLegacyPublicUrl(updateData.avatarUrl ?? null);
+      }
       
       // КРИТИЧЕСКИ ВАЖНО: Защита от установки username в пустую строку или "user"
       // Если username передан, но он пустой или равен "user", не обновляем его
@@ -130,7 +142,7 @@ export class UsersService {
       if (updateData.dateOfBirth && typeof updateData.dateOfBirth === 'string') {
         updateData.dateOfBirth = new Date(updateData.dateOfBirth);
       }
-      return await this.prisma.user.update({
+      const user = await this.prisma.user.update({
         where: { id },
         data: updateData,
         select: {
@@ -153,6 +165,7 @@ export class UsersService {
           updatedAt: true,
         },
       });
+      return { ...user, avatarUrl: this.normalizeLegacyPublicUrl(user.avatarUrl) };
     } catch (error: any) {
       if (error.code === 'P2002') {
         throw new ConflictException('Field must be unique');

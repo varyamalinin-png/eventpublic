@@ -37,8 +37,8 @@ export class EventFoldersController {
   create(
     @RequestUser('userId') userId: string,
     @Body() body: { name: string; description?: string },
-    @UploadedFile() coverPhoto?: Express.Multer.File,
     @Req() req: any,
+    @UploadedFile() coverPhoto?: Express.Multer.File,
   ) {
     try {
       logger.info(`📤 POST /event-folders, userId: ${userId}`);
@@ -58,6 +58,13 @@ export class EventFoldersController {
     }
   }
 
+  @Get('user/:ownerId')
+  listByOwner(@RequestUser('userId') userId: string, @Param('ownerId') ownerId: string) {
+    // Разрешаем просмотр папок других пользователей (публичные папки)
+    logger.info(`📂 GET /event-folders/user/${ownerId}, requested by userId: ${userId}`);
+    return this.eventFoldersService.list(ownerId);
+  }
+
   @Get()
   list(@RequestUser('userId') userId: string) {
     return this.eventFoldersService.list(userId);
@@ -65,6 +72,7 @@ export class EventFoldersController {
 
   @Get(':folderId')
   getById(@RequestUser('userId') userId: string, @Param('folderId') folderId: string) {
+    logger.info(`📂 GET /event-folders/${folderId}, requested by userId: ${userId}`);
     return this.eventFoldersService.getById(userId, folderId);
   }
 

@@ -1,0 +1,25 @@
+{
+  "name": "iventapp-vk-mini-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host"
+  },
+  "dependencies": {
+    "@vkontakte/icons": "^2.92.0",
+    "@vkontakte/vk-bridge": "^2.15.11",
+    "@vkontakte/vkui": "^6.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.4.2",
+    "vite": "^5.4.0"
+  }
+}

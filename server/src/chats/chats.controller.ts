@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ChatsService } from './chats.service';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { RequestUser } from '../shared/decorators/request-user.decorator';
@@ -24,8 +24,13 @@ export class ChatsController {
   }
 
   @Get(':chatId/messages')
-  listMessages(@RequestUser('userId') userId: string, @Param('chatId') chatId: string) {
-    return this.chatsService.listMessages(userId, chatId);
+  listMessages(
+    @RequestUser('userId') userId: string,
+    @Param('chatId') chatId: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.chatsService.listMessages(userId, chatId, cursor, limit ? parseInt(limit, 10) : undefined);
   }
 
   @Post(':chatId/messages')
@@ -35,6 +40,14 @@ export class ChatsController {
     @Body() dto: CreateMessageDto,
   ) {
     return this.chatsService.createMessage(userId, chatId, dto);
+  }
+
+  @Post(':chatId/read')
+  markRead(
+    @RequestUser('userId') userId: string,
+    @Param('chatId') chatId: string,
+  ) {
+    return this.chatsService.markMessagesAsRead(userId, chatId);
   }
 
   @Post('events/:eventId')
@@ -52,6 +65,26 @@ export class ChatsController {
     @Body() body: { otherUserId: string },
   ) {
     return this.chatsService.createPersonalChat(userId, body.otherUserId);
+  }
+
+  @Post(':chatId/messages/:messageId/reactions')
+  addReaction(
+    @RequestUser('userId') userId: string,
+    @Param('chatId') chatId: string,
+    @Param('messageId') messageId: string,
+    @Body() body: { emoji: string },
+  ) {
+    return this.chatsService.addReaction(chatId, messageId, userId, body.emoji);
+  }
+
+  @Delete(':chatId/messages/:messageId/reactions/:emoji')
+  removeReaction(
+    @RequestUser('userId') userId: string,
+    @Param('chatId') chatId: string,
+    @Param('messageId') messageId: string,
+    @Param('emoji') emoji: string,
+  ) {
+    return this.chatsService.removeReaction(chatId, messageId, userId, emoji);
   }
 
   @Delete(':chatId')

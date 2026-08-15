@@ -156,6 +156,15 @@ export class EventProfilesController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post('posts/:postId/like')
+  async toggleLike(
+    @Param('postId') postId: string,
+    @RequestUser('userId') userId: string,
+  ) {
+    return this.eventProfilesService.toggleLike(postId, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Patch('posts/:postId')
   async updatePost(
     @Param('eventId') eventId: string,

@@ -17,8 +17,8 @@ export class FriendsService {
         status: FriendshipStatus.ACCEPTED,
       },
       include: {
-        requester: true,
-        addressee: true,
+        requester: { select: { id: true, name: true, username: true, avatarUrl: true } },
+        addressee: { select: { id: true, name: true, username: true, avatarUrl: true } },
       },
     });
   }
@@ -51,7 +51,7 @@ export class FriendsService {
           return this.prisma.friendship.update({
             where: { id: existing.id },
             data: { status: FriendshipStatus.PENDING },
-            include: { requester: true, addressee: true },
+            include: { requester: { select: { id: true, name: true, username: true, avatarUrl: true } }, addressee: { select: { id: true, name: true, username: true, avatarUrl: true } } },
           });
         }
       }
@@ -68,7 +68,7 @@ export class FriendsService {
               addresseeId: friendId,
               status: FriendshipStatus.PENDING,
             },
-            include: { requester: true, addressee: true },
+            include: { requester: { select: { id: true, name: true, username: true, avatarUrl: true } }, addressee: { select: { id: true, name: true, username: true, avatarUrl: true } } },
           });
         }
       }
@@ -83,8 +83,8 @@ export class FriendsService {
         status: FriendshipStatus.PENDING,
       },
       include: {
-        requester: true,
-        addressee: true,
+        requester: { select: { id: true, name: true, username: true, avatarUrl: true } },
+        addressee: { select: { id: true, name: true, username: true, avatarUrl: true } },
       },
     });
 
@@ -120,8 +120,8 @@ export class FriendsService {
         },
         orderBy: { createdAt: 'desc' },
         include: {
-          requester: true,
-          addressee: true,
+          requester: { select: { id: true, name: true, username: true, avatarUrl: true } },
+          addressee: { select: { id: true, name: true, username: true, avatarUrl: true } },
         },
       }),
       this.prisma.friendship.findMany({
@@ -131,8 +131,8 @@ export class FriendsService {
         },
         orderBy: { createdAt: 'desc' },
         include: {
-          requester: true,
-          addressee: true,
+          requester: { select: { id: true, name: true, username: true, avatarUrl: true } },
+          addressee: { select: { id: true, name: true, username: true, avatarUrl: true } },
         },
       }),
     ]);
@@ -163,8 +163,8 @@ export class FriendsService {
         status: accept ? FriendshipStatus.ACCEPTED : FriendshipStatus.REJECTED,
       },
       include: {
-        requester: true,
-        addressee: true,
+        requester: { select: { id: true, name: true, username: true, avatarUrl: true } },
+        addressee: { select: { id: true, name: true, username: true, avatarUrl: true } },
       },
     });
 

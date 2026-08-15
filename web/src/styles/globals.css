@@ -2,13 +2,42 @@
   box-sizing: border-box;
   padding: 0;
   margin: 0;
+  /* Убираем 300ms задержку клика на мобильных — браузер не ждёт double-tap */
+  touch-action: manipulation;
+}
+
+/* Нативный скролл на iOS (плавный, без рывков) */
+[style*="overflow-y: auto"],
+[style*="overflow-y:auto"],
+[style*="overflow: auto"],
+[style*="overflow:auto"] {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* GPU-ускорение для фиксированных элементов (таббар, хедер) */
+[style*="position: fixed"],
+[style*="position:fixed"],
+.web-tab-bar {
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Индикатор загрузки страницы (PageLoading) */
+@keyframes page-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 html {
   width: 100%;
   max-width: 100vw;
   overflow-x: hidden;
-  background-color: #0f0f0f;
+  background-color: #0a0a0c;
 }
 
 /* Для мобильных центрируем контент */
@@ -21,23 +50,16 @@ html {
 
 body {
   width: 100%;
-  margin: 0;
+  max-width: 500px !important;
+  margin: 0 auto !important;
   overflow-x: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #0f0f0f;
+  background-color: #0a0a0c;
   color: #fff;
-}
-
-/* Для мобильных сохраняем ограничение ширины */
-@media (max-width: 767px) {
-  body {
-    margin: 0 auto;
-    max-width: 500px;
-  }
 }
 
 a {
@@ -45,22 +67,21 @@ a {
   text-decoration: none;
 }
 
-/* React Native Web стили */
-#__next {
-  height: 100vh;
-  width: 100%;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  background-color: #0f0f0f;
+/* Event card containment on desktop */
+img {
+  max-width: 100% !important;
+  object-fit: cover;
 }
 
-/* Для мобильных сохраняем ограничение ширины */
-@media (max-width: 767px) {
-  #__next {
-    margin: 0 auto;
-    max-width: 500px;
-  }
+/* React Native Web стили */
+#__next {
+  min-height: 100vh;
+  width: 100%;
+  max-width: 500px !important;
+  margin: 0 auto !important;
+  display: flex;
+  flex-direction: column;
+  background-color: #0a0a0c;
 }
 
 /* Стили для react-native-web TextInput - исправление проблемы с интерактивностью */
@@ -126,38 +147,149 @@ button:not(:disabled),
 input:focus,
 textarea:focus {
   outline: none;
-  border-color: #8B5CF6 !important;
+  border-color: #ff8d32 !important;
 }
 
-/* Стили для нижней панели навигации в вебе */
-/* КРИТИЧЕСКИЕ СТИЛИ ДЛЯ WEB TAB BAR - всегда видимая панель */
+/* Focus indicators for accessibility */
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #FF8D32;
+  outline-offset: 2px;
+}
+
+/* Нижняя панель навигации — минималистичный стиль */
 .web-tab-bar,
 nav.web-tab-bar,
 nav[role="tablist"].web-tab-bar {
   position: fixed !important;
-  bottom: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  z-index: 99999 !important;
-  display: flex !important;
+  bottom: max(14px, env(safe-area-inset-bottom)) !important;
+  left: 50% !important;
+  right: auto !important;
+  z-index: 999 !important;
   visibility: visible !important;
   opacity: 1 !important;
-  height: 60px !important;
-  background-color: #121212 !important;
-  border-top: 1px solid #2a2a2a !important;
-  width: 100% !important;
-  max-width: 500px !important;
-  margin: 0 auto !important;
+  height: 64px !important;
   box-sizing: border-box !important;
-  -webkit-transform: translateZ(0) !important;
-  transform: translateZ(0) !important;
+  background: rgba(22, 22, 26, 0.72) !important;
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-radius: 24px !important;
+  width: calc(100% - 28px) !important;
+  max-width: 472px !important;
+  margin: 0 !important;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.45) !important;
+  -webkit-transform: translateX(-50%) translateZ(0) !important;
+  transform: translateX(-50%) translateZ(0) !important;
   -webkit-backface-visibility: hidden !important;
   backface-visibility: hidden !important;
   will-change: transform !important;
+  display: flex !important;
 }
 
-/* Ограничиваем ширину нижней панели навигации до 500px и центрируем на мобильных */
-@media (min-width: 500px) and (max-width: 767px) {
+/* Контейнер кнопок — строго в ряд, без переноса */
+nav.web-tab-bar .web-tab-bar__inner,
+.web-tab-bar__inner {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  height: 56px !important;
+  width: 100% !important;
+  padding: 0 8px !important;
+  box-sizing: border-box !important;
+  gap: 0 !important;
+}
+
+/* Каждая кнопка ровно 20% ширины — жёстко, чтобы не наслаивались */
+nav.web-tab-bar .web-tab-bar__inner .web-tab-bar__item,
+nav.web-tab-bar .web-tab-bar__item,
+.web-tab-bar__item {
+  display: flex !important;
+  flex: 0 0 20% !important;
+  width: 20% !important;
+  max-width: 20% !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 2px !important;
+  background: none !important;
+  border: none !important;
+  cursor: pointer !important;
+  padding: 4px 2px !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+  transition: color 0.15s ease !important;
+  position: relative !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+.web-tab-bar__item:hover {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.web-tab-bar__item--active {
+  color: #fff;
+}
+
+.web-tab-bar__item--active .web-tab-bar__label {
+  font-weight: 500;
+}
+
+nav.web-tab-bar .web-tab-bar__icon,
+.web-tab-bar__icon {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  position: relative !important;
+  width: 28px !important;
+  min-width: 28px !important;
+  max-width: 28px !important;
+  height: 28px !important;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+nav.web-tab-bar .web-tab-bar__icon svg,
+.web-tab-bar__icon svg {
+  display: block !important;
+  flex-shrink: 0 !important;
+}
+
+.web-tab-bar__label {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  font-weight: 400;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.web-tab-bar__badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  background: #e53935;
+  border-radius: 10px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  border: 1.5px solid rgba(15, 15, 15, 0.98);
+}
+
+/* Ограничиваем ширину нижней панели навигации до 500px и центрируем на экранах больше 500px */
+@media (min-width: 500px) {
   nav[role="tablist"],
   div[role="tablist"],
   nav[role=tablist],
@@ -176,8 +308,9 @@ nav[role="tablist"].web-tab-bar {
     transform: translateX(-50%) !important;
     bottom: 0 !important;
     box-sizing: border-box !important;
-    z-index: 9999 !important;
+    z-index: 999 !important;
     display: flex !important;
+    right: auto !important;
   }
 }
 
@@ -201,12 +334,17 @@ nav[role="tablist"].web-tab-bar {
     left: 0 !important;
     bottom: 0 !important;
     box-sizing: border-box !important;
-    z-index: 9999 !important;
+    z-index: 999 !important;
     display: flex !important;
     transform: none !important;
   }
 }
 
+/* Полоска активной вкладки Explore (GLOB / FRIENDS / Организаторы) — белая на вебе */
+#explore-tabs-bar [data-active="true"],
+#explore-organizers-bar [data-active="true"] {
+  border-bottom: 2px solid #F0F0F0 !important;
+}
 
 /* Стили для изображений в MemoryPost на вебе */
 /* Исправление для Image из react-native-web */
@@ -251,19 +389,93 @@ img[style*="resizeMode: \"cover\""] {
   object-fit: cover !important;
 }
 
-/* Критическое исправление для контейнеров с aspectRatio */
-/* Исправляем родительские контейнеры (TouchableOpacity, View) внутри контейнеров с aspectRatio */
-div[style*="aspectRatio: 0.75"] > div,
-div[style*="aspectRatio:0.75"] > div,
-div[style*="aspect-ratio: 0.75"] > div,
-div[style*="aspect-ratio:0.75"] > div,
-div[style*="aspectRatio: 3 / 4"] > div,
-div[style*="aspectRatio:3/4"] > div,
-div[style*="aspect-ratio: 3 / 4"] > div,
-div[style*="aspect-ratio:3/4"] > div {
+/* EventCard: превью события (полная ширина, cover). */
+[id^="event-card-hero-"] {
+  width: 100% !important;
+  max-width: 100% !important;
+  left: 0 !important;
+  right: 0 !important;
+  box-sizing: border-box !important;
+}
+[id^="event-card-hero-"] img {
+  object-fit: cover !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+}
+
+/* FIX: Production Next.js converts RNW styles to CSS classes where .css-view-g5y9jx
+   sets position:relative and can override our position:absolute class depending on
+   CSS file order. These !important rules ensure the image always fills the card. */
+/* aspect-ratio container — must be positioned so children can absolute-fill it */
+[id^="event-card-hero-"] > div:first-child {
+  position: relative !important;
+  overflow: hidden !important;
+}
+/* image outer div — must fill the aspect container */
+[id^="event-card-hero-"] > div:first-child > div:first-child {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+/* image inner div (background-image) — must fill the outer div */
+[id^="event-card-hero-"] > div:first-child > div:first-child > div:first-child {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  background-size: cover !important;
+  background-position: center !important;
+}
+
+/* Аватар организатора на карточке: глобальные img 100%×100% contain не должны обнулять картинку */
+[id^="event-organizer-avatar-"],
+img[id^="event-organizer-avatar-"],
+[id^="event-organizer-avatar-"] img {
+  object-fit: cover !important;
+  width: 69px !important;
+  height: 69px !important;
+  max-width: 69px !important;
+  max-height: 69px !important;
+  border-radius: 50% !important;
+  box-sizing: border-box !important;
+}
+
+/* Аватарки: на web иногда становятся квадратными из-за стилей react-native-web/обёрток */
+img[style*="width: 18px"][style*="height: 18px"],
+img[style*="width:18px"][style*="height:18px"],
+img[style*="width: 24px"][style*="height: 24px"],
+img[style*="width:24px"][style*="height:24px"],
+img[style*="width: 40px"][style*="height: 40px"],
+img[style*="width:40px"][style*="height:40px"],
+img[style*="width: 50px"][style*="height: 50px"],
+img[style*="width:50px"][style*="height:50px"],
+img[style*="width: 69px"][style*="height: 69px"],
+img[style*="width:69px"][style*="height:69px"] {
+  border-radius: 9999px !important;
+  overflow: hidden !important;
+}
+
+/* Исправление для первого дочернего элемента (обёртка изображения) внутри контейнеров с aspectRatio */
+/* Только первый ребёнок (картинка) получает 100%/100%, остальные (оверлеи) остаются абсолютными */
+div[style*="aspectRatio: 0.75"] > div:first-child,
+div[style*="aspectRatio:0.75"] > div:first-child,
+div[style*="aspect-ratio: 0.75"] > div:first-child,
+div[style*="aspect-ratio:0.75"] > div:first-child,
+div[style*="aspectRatio: 3 / 4"] > div:first-child,
+div[style*="aspectRatio:3/4"] > div:first-child,
+div[style*="aspect-ratio: 3 / 4"] > div:first-child,
+div[style*="aspect-ratio:3/4"] > div:first-child {
   height: 100% !important;
   width: 100% !important;
-  position: relative !important;
 }
 
 /* УБРАНО: Агрессивные правила, которые влияли на все изображения */
@@ -277,21 +489,66 @@ div[style*="aspect-ratio:3/4"] > div {
   }
 }
 
+/* Мобильный layout - ограничиваем ширину на всех экранах */
+.mobile-layout {
+  max-width: 500px !important;
+  margin: 0 auto !important;
+  width: 100% !important;
+}
+
+/* Чужой профиль: контент может расти, обёртка прокручивается */
+.profile-page-scroll > div,
+.chat-page-scroll > div {
+  height: 100vh !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+}
+/* Корневой View профиля — пусть растёт по контенту, чтобы обёртка прокручивалась */
+.profile-page-scroll > div > div {
+  min-height: min-content !important;
+  height: auto !important;
+  flex: none !important;
+}
+/* Корневой View чата — всегда занимает всю доступную высоту контейнера */
+.chat-page-scroll > div > div {
+  min-height: 100% !important;
+  height: 100% !important;
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
 /* На мобильных показываем мобильный layout */
 @media (max-width: 767px) {
   .mobile-layout {
     display: flex !important;
     flex-direction: column !important;
     width: 100% !important;
-    height: 100vh !important;
+    /* Используем 100dvh, чтобы высота была стабильной на мобильных браузерах (адресная строка, safe‑area и т.п.) */
+    height: 100dvh !important;
     position: relative !important;
   }
   
-  /* Убеждаемся, что контент не перекрывает нижнюю панель */
-  .mobile-layout > *:not(.web-tab-bar):not(nav.web-tab-bar):not([role="tablist"]) {
+  /* Убеждаемся, что контент не перекрывает нижнюю панель.
+     Для страницы чата не добавляем дополнительный padding-bottom,
+     так как там уже есть собственный layout инпута.
+     calc(64px + env(safe-area-inset-bottom)) — высота таббара + safe area */
+  .mobile-layout:not(.chat-page-scroll):not(.explore-page-scroll) > *:not(.web-tab-bar):not(nav.web-tab-bar):not([role="tablist"]) {
     flex: 1 !important;
     overflow-y: auto !important;
-    padding-bottom: 70px !important; /* Отступ для нижней панели */
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Explore использует собственный ScrollView внутри RN Web.
+     Внешний overflow создавал второй скролл и "пустой хвост".
+     padding-bottom резервирует место для фиксированного нижнего таббара,
+     чтобы ScrollView не уходил под него и лента не «срезалась». */
+  .mobile-layout.explore-page-scroll > *:not(.web-tab-bar):not(nav.web-tab-bar):not([role="tablist"]) {
+    flex: 1 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)) !important;
   }
   
   /* КРИТИЧЕСКОЕ: Гарантируем видимость WebTabBar на мобильных (особенно для Safari iOS) */
@@ -302,7 +559,7 @@ div[style*="aspect-ratio:3/4"] > div {
     bottom: 0 !important;
     left: 0 !important;
     right: 0 !important;
-    z-index: 99999 !important;
+    z-index: 999 !important;
     width: 100% !important;
     max-width: 500px !important;
     margin-left: auto !important;
@@ -310,9 +567,10 @@ div[style*="aspect-ratio:3/4"] > div {
     display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
-    height: 60px !important;
-    background-color: #121212 !important;
-    border-top: 1px solid #2a2a2a !important;
+    height: 64px !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+    background: rgba(15, 15, 15, 0.98) !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
     -webkit-transform: translateZ(0) !important;
     transform: translateZ(0) !important;
     -webkit-backface-visibility: hidden !important;
@@ -340,7 +598,7 @@ div[style*="aspect-ratio:3/4"] > div {
     bottom: 0 !important;
     left: 0 !important;
     right: 0 !important;
-    z-index: 1000 !important;
+    z-index: 999 !important;
     width: 100% !important;
     max-width: 500px !important;
     margin-left: auto !important;
@@ -371,5 +629,77 @@ div[style*="aspect-ratio:3/4"] > div {
     width: 100% !important;
     max-width: 100% !important;
     margin: 0 !important;
+  }
+}
+
+/* Политика конфиденциальности: полная ширина вместо колонки 500px приложения */
+body:has(.privacy-legal-page) {
+  max-width: 100% !important;
+}
+
+#__next:has(.privacy-legal-page) {
+  max-width: 100% !important;
+}
+
+html:has(.privacy-legal-page) {
+  display: block;
+}
+
+/* ===========================================================
+   Десктопная версия (>=1024px): боковая навигация + широкий холст
+   Сайдбар (см. WebTabBar.tsx) занимает 248px слева, контент сдвигается
+   и центрируется в комфортной колонке вместо узких 500px.
+   =========================================================== */
+@media (min-width: 1024px) {
+  html {
+    display: block;
+  }
+
+  body,
+  #__next {
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+
+  /* Внутренние экраны калибруют абсолютные панели/свайпы под ширину ~500px —
+     поэтому сохраняем "родную" ширину контента и просто красиво центрируем
+     его в пространстве справа от сайдбара, в собственной "карточке"-холсте.
+     height (не min-height) + overflow-y: auto даёт фиксированную «телефонную»
+     карточку, внутри которой контент скроллится — так же, как на мобильных. */
+  .mobile-layout {
+    max-width: 500px !important;
+    margin-left: calc(248px + max(24px, (100vw - 248px - 500px) / 2)) !important;
+    margin-right: auto !important;
+    margin-top: 28px !important;
+    margin-bottom: 28px !important;
+    border-radius: 24px;
+    border: 1px solid rgba(255,255,255,0.07);
+    overflow-x: hidden;
+    overflow-y: auto;    /* Скролл внутри карточки, как на реальном телефоне */
+    box-shadow: 0 24px 80px rgba(0,0,0,0.45);
+    height: calc(100vh - 56px) !important;  /* Фиксированная высота = контент скроллится внутри */
+  }
+
+  /* Прячем мобильный нижний таб-бар (сайдбар берёт на себя навигацию) */
+  .mobile-layout .web-tab-bar,
+  .mobile-layout nav.web-tab-bar,
+  .mobile-layout nav[role="tablist"].web-tab-bar,
+  nav.iwent-bottombar {
+    display: none !important;
+  }
+
+  /* Контент внутри карточки — flex:1 чтобы RN ScrollView получал ограниченную высоту */
+  .mobile-layout > *:not(.web-tab-bar):not(nav.web-tab-bar):not([role="tablist"]) {
+    flex: 1 !important;
+    min-height: 0 !important;
+    /* Убираем padding-bottom: таббара нет, запаса не нужно */
+  }
+}
+
+/* Очень широкие экраны (>=1320px): сдвигаем "холст" чуть левее, освобождая
+   место под правую панель (DesktopRightRail), сохраняя баланс композиции. */
+@media (min-width: 1320px) {
+  .mobile-layout {
+    margin-left: calc(248px + max(24px, (100vw - 248px - 500px - 300px - 24px) / 2)) !important;
   }
 }

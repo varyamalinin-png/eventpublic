@@ -96,12 +96,26 @@ fi
 echo ""
 
 echo "═══════════════════════════════════════════════════════════"
+echo "5.1 Отправка писем (Yandex Cloud Email)"
+echo "═══════════════════════════════════════════════════════════"
+EMAIL_STATUS=$(curl -s http://localhost:4000/auth/email-status 2>/dev/null || echo '')
+if echo "$EMAIL_STATUS" | grep -q '"enabled":true'; then
+  echo "✅ Email настроен (токены верификации будут отправляться)"
+  echo "$EMAIL_STATUS" | head -1
+else
+  echo "❌ Email НЕ настроен — письма с токеном не отправляются!"
+  echo "   Задайте на VM: YANDEX_IAM_TOKEN и YANDEX_CLOUD_FROM_EMAIL (или Postbox ключи)."
+  echo "   См. docs/EMAIL_VERIFICATION_SETUP.md и server/scripts/setup-yandex-email-ubuntu.sh"
+fi
+echo ""
+
+echo "═══════════════════════════════════════════════════════════"
 echo "6. Проверка доступности сервисов локально"
 echo "═══════════════════════════════════════════════════════════"
 echo "Next.js (порт 3000):"
 curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://localhost:3000 || echo "❌ Недоступен"
 echo "Backend (порт 4000):"
-curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://localhost:4000/health || echo "❌ Недоступен"
+curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://localhost:4000/auth/email-status 2>/dev/null | head -1 || curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://localhost:4000/health || echo "❌ Недоступен"
 echo ""
 
 echo "═══════════════════════════════════════════════════════════"
@@ -144,6 +158,7 @@ if [ $? -eq 0 ]; then
   echo "   2. Если процессы PM2 не запущены: используйте restart-server-on-vm.sh"
   echo "   3. Если порты закрыты: проверьте Security Groups в Yandex Cloud"
   echo "   4. Если SSL сертификат отсутствует: sudo certbot --nginx -d iventapp.ru"
+  echo "   5. Если SSL сертификат истёк: sudo certbot renew --nginx && sudo systemctl reload nginx (см. docs/SSL_RENEW_IVENTAPP.md)"
 else
   echo ""
   echo "❌ Ошибка при подключении к серверу"

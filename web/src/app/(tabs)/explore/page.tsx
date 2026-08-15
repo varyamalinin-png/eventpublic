@@ -1,8 +1,10 @@
 'use client';
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode, useEffect } from 'react';
 import dynamicImport from 'next/dynamic';
 import { WebTabBar } from '../../../components/WebTabBar';
+import { PageLoading } from '@/web/components/PageLoading';
+import { useLanguage } from '@/client/context/LanguageContext';
 
 // Error Boundary для обработки ошибок инициализации
 class ErrorBoundary extends Component<
@@ -65,8 +67,8 @@ class ErrorBoundary extends Component<
             }}
             style={{
               padding: '10px 20px',
-              backgroundColor: '#8B5CF6',
-              color: '#fff',
+              backgroundColor: '#ff8d32',
+              color: '#0a0a0a',
               border: 'none',
               borderRadius: '8px',
               cursor: 'pointer',
@@ -113,8 +115,8 @@ const ExploreScreen = dynamicImport(
               style={{
                 marginTop: '20px',
                 padding: '10px 20px',
-                backgroundColor: '#8B5CF6',
-                color: '#fff',
+                backgroundColor: '#ff8d32',
+                color: '#0a0a0a',
                 border: 'none',
                 borderRadius: '8px',
                 cursor: 'pointer'
@@ -128,36 +130,19 @@ const ExploreScreen = dynamicImport(
     }),
   { 
     ssr: false, 
-    loading: () => <LoadingScreen /> 
+    loading: () => <PageLoading /> 
   }
 );
 
 
-function LoadingScreen() {
-  return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: '100vh',
-      backgroundColor: '#0f0f0f',
-      color: '#8B5CF6'
-    }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '24px', marginBottom: '10px' }}>⏳</div>
-        <div>Загрузка...</div>
-      </div>
-    </div>
-  );
-}
-
-export const dynamic = 'force-dynamic';
 
 export default function ExplorePage() {
+  const { language } = useLanguage();
+  useEffect(() => { document.title = language === 'ru' ? 'Лента — iwent' : 'Feed — iwent'; }, [language]);
   return (
     <ErrorBoundary>
       {/* Мобильный layout - показывается по умолчанию, скрывается через CSS на десктопе */}
-      <div className="mobile-layout">
+      <div className="mobile-layout explore-page-scroll">
         <ExploreScreen />
         <WebTabBar />
       </div>

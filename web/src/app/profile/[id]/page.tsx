@@ -1,38 +1,28 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { PageLoading } from '@/web/components/PageLoading';
 import { Providers } from '../../providers';
 
 const ProfileScreen = dynamic(
   () => import('@/client/app/profile/[id]').then(mod => ({ default: mod.default })),
-  { ssr: false, loading: () => <LoadingScreen /> }
+  { ssr: false, loading: () => <PageLoading /> }
 );
 
-function LoadingScreen() {
-  return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: '100vh',
-      backgroundColor: '#0f0f0f',
-      color: '#8B5CF6'
-    }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '24px', marginBottom: '10px' }}>⏳</div>
-        <div>Загрузка...</div>
-      </div>
-    </div>
-  );
-}
 
 export default function ProfilePage() {
-  // На мобильных - профиль как отдельную страницу
   return (
     <Providers>
-      {/* Мобильный layout - показывается по умолчанию, скрывается через CSS на десктопе */}
-      <div className="mobile-layout">
-        <div style={{ width: '100%', height: '100vh' }}>
+      <div className="mobile-layout profile-page-scroll">
+        <div
+          style={{
+            width: '100%',
+            height: '100vh',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
           <ProfileScreen />
         </div>
       </div>

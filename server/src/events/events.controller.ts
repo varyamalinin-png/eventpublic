@@ -5,12 +5,29 @@ import { EventsService } from './events.service';
 import { EventProfilesService } from './event-profiles.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt.guard';
 import { RequestUser } from '../shared/decorators/request-user.decorator';
 import { StorageService } from '../storage/storage.service';
 import { createLogger } from '../shared/utils/logger';
+import { normalizePublicMediaUrl } from '../shared/public-site';
 import type { Express } from 'express';
 
 const logger = createLogger('EventsController');
+
+/** Нормализует URL медиа (trycloudflare, старый домен iventapp.ru → iwent.ru). */
+function normalizeEventMediaUrls(event: any): any {
+  if (!event) return event;
+  if (Array.isArray(event)) {
+    return event.map(normalizeEventMediaUrls);
+  }
+  if (event.mediaUrl) {
+    event.mediaUrl = normalizePublicMediaUrl(event.mediaUrl) ?? event.mediaUrl;
+  }
+  if (event.originalMediaUrl) {
+    event.originalMediaUrl = normalizePublicMediaUrl(event.originalMediaUrl) ?? event.originalMediaUrl;
+  }
+  return event;
+}
 
 @Controller('events')
 export class EventsController {
@@ -43,21 +60,29 @@ export class EventsController {
     }
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get()
   async findAll(
     @Query('organizerId') organizerId?: string,
     @Query('upcoming') upcoming?: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+    @Query('lat') lat?: string,
+    @Query('lon') lon?: string,
     @RequestUser('userId') currentUserId?: string,
   ) {
     try {
-      logger.info(`📥 GET all events, organizerId: ${organizerId}, upcoming: ${upcoming}, currentUserId: ${currentUserId}`);
+      const parsedLimit = limit ? Math.min(parseInt(limit, 10) || 50, 100) : undefined;
+      logger.info(`📥 GET events, limit: ${parsedLimit}, cursor: ${cursor}, currentUserId: ${currentUserId}`);
       const result = await this.eventsService.findAll({
         organizerId,
         upcoming: upcoming === 'true',
         currentUserId,
+        limit: parsedLimit,
+        cursor,
       });
       logger.info(`Events retrieved: ${result?.length || 0} events`);
-      return result;
+      return normalizeEventMediaUrls(result);
     } catch (error) {
       logger.error(`Error getting events: ${error?.message}`, error?.stack);
       throw error;
@@ -97,13 +122,28 @@ export class EventsController {
     }
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get('recommended/for-user')
+  async getRecommended(@RequestUser('userId') userId: string) {
+    try {
+      logger.info(`GET recommended events for userId: ${userId}`);
+      const result = await this.eventsService.getRecommendedEvents(userId);
+      logger.info(`Recommended events: ${result?.length || 0}`);
+      return normalizeEventMediaUrls(result);
+    } catch (error) {
+      logger.error(`Error getting recommended events: ${error?.message}`, error?.stack);
+      throw error;
+    }
+  }
+
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
   async findOne(@Param('id') id: string, @RequestUser('userId') currentUserId?: string) {
     try {
       logger.info(`📥 GET event by id: ${id}, currentUserId: ${currentUserId}`);
       const result = await this.eventsService.findOne(id, currentUserId);
       logger.info(`Event retrieved: ${result ? result.id : 'not found'}`);
-      return result;
+      return normalizeEventMediaUrls(result);
     } catch (error) {
       logger.error(`Error getting event: ${error?.message}`, error?.stack);
       throw error;

@@ -8,19 +8,20 @@ export default () => ({
     url: process.env.REDIS_URL || 'redis://localhost:6379',
   },
   auth: {
-    jwtAccessSecret: process.env.JWT_ACCESS_SECRET || 'change-me',
-    jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || 'change-me-refresh',
+    jwtAccessSecret: process.env.JWT_ACCESS_SECRET,
+    jwtRefreshSecret: process.env.JWT_REFRESH_SECRET,
     accessTokenTtl: process.env.JWT_ACCESS_TTL || '15m',
     refreshTokenTtl: process.env.JWT_REFRESH_TTL || '7d',
   },
   email: {
-    // Yandex Cloud Email API настройки (единственный способ отправки email)
-    // Используем статический ключ доступа (AWS Access Key) вместо IAM токена
+    // Yandex Cloud: два варианта — Postbox (статический ключ) или Mail API (IAM токен)
     yandexCloudAccessKeyId: process.env.YANDEX_CLOUD_ACCESS_KEY_ID,
     yandexCloudSecretAccessKey: process.env.YANDEX_CLOUD_SECRET_ACCESS_KEY,
     yandexCloudApiEndpoint: process.env.YANDEX_CLOUD_API_ENDPOINT || 'https://postbox.cloud.yandex.net',
     yandexCloudFromEmail: process.env.YANDEX_CLOUD_FROM_EMAIL,
-    fromEmail: process.env.YANDEX_CLOUD_FROM_EMAIL || 'noreply@iventapp.ru',
+    yandexCloudIamToken: process.env.YANDEX_IAM_TOKEN,
+    yandexCloudMailApiEndpoint: process.env.YANDEX_CLOUD_MAIL_API_ENDPOINT || 'https://mail-api.cloud.yandex.net',
+    fromEmail: process.env.YANDEX_CLOUD_FROM_EMAIL || 'noreply@iwent.ru',
     verificationRedirectUrl: process.env.EMAIL_VERIFICATION_REDIRECT_URL,
     passwordResetRedirectUrl: process.env.PASSWORD_RESET_REDIRECT_URL,
   },

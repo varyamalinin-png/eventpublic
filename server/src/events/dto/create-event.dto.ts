@@ -24,6 +24,16 @@ class CoordinatesDto {
   longitude!: number;
 }
 
+class VisibilityDto {
+  @IsEnum(['all', 'friends', 'all_except_friends', 'all_except_excluded', 'only_me', 'me_and_excluded'])
+  type!: 'all' | 'friends' | 'all_except_friends' | 'all_except_excluded' | 'only_me' | 'me_and_excluded';
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  excludedUsers?: string[];
+}
+
 export class CreateEventDto {
   @IsString()
   @IsNotEmpty()
@@ -132,4 +142,10 @@ export class CreateEventDto {
     reach?: number;
     responses?: number;
   };
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => VisibilityDto)
+  visibility?: VisibilityDto;
 }

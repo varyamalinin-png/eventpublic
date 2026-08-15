@@ -1,4 +1,11 @@
 # Project documentation with sensitive information
 PROJECT_INFO.md
 
+# Private keys and credentials — never commit these
+*.pem
+*.key
+*private_key*
+*service_account_key*
+yandex-key*.json
+
 node_modules

@@ -34,46 +34,27 @@
     </array>
     <key>CFBundleVersion</key>
     <string>1</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>12.0</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSAppTransportSecurity</key>
     <dict>
       <key>NSAllowsArbitraryLoads</key>
-      <true/>
+      <false/>
       <key>NSExceptionDomains</key>
       <dict>
-        <key>192.168.0.39</key>
-        <dict>
-          <key>NSExceptionAllowsInsecureHTTPLoads</key>
-          <true/>
-          <key>NSIncludesSubdomains</key>
-          <true/>
-        </dict>
-        <key>localhost</key>
-        <dict>
-          <key>NSExceptionAllowsInsecureHTTPLoads</key>
-          <true/>
-        </dict>
-        <key>iventapp.ru</key>
+        <key>iwent.ru</key>
         <dict>
           <key>NSExceptionAllowsInsecureHTTPLoads</key>
           <false/>
           <key>NSIncludesSubdomains</key>
           <true/>
         </dict>
-        <key>89.169.173.152</key>
+        <key>iventapp.ru</key>
         <dict>
           <key>NSExceptionAllowsInsecureHTTPLoads</key>
-          <true/>
-          <key>NSIncludesSubdomains</key>
-          <true/>
-        </dict>
-        <key>158.160.67.4</key>
-        <dict>
-          <key>NSExceptionAllowsInsecureHTTPLoads</key>
-          <true/>
+          <false/>
           <key>NSIncludesSubdomains</key>
           <true/>
         </dict>
@@ -86,12 +67,8 @@
     </dict>
     <key>NSCameraUsageDescription</key>
     <string>Приложение использует доступ к камере для добавления фотографий к событиям.</string>
-    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Приложение использует ваше местоположение для отображения событий на карте.</string>
-    <key>NSLocationAlwaysUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your location</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your location</string>
+    <string>Приложение использует ваше местоположение для отображения событий на карте рядом с вами.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Приложение использует доступ к микрофону для записи аудио.</string>
     <key>NSPhotoLibraryUsageDescription</key>
@@ -111,11 +88,10 @@
     <key>UIRequiresFullScreen</key>
     <false/>
     <key>UIStatusBarStyle</key>
-    <string>UIStatusBarStyleDefault</string>
+    <string>UIStatusBarStyleLightContent</string>
     <key>UISupportedInterfaceOrientations</key>
     <array>
       <string>UIInterfaceOrientationPortrait</string>
-      <string>UIInterfaceOrientationPortraitUpsideDown</string>
     </array>
     <key>UISupportedInterfaceOrientations~ipad</key>
     <array>
@@ -125,7 +101,7 @@
       <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
     <key>UIUserInterfaceStyle</key>
-    <string>Light</string>
+    <string>Dark</string>
     <key>UIViewControllerBasedStatusBarAppearance</key>
     <false/>
   </dict>

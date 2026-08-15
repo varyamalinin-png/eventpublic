@@ -65,7 +65,56 @@ export class ChatsGateway implements OnGatewayConnection {
       throw new UnauthorizedException();
     }
     const message = await this.chatsService.createMessage(userId, payload.chatId, payload.dto);
-    // WebSocket событие отправляется через ChatsService -> WebSocketService
     return message;
+  }
+
+  @SubscribeMessage('typing:start')
+  handleTypingStart(
+    @MessageBody() body: { chatId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    if (!client.data.userId) return;
+    client.to(`chat:${body.chatId}`).emit('typing:start', {
+      chatId: body.chatId,
+      userId: client.data.userId,
+    });
+  }
+
+  @SubscribeMessage('typing:stop')
+  handleTypingStop(
+    @MessageBody() body: { chatId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    if (!client.data.userId) return;
+    client.to(`chat:${body.chatId}`).emit('typing:stop', {
+      chatId: body.chatId,
+      userId: client.data.userId,
+    });
+  }
+
+  @SubscribeMessage('message:reaction')
+  async handleReaction(
+    @MessageBody() payload: { chatId: string; messageId: string; emoji: string; action: 'add' | 'remove' },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const userId = client.data.userId;
+    if (!userId) {
+      throw new UnauthorizedException();
+    }
+    if (payload.action === 'add') {
+      return this.chatsService.addReaction(payload.chatId, payload.messageId, userId, payload.emoji);
+    } else {
+      await this.chatsService.removeReaction(payload.chatId, payload.messageId, userId, payload.emoji);
+      return { success: true };
+    }
+  }
+
+  @SubscribeMessage('messages:read')
+  async handleMessagesRead(
+    @MessageBody() body: { chatId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    if (!client.data.userId) return;
+    return this.chatsService.markMessagesAsRead(client.data.userId, body.chatId);
   }
 }

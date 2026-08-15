@@ -143,7 +143,7 @@ async function fixRamenEventProfile() {
         for (const userId of missingUserIds) {
           await prisma.eventProfileParticipant.create({
             data: {
-              eventProfileId: eventProfile.id,
+              profileId: eventProfile.id,
               userId: userId,
             },
           });

@@ -2,26 +2,8 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Providers } from './providers';
 import { useAuth } from '@/client/context/AuthContext';
-
-function LoadingScreen() {
-  return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: '100vh',
-      backgroundColor: '#0f0f0f',
-      color: '#8B5CF6'
-    }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '24px', marginBottom: '10px' }}>⏳</div>
-        <div>Загрузка...</div>
-      </div>
-    </div>
-  );
-}
+import { PageLoading } from '@/web/components/PageLoading';
 
 function AppContent() {
   const router = useRouter();
@@ -37,13 +19,9 @@ function AppContent() {
     }
   }, [isAuthenticated, initializing, router]);
 
-  return <LoadingScreen />;
+  return <PageLoading />;
 }
 
 export default function Home() {
-  return (
-    <Providers>
-      <AppContent />
-    </Providers>
-  );
+  return <AppContent />;
 }

@@ -221,9 +221,8 @@ export class EventFoldersService {
       throw new NotFoundException('Folder not found');
     }
 
-    if (folder.ownerId !== ownerId) {
-      throw new ForbiddenException('Not authorized');
-    }
+    // Папки публичные для чтения - любой авторизованный пользователь может просматривать папки других пользователей
+    // Проверка владельца нужна только для редактирования (update, delete, addEvent, removeEvent)
 
     // Собираем всех уникальных участников из всех событий
     const allParticipants = new Map<string, any>();
@@ -287,34 +286,16 @@ export class EventFoldersService {
       throw new NotFoundException('Event not found');
     }
 
-    // Клиент уже фильтрует события и показывает только прошедшие в режиме select
-    // Клиент использует date и time строки для проверки, которые более надежны
-    // startTime/endTime в базе могут быть некорректными из-за проблем с часовыми поясами
-    // Поэтому доверяем проверке клиента и не блокируем добавление на сервере
-    // Только логируем для отладки
-    
+    // В папку можно добавлять только прошедшие события. Раньше проверка здесь была
+    // отключена: клиент считал «прошедшее» по паре date/time, в которой дата бралась
+    // из UTC, а время из локального пояса, поэтому для вечерних событий он расходился
+    // с сервером ровно на сутки. Маппер на клиенте исправлен, обе стороны считают по
+    // одному и тому же моменту, и проверку можно вернуть.
     const now = new Date();
-    const eventEndTime = event.endTime || event.startTime;
-    
-    // Логируем для отладки
-    console.log('Adding event to folder:', {
-      eventId,
-      folderId,
-      eventTitle: event.title,
-      eventStartTime: event.startTime,
-      eventEndTime: event.endTime,
-      now,
-      eventEndTimeISO: eventEndTime ? eventEndTime.toISOString() : null,
-      nowISO: now.toISOString(),
-      timeDiff: eventEndTime ? eventEndTime.getTime() - now.getTime() : null,
-      timeDiffMinutes: eventEndTime ? (eventEndTime.getTime() - now.getTime()) / (60 * 1000) : null,
-      timeDiffHours: eventEndTime ? (eventEndTime.getTime() - now.getTime()) / (60 * 60 * 1000) : null,
-      isPast: eventEndTime ? eventEndTime.getTime() <= now.getTime() : 'no time',
-      note: 'Client already validated event as past via date/time strings',
-    });
-    
-    // Разрешаем добавление - клиент уже проверил через date/time строки
-    // Проверка на сервере через startTime/endTime может быть некорректной из-за часовых поясов
+    const eventEnd = event.endTime ?? event.startTime;
+    if (eventEnd.getTime() > now.getTime()) {
+      throw new BadRequestException('Only past events can be added to a folder');
+    }
 
     return this.prisma.eventFolderEvent.upsert({
       where: { folderId_eventId: { folderId, eventId } },

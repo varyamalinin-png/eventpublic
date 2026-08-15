@@ -32,4 +32,11 @@ export const validationSchema = Joi.object({
   STORAGE_FORCE_PATH_STYLE: Joi.string().valid('true', 'false').optional(),
   STORAGE_MAX_FILE_SIZE_MB: Joi.number().integer().min(1).max(50).optional(),
   CORS_ORIGIN: Joi.string().optional(),
+  /** Защищённый ключ приложения ВК (мини-приложение) для проверки sign */
+  VK_MINI_APP_SECRET: Joi.string().optional(),
+  /** Сервисный ключ приложения ВК (опционально, для методов API от имени приложения) */
+  VK_APP_SERVICE_TOKEN: Joi.string().optional(),
+  /** Токен сообщества ВК с доступом к messages (для первого сообщения пользователю) */
+  VK_GROUP_MESSAGES_TOKEN: Joi.string().optional(),
+  VK_GROUP_WELCOME_TEXT: Joi.string().max(4096).optional(),
 });

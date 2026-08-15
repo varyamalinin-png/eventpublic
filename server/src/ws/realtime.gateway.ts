@@ -31,6 +31,13 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   @WebSocketServer()
   server!: Server;
 
+  private onlineUsers = new Set<string>();
+
+  /** Количество уникальных онлайн-пользователей (используется в статистике) */
+  get onlineCount(): number {
+    return this.onlineUsers.size;
+  }
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly websocketService: WebSocketService,
@@ -56,6 +63,8 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       
       // Подключаем пользователя к его персональной комнате
       socket.join(`user:${payload.sub}`);
+      this.onlineUsers.add(payload.sub);
+      this.server.emit('presence:online', { userId: payload.sub });
       
       // Получаем чаты пользователя и подключаем его к комнатам чатов
       const chats = await this.prisma.chat.findMany({
@@ -104,8 +113,14 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   async handleDisconnect(socket: Socket) {
     const userId = socket.data.userId;
     if (userId) {
+      this.onlineUsers.delete(userId);
+      this.server.emit('presence:offline', { userId });
       logger.info(`WebSocket disconnected: ${userId}`);
     }
+  }
+
+  getOnlineUsers(): string[] {
+    return Array.from(this.onlineUsers);
   }
 
   /**

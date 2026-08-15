@@ -10,12 +10,15 @@ import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuid } from 'uuid';
 import * as path from 'path';
+import { ImageOptimizerService } from './image-optimizer.service';
 
 type UploadParams = {
   buffer: Buffer;
   mimetype: string;
   originalName: string;
 };
+
+const IMMUTABLE_MEDIA_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
 @Injectable()
 export class StorageService {
@@ -27,7 +30,10 @@ export class StorageService {
   private readonly region: string;
   private ensureBucketTask?: Promise<void>;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly imageOptimizer: ImageOptimizerService,
+  ) {
     const driver = this.configService.get<string>('storage.driver', 's3');
     if (driver !== 's3') {
       throw new Error(`Unsupported storage driver: ${driver}`);
@@ -69,7 +75,15 @@ export class StorageService {
   }
 
   async uploadUserAvatar(userId: string, { buffer, mimetype, originalName }: UploadParams) {
-    const key = `users/${userId}/avatars/${uuid()}`;
+    // Оптимизируем аватар перед загрузкой
+    this.logger.log(`🔧 Optimizing avatar image (${(buffer.length / 1024).toFixed(1)}KB)...`);
+    const { buffer: optimizedBuffer, mimetype: optimizedMimetype } = await this.imageOptimizer.optimizeAvatar(
+      buffer,
+      mimetype,
+    );
+
+    const extension = optimizedMimetype === 'image/webp' ? '.webp' : optimizedMimetype === 'image/png' ? '.png' : '.jpg';
+    const key = `users/${userId}/avatars/${uuid()}${extension}`;
 
     try {
       // Try to ensure bucket exists, but don't fail if it already exists
@@ -84,20 +98,17 @@ export class StorageService {
         }
       }
 
-      const uploader = new Upload({
-        client: this.s3,
-        params: {
+      // Для аватарок используем простой PutObject (избегаем edge-case'ов multipart upload в S3-compatible хранилищах)
+      await this.s3.send(
+        new PutObjectCommand({
           Bucket: this.bucket,
           Key: key,
-          Body: buffer,
-          ContentType: mimetype,
-          Metadata: {
-            originalName,
-          },
-        },
-      });
-
-      await uploader.done();
+          Body: optimizedBuffer,
+          ContentType: optimizedMimetype,
+          CacheControl: IMMUTABLE_MEDIA_CACHE_CONTROL,
+          // Не передаём originalName в Metadata: не-ASCII имена файлов ломают заголовки (x-amz-meta-*) в Node http client
+        }),
+      );
       this.logger.log(`Avatar uploaded successfully: ${key}`);
     } catch (error) {
       if (this.isMissingBucketError(error)) {
@@ -110,7 +121,10 @@ export class StorageService {
         return this.uploadUserAvatar(userId, { buffer, mimetype, originalName });
       }
 
-      this.logger.error('Failed to upload avatar', error as Error);
+      this.logger.error(
+        `Failed to upload avatar (bucket=${this.bucket}, key=${key}, mimetype=${optimizedMimetype}, size=${optimizedBuffer.length})`,
+        error as Error,
+      );
       throw new InternalServerErrorException('Не удалось загрузить изображение');
     }
 
@@ -118,7 +132,15 @@ export class StorageService {
   }
 
   async uploadEventMedia(userId: string, { buffer, mimetype, originalName }: UploadParams) {
-    const extension = path.extname(originalName) || '.jpg';
+    // Оптимизируем медиа события перед загрузкой
+    this.logger.log(`🔧 Optimizing event media image (${(buffer.length / 1024).toFixed(1)}KB)...`);
+    const { buffer: optimizedBuffer, mimetype: optimizedMimetype } = await this.imageOptimizer.optimizeEventMedia(
+      buffer,
+      mimetype,
+    );
+
+    // Определяем расширение на основе оптимизированного формата
+    const extension = optimizedMimetype === 'image/webp' ? '.webp' : optimizedMimetype === 'image/png' ? '.png' : '.jpg';
     const key = `events/${userId}/${uuid()}${extension}`;
     
     try {
@@ -127,8 +149,9 @@ export class StorageService {
         params: {
           Bucket: this.bucket,
           Key: key,
-          Body: buffer,
-          ContentType: mimetype,
+          Body: optimizedBuffer,
+          ContentType: optimizedMimetype,
+          CacheControl: IMMUTABLE_MEDIA_CACHE_CONTROL,
         },
       });
 
@@ -149,6 +172,7 @@ export class StorageService {
       Bucket: this.bucket,
       Key: key,
       ContentType: contentType,
+      CacheControl: IMMUTABLE_MEDIA_CACHE_CONTROL,
     });
 
     const url = await getSignedUrl(this.s3, command, { expiresIn: 60 * 5 });
@@ -162,7 +186,13 @@ export class StorageService {
   private buildPublicUrl(key: string) {
     // КРИТИЧЕСКИ ВАЖНО: Всегда используем publicBaseUrl если он установлен
     if (this.publicBaseUrl) {
-      const url = `${this.publicBaseUrl.replace(/\/$/, '')}/${key}`;
+      // Нормализуем legacy-домен (iventapp.ru -> iwent.ru), чтобы ссылки на медиа были канонические.
+      // Это важно для фронта: аватар обновляется через /auth/me и берётся из avatarUrl.
+      const normalizedBaseUrl = this.publicBaseUrl
+        .replace('://www.iventapp.ru', '://iwent.ru')
+        .replace('://iventapp.ru', '://iwent.ru');
+
+      const url = `${normalizedBaseUrl.replace(/\/$/, '')}/${key}`;
       this.logger.debug(`Built public URL from publicBaseUrl: ${url}`);
       return url;
     }

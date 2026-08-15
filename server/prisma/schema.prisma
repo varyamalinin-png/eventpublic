@@ -42,6 +42,8 @@ enum NotificationType {
   EVENT_PARTICIPANT_LEFT
   EVENT_POST_ADDED
   EVENT_ORGANIZER_TRANSFERRED
+  EVENT_JOIN_REQUEST
+  EVENT_REQUEST_ACCEPTED
 }
 
 enum ComplaintType {
@@ -60,6 +62,10 @@ model User {
   id            String    @id @default(uuid())
   email         String    @unique
   username      String    @unique
+  // Обязателен при регистрации, но в базе nullable: колонку добавляем к таблице,
+  // где уже есть аккаунты без телефона, и NOT NULL там просто не применится.
+  // Ужесточим отдельной миграцией, когда существующие записи будут заполнены.
+  phone         String?   @unique
   passwordHash  String?
   emailVerified Boolean   @default(false)
   googleId      String?   @unique
@@ -105,6 +111,7 @@ model User {
   passwordResetTokens      PasswordResetToken[]
   complaintsReported       Complaint[]               @relation("ComplaintReporter")
   complaintsReceived       Complaint[]               @relation("ComplaintReported")
+  messageReactions         MessageReaction[]
 }
 
 model Event {
@@ -152,6 +159,8 @@ model Event {
   participations UserEventParticipation[]
   eventFolders   EventFolderEvent[]
 
+  @@index([organizerId])
+  @@index([startTime])
   @@index([isRecurring])
   @@index([autoTags])
   @@index([customTags])
@@ -212,9 +221,10 @@ model EventProfilePost {
   profileId String
   authorId  String
   content   String?
-  photoUrl  String? // Для обратной совместимости
-  photoUrls Json? // Массив URL для карусели
-  captions  Json? // Массив описаний для каждого фото
+  photoUrl  String?
+  photoUrls Json?
+  captions  Json?
+  likes     String[] @default([])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -324,12 +334,29 @@ model Message {
   senderId  String
   content   String?
   eventId   String?
+  readBy    String[] @default([])
   createdAt DateTime @default(now())
 
-  chat     Chat   @relation(fields: [chatId], references: [id])
-  sender   User   @relation("UserMessages", fields: [senderId], references: [id])
-  event    Event? @relation(fields: [eventId], references: [id])
-  chatLast Chat?  @relation("ChatLastMessage")
+  chat      Chat              @relation(fields: [chatId], references: [id])
+  sender    User              @relation("UserMessages", fields: [senderId], references: [id])
+  event     Event?            @relation(fields: [eventId], references: [id])
+  chatLast  Chat?             @relation("ChatLastMessage")
+  reactions MessageReaction[]
+
+  @@index([chatId, createdAt])
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
 }
 
 model Friendship {
@@ -344,6 +371,8 @@ model Friendship {
   addressee User @relation("FriendshipAddressee", fields: [addresseeId], references: [id])
 
   @@unique([requesterId, addresseeId])
+  @@index([requesterId])
+  @@index([addresseeId])
 }
 
 model Folder {
@@ -376,6 +405,8 @@ model Notification {
   createdAt DateTime         @default(now())
 
   user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, readAt])
 }
 
 model Complaint {
@@ -415,9 +446,13 @@ model RefreshToken {
 }
 
 model EmailVerificationToken {
-  id        String   @id @default(uuid())
-  userId    String
-  token     String   @unique
+  id     String @id @default(uuid())
+  userId String
+  // Шестизначный код. Уникальность намеренно не глобальная: код действителен
+  // только вместе со своим пользователем, иначе им можно было бы подтвердить
+  // чужой аккаунт, да и миллиона вариантов на всю таблицу не хватит.
+  token     String
+  attempts  Int      @default(0)
   expiresAt DateTime
   createdAt DateTime @default(now())
 
@@ -425,6 +460,7 @@ model EmailVerificationToken {
 
   @@index([userId])
   @@index([expiresAt])
+  @@index([userId, token])
 }
 
 model PasswordResetToken {

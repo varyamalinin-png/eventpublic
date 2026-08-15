@@ -27,11 +27,11 @@ export class ChatsService {
         },
       },
       include: {
-        participants: { include: { user: true } },
-        lastMessage: { include: { sender: true } },
+        participants: { include: { user: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
+        lastMessage: { include: { sender: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
         event: {
           include: {
-            organizer: true,
+            organizer: { select: { id: true, name: true, username: true, avatarUrl: true } },
             memberships: {
               where: { userId },
             },
@@ -78,11 +78,11 @@ export class ChatsService {
         },
       },
       include: {
-        participants: { include: { user: true } },
-        lastMessage: { include: { sender: true } },
+        participants: { include: { user: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
+        lastMessage: { include: { sender: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
         event: {
           include: {
-            organizer: true,
+            organizer: { select: { id: true, name: true, username: true, avatarUrl: true } },
             memberships: {
               where: { userId },
             },
@@ -127,7 +127,41 @@ export class ChatsService {
     );
   }
 
-  async listMessages(userId: string, chatId: string) {
+  async addReaction(chatId: string, messageId: string, userId: string, emoji: string) {
+    const reaction = await this.prisma.messageReaction.upsert({
+      where: { messageId_userId_emoji: { messageId, userId, emoji } },
+      create: { messageId, userId, emoji },
+      update: {},
+    });
+
+    // Emit WebSocket event
+    this.websocketService.emitToChat(chatId, 'message:reaction', {
+      chatId,
+      messageId,
+      userId,
+      emoji,
+      action: 'add',
+    });
+
+    return reaction;
+  }
+
+  async removeReaction(chatId: string, messageId: string, userId: string, emoji: string) {
+    await this.prisma.messageReaction.deleteMany({
+      where: { messageId, userId, emoji },
+    });
+
+    // Emit WebSocket event
+    this.websocketService.emitToChat(chatId, 'message:reaction', {
+      chatId,
+      messageId,
+      userId,
+      emoji,
+      action: 'remove',
+    });
+  }
+
+  async listMessages(userId: string, chatId: string, cursor?: string, limit: number = 50) {
     // Проверяем, является ли пользователь участником чата
     const participant = await this.prisma.chatParticipant.findUnique({
       where: { chatId_userId: { chatId, userId } },
@@ -154,22 +188,28 @@ export class ChatsService {
       if (chat?.type === 'EVENT' && chat.eventId && chat.event) {
         const isOrganizer = chat.event.organizerId === userId;
         const hasMembership = chat.event.memberships.length > 0;
-        
-        if (isOrganizer || hasMembership) {
-          // Разрешаем доступ к сообщениям
-        } else {
+
+        if (!isOrganizer && !hasMembership) {
           throw new ForbiddenException('Access denied to chat messages');
         }
       } else {
-      throw new ForbiddenException('Access denied to chat messages');
+        throw new ForbiddenException('Access denied to chat messages');
       }
     }
 
+    // Clamp limit to a reasonable range
+    const take = Math.min(Math.max(limit, 1), 200);
+
     return this.prisma.message.findMany({
       where: { chatId },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
+      take,
+      ...(cursor
+        ? { skip: 1, cursor: { id: cursor } }
+        : {}),
       include: {
-        sender: true,
+        sender: { select: { id: true, name: true, username: true, avatarUrl: true } },
+        reactions: true,
       },
     });
   }
@@ -183,7 +223,7 @@ export class ChatsService {
         eventId: dto.eventId,
       },
       include: {
-        sender: true,
+        sender: { select: { id: true, name: true, username: true, avatarUrl: true } },
       },
     });
 
@@ -216,6 +256,32 @@ export class ChatsService {
     return message;
   }
 
+  async markMessagesAsRead(userId: string, chatId: string) {
+    const unread = await this.prisma.message.findMany({
+      where: {
+        chatId,
+        senderId: { not: userId },
+        NOT: { readBy: { has: userId } },
+      },
+      select: { id: true },
+    });
+
+    if (unread.length === 0) return { updated: 0 };
+
+    await this.prisma.message.updateMany({
+      where: { id: { in: unread.map(m => m.id) } },
+      data: { readBy: { push: userId } },
+    });
+
+    this.websocketService.emitToChat(chatId, 'messages:read', {
+      chatId,
+      userId,
+      messageIds: unread.map(m => m.id),
+    });
+
+    return { updated: unread.length };
+  }
+
   async createEventChat(userId: string, eventId: string, participantIds: string[]) {
     // Проверяем, существует ли уже чат для этого события
     const existingChat = await this.prisma.chat.findUnique({
@@ -246,11 +312,11 @@ export class ChatsService {
       return this.prisma.chat.findUnique({
         where: { id: existingChat.id },
         include: {
-          participants: { include: { user: true } },
-          lastMessage: { include: { sender: true } },
+          participants: { include: { user: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
+          lastMessage: { include: { sender: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
           event: {
             include: {
-              organizer: true,
+              organizer: { select: { id: true, name: true, username: true, avatarUrl: true } },
             },
           },
         },
@@ -260,7 +326,7 @@ export class ChatsService {
     // Создаем новый чат
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
-      include: { organizer: true },
+      include: { organizer: { select: { id: true, name: true, username: true, avatarUrl: true } } },
     });
 
     if (!event) {
@@ -291,10 +357,10 @@ export class ChatsService {
         },
       },
       include: {
-        participants: { include: { user: true } },
+        participants: { include: { user: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
         event: {
           include: {
-            organizer: true,
+            organizer: { select: { id: true, name: true, username: true, avatarUrl: true } },
           },
         },
       },
@@ -323,8 +389,8 @@ export class ChatsService {
       return this.prisma.chat.findUnique({
         where: { id: existingKey.chatId },
         include: {
-          participants: { include: { user: true } },
-          lastMessage: { include: { sender: true } },
+          participants: { include: { user: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
+          lastMessage: { include: { sender: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
         },
       });
     }
@@ -342,8 +408,8 @@ export class ChatsService {
         },
       },
       include: {
-        participants: { include: { user: true } },
-        lastMessage: { include: { sender: true } },
+        participants: { include: { user: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
+        lastMessage: { include: { sender: { select: { id: true, name: true, username: true, avatarUrl: true } } } },
       },
     });
 
@@ -436,7 +502,7 @@ export class ChatsService {
         senderId: userId,
         content: `${userName} покинул(а) чат`,
       },
-      include: { sender: true },
+      include: { sender: { select: { id: true, name: true, username: true, avatarUrl: true } } },
     });
 
     await this.prisma.chat.update({

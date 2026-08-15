@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post, UseGuards, Request, Query, Res, Logger, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { LocalAuthGuard } from './guards/local.guard';
@@ -24,11 +25,13 @@ export class AuthController {
     private readonly mailerService: MailerService,
   ) {}
 
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('register')
   async register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
   }
 
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(LocalAuthGuard)
   @Post('login')
   async login(@Request() req: any) {
@@ -60,9 +63,15 @@ export class AuthController {
 
   @Post('verify-email')
   async verifyEmail(@Body() dto: VerifyEmailDto) {
-    this.logger.log(`📧 Verify email request received, token length: ${dto.token?.length || 0}`);
+    this.logger.log(`Verify email request received`);
     try {
-      const user = await this.authService.verifyEmailToken(dto.token);
+      // Код и email проверяются внутри verifyEmailToken; там же выдаётся
+      // единое сообщение для пустого/неверного кода, чтобы не палить причину отказа.
+      if (!dto.code || !dto.code.trim() || !dto.email) {
+        this.logger.error(`❌ Empty code or email received`);
+        throw new BadRequestException('Verification code is required');
+      }
+      const user = await this.authService.verifyEmailToken(dto.email, dto.code);
       if (!user) {
         this.logger.error(`❌ Email verification returned null user`);
         throw new BadRequestException('Failed to verify email. User not found.');
@@ -86,12 +95,18 @@ export class AuthController {
   }
 
   @Get('verify-email')
-  async verifyEmailRedirect(@Query('token') token: string, @Res() res: Response) {
-    if (!token) {
-      return res.status(400).send('Verification token is required');
+  async verifyEmailRedirect(
+    @Query('token') token: string,
+    @Query('email') email: string,
+    @Res() res: Response,
+  ) {
+    if (!token || !email) {
+      // Ссылки, выписанные до перехода на короткий код, приходят без адреса —
+      // подтвердить их уже нечем, пользователю нужен новый код.
+      return res.status(400).send('Verification link is invalid or outdated. Request a new code.');
     }
     try {
-      await this.authService.verifyEmailToken(token);
+      await this.authService.verifyEmailToken(email, token);
       // После успешной верификации показываем страницу успеха
       return res.send(`
         <!DOCTYPE html>
@@ -174,12 +189,17 @@ export class AuthController {
   }
 
   @Get('verify')
-  async verifyRedirect(@Query('status') status: string, @Query('token') token: string, @Res() res: Response) {
+  async verifyRedirect(
+    @Query('status') status: string,
+    @Query('token') token: string,
+    @Query('email') email: string,
+    @Res() res: Response,
+  ) {
     // Обработка редиректа после верификации email
     // Если есть токен, обрабатываем его
-    if (token) {
+    if (token && email) {
       try {
-        await this.authService.verifyEmailToken(token);
+        await this.authService.verifyEmailToken(email, token);
         // После успешной верификации редиректим на страницу успеха
         return res.send(`
           <!DOCTYPE html>
@@ -348,11 +368,13 @@ export class AuthController {
     return res.status(404).send('Not Found');
   }
 
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post('request-password-reset')
   async requestPasswordReset(@Body() dto: RequestPasswordResetDto) {
     return this.authService.requestPasswordReset(dto.email);
   }
 
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post('resend-verification')
   async resendVerification(@Body() dto: RequestPasswordResetDto) {
     this.logger.log(`📧 Resend verification requested for email: ${dto.email}`);
@@ -384,14 +406,13 @@ export class AuthController {
   @Get('email-status')
   async checkEmailStatus() {
     const isEnabled = this.mailerService.isEnabled();
-    const fromEmail = this.configService.get<string>('email.yandexCloudFromEmail') || 'noreply@iventapp.ru';
-    const yandexCloudEnabled = !!(this.configService.get<string>('email.yandexCloudIamToken') && this.configService.get<string>('email.yandexCloudFromEmail'));
-    
+    const fromEmail = this.configService.get<string>('email.yandexCloudFromEmail') || 'noreply@iwent.ru';
+    const method = this.mailerService.getAuthMethod?.() === 'postbox' ? 'Yandex Cloud Postbox' : this.mailerService.getAuthMethod?.() === 'iam' ? 'Yandex Cloud Mail API (IAM)' : 'none';
     return {
       enabled: isEnabled,
-      method: yandexCloudEnabled ? 'Yandex Cloud Email API' : 'none',
-      configured: yandexCloudEnabled,
-      fromEmail: fromEmail,
+      method,
+      configured: isEnabled,
+      fromEmail,
     };
   }
 
@@ -425,42 +446,4 @@ export class AuthController {
     }
   }
 
-  @Post('temp-verify-user')
-  async tempVerifyUser(@Body() body?: { email?: string; id?: string }) {
-    // ВРЕМЕННЫЙ endpoint для верификации пользователя
-    try {
-      const email = body?.email || 'varya.malinina.2003@mail.ru';
-      const id = body?.id || 'bb2948d1-32b9-4a6f-a033-fc2a92dcbc69';
-
-      this.logger.log(`[TempVerify] Verifying user: email=${email}, id=${id}`);
-
-      const result = await this.usersService.verifyUserByEmailOrId(email, id);
-
-      return {
-        success: true,
-        message: 'User verified successfully',
-        ...result,
-      };
-    } catch (error: any) {
-      this.logger.error(`[TempVerify] Error: ${error.message}`);
-      throw error;
-    }
-  }
-
-  @Post('temp-delete-all-users')
-  async tempDeleteAllUsers() {
-    // ВРЕМЕННЫЙ endpoint для удаления всех пользователей
-    try {
-      this.logger.log(`[TempDelete] Deleting all users...`);
-      const result = await this.usersService.deleteAllUsers();
-      return {
-        success: true,
-        message: 'All users deleted successfully',
-        deleted: result.count,
-      };
-    } catch (error: any) {
-      this.logger.error(`[TempDelete] Error: ${error.message}`);
-      throw error;
-    }
-  }
 }

@@ -6,7 +6,7 @@ import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { MailerService } from '../mailer/mailer.service';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomInt } from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 
 type JwtPayload = { sub: string; username: string };
@@ -33,25 +33,33 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
-    console.log(`[AuthService] register called for email: ${dto.email}, username: ${dto.username}`);
-    const [existingEmail, existingUsername] = await Promise.all([
+    this.logger.log(`Register called for email: ${dto.email}`);
+    const normalizedPhone = dto.phone.replace(/[^\d+]/g, '');
+
+    const [existingEmail, existingUsername, existingPhone] = await Promise.all([
       this.usersService.findByEmail(dto.email),
       this.usersService.findByUsername(dto.username),
+      this.prisma.user.findUnique({ where: { phone: normalizedPhone } }),
     ]);
 
     if (existingEmail) {
-      console.log(`[AuthService] Email already registered: ${dto.email}, existing user id: ${existingEmail.id}, emailVerified: ${existingEmail.emailVerified}`);
+      this.logger.debug(`Email already registered: ${dto.email}`);
       throw new BadRequestException('Email already registered');
     }
     if (existingUsername) {
-      console.log(`[AuthService] Username already taken: ${dto.username}`);
+      this.logger.debug(`Username already taken: ${dto.username}`);
       throw new BadRequestException('Username already taken');
+    }
+    if (existingPhone) {
+      throw new BadRequestException('Phone already registered');
     }
 
     const passwordHash = await argon2.hash(dto.password);
     const user = await this.usersService.createUser({
       email: dto.email,
       username: dto.username,
+      // храним в нормализованном виде, иначе «+7 999…» и «+7(999)…» станут разными номерами
+      phone: normalizedPhone,
       passwordHash,
       name: dto.name,
       accountType: dto.accountType,
@@ -60,14 +68,18 @@ export class AuthService {
 
     // Создаем токен верификации и отправляем письмо при регистрации
     const token = await this.createEmailVerificationToken(user.id);
+    let verificationEmailSent = false;
     try {
       await this.mailer.sendVerificationEmail(user.email, token);
       this.logger.log(`✅ Verification email sent to ${user.email} during registration`);
+      verificationEmailSent = true;
     } catch (error: any) {
       // Логируем ошибку, но не прерываем регистрацию
       // Пользователь может запросить повторную отправку письма позже
       this.logger.error('[AuthService] Failed to send verification email during registration:', error?.message || error);
-      // НЕ выбрасываем ошибку - регистрация успешна, письмо можно отправить позже
+      if (!this.mailer.isEnabled()) {
+        this.logger.warn('[AuthService] Email service is not configured (YANDEX_CLOUD_* env vars). Set YANDEX_CLOUD_ACCESS_KEY_ID, YANDEX_CLOUD_SECRET_ACCESS_KEY, YANDEX_CLOUD_FROM_EMAIL.');
+      }
     }
 
     // НЕ возвращаем токены до подтверждения email
@@ -80,35 +92,27 @@ export class AuthService {
         emailVerified: false,
       },
       requiresEmailVerification: true,
-      message: 'Registration successful. Please check your inbox and verify your email address to complete registration.',
+      verificationEmailSent,
+      message: verificationEmailSent
+        ? 'Registration successful. Please check your inbox and verify your email address to complete registration.'
+        : 'Registration successful. Verification email could not be sent (email service not configured or error). Use "Resend verification" later or contact support.',
     };
   }
 
   async validateCredentials(email: string, password: string) {
-    console.log(`[AuthService] validateCredentials called for email: ${email}`);
     const user = await this.usersService.findByEmail(email);
-    
+
     if (!user) {
-      console.log(`[AuthService] User not found for email: ${email}`);
       throw new UnauthorizedException('Invalid credentials');
     }
-    
-    console.log(`[AuthService] User found: id=${user.id}, emailVerified=${user.emailVerified}, hasPasswordHash=${!!user.passwordHash}`);
-    console.log(`[AuthService] 🔍 DEBUG: emailVerified type: ${typeof user.emailVerified}, value: ${JSON.stringify(user.emailVerified)}`);
-    console.log(`[AuthService] 🔍 DEBUG: emailVerified === true: ${user.emailVerified === true}`);
-    console.log(`[AuthService] 🔍 DEBUG: emailVerified === false: ${user.emailVerified === false}`);
-    console.log(`[AuthService] 🔍 DEBUG: !user.emailVerified: ${!user.emailVerified}`);
-    
+
     if (!user.passwordHash) {
-      console.log(`[AuthService] User has no password hash for email: ${email}`);
       throw new UnauthorizedException('Invalid credentials');
     }
 
     const isValid = await argon2.verify(user.passwordHash, password);
-    console.log(`[AuthService] Password verification result: ${isValid}`);
-    
+
     if (!isValid) {
-      console.log(`[AuthService] Invalid password for email: ${email}`);
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -129,7 +133,6 @@ export class AuthService {
       throw new UnauthorizedException('Email address is not verified. A verification email has been sent to your inbox. Please check your email and verify your address before logging in.');
     }
 
-    console.log(`[AuthService] ✅ Credentials validated successfully for user: ${user.id}, email: ${email}`);
     return user;
   }
 
@@ -206,66 +209,63 @@ export class AuthService {
     }
   }
 
-  async verifyEmailToken(token: string): Promise<SanitizedUser> {
-    console.log(`[AuthService] verifyEmailToken called, token length: ${token?.length || 0}, token: ${token?.substring(0, 10)}...`);
-    
-    if (!token || !token.trim()) {
-      console.error(`[AuthService] Token is empty or invalid`);
-      throw new BadRequestException('Verification token is required');
+  /**
+   * Код проверяется только в паре с email. Раньше искали по глобально уникальному
+   * токену — для длинной hex-строки это допустимо, для шести цифр нет: таким кодом
+   * можно было бы подтвердить чужой аккаунт.
+   */
+  async verifyEmailToken(email: string, code: string): Promise<SanitizedUser> {
+    if (!code || !code.trim()) {
+      throw new BadRequestException('Verification code is required');
+    }
+    if (!email || !email.trim()) {
+      throw new BadRequestException('Email is required');
     }
 
-    const trimmedToken = token.trim();
-    console.log(`[AuthService] Searching for token in database...`);
-    
-    const record = await this.prisma.emailVerificationToken.findUnique({ 
-      where: { token: trimmedToken } 
+    // Пользователь может вставить код с пробелами — убираем всё, кроме цифр.
+    const normalized = code.replace(/\D/g, '');
+    if (normalized.length !== 6) {
+      throw new BadRequestException('Verification code is invalid or expired');
+    }
+
+    const user = await this.usersService.findByEmail(email.trim());
+    // Одно и то же сообщение и для несуществующего адреса, и для неверного кода:
+    // иначе по ответу можно перебирать зарегистрированные почты.
+    const invalid = () => new BadRequestException('Verification code is invalid or expired');
+    if (!user) throw invalid();
+
+    const record = await this.prisma.emailVerificationToken.findFirst({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
     });
-    
-    console.log(`[AuthService] Token record found:`, record ? `userId=${record.userId}, expiresAt=${record.expiresAt}` : 'not found');
-    
-    if (!record) {
-      console.error(`[AuthService] Token not found in database. Token: ${trimmedToken.substring(0, 20)}...`);
-      
-      // Попробуем найти все активные токены для отладки
-      const allActiveTokens = await this.prisma.emailVerificationToken.findMany({
-        where: {
-          expiresAt: {
-            gt: new Date(), // Активные токены
-          },
-        },
-        take: 5,
-      });
-      
-      console.log(`[AuthService] Found ${allActiveTokens.length} active tokens in database:`);
-      allActiveTokens.forEach((t, idx) => {
-        console.log(`[AuthService] Token ${idx + 1}: userId=${t.userId}, token=${t.token.substring(0, 20)}..., expiresAt=${t.expiresAt}`);
-      });
-      
-      // НЕ используем частичное совпадение токенов - это небезопасно
-      // Токен должен совпадать полностью для безопасности
-      // console.log(`[AuthService] Token not found. Partial matching disabled for security.`);
-      
-      throw new BadRequestException('Verification token is invalid or expired');
-    }
-    
-    const now = new Date();
-    console.log(`[AuthService] Checking expiration. Token expires at: ${record.expiresAt}, Current time: ${now}, Is expired: ${record.expiresAt < now}`);
-    
-    if (record.expiresAt < now) {
-      console.error(`[AuthService] Token expired. Expires at: ${record.expiresAt}, Current time: ${now}`);
-      throw new BadRequestException('Verification token is invalid or expired');
+    if (!record) throw invalid();
+
+    if (record.expiresAt < new Date()) {
+      await this.prisma.emailVerificationToken.deleteMany({ where: { userId: user.id } });
+      throw invalid();
     }
 
-    console.log(`[AuthService] Token is valid, deleting all tokens for user ${record.userId} and marking email as verified`);
-    await this.prisma.emailVerificationToken.deleteMany({ where: { userId: record.userId } });
-    
-    const verifiedUser = await this.usersService.markEmailVerified(record.userId);
+    if (record.attempts >= AuthService.OTP_MAX_ATTEMPTS) {
+      await this.prisma.emailVerificationToken.deleteMany({ where: { userId: user.id } });
+      throw new BadRequestException('Too many attempts. Request a new code.');
+    }
+
+    if (record.token !== normalized) {
+      await this.prisma.emailVerificationToken.update({
+        where: { id: record.id },
+        data: { attempts: { increment: 1 } },
+      });
+      throw invalid();
+    }
+
+    await this.prisma.emailVerificationToken.deleteMany({ where: { userId: user.id } });
+
+    const verifiedUser = await this.usersService.markEmailVerified(user.id);
     if (!verifiedUser) {
-      console.error(`[AuthService] Failed to mark email as verified - user not found: ${record.userId}`);
       throw new BadRequestException('User not found');
     }
-    
-    console.log(`[AuthService] ✅ Email verified successfully for user ${record.userId}`);
+
+    this.logger.log(`Email verified successfully for user ${user.id}`);
     return verifiedUser;
   }
 
@@ -282,71 +282,49 @@ export class AuthService {
   }
 
   async resendVerificationEmail(email: string) {
-    console.log(`[AuthService] resendVerificationEmail called for: ${email}`);
-    
     const user = await this.usersService.findByEmail(email);
-    console.log(`[AuthService] User found:`, user ? `id=${user.id}, emailVerified=${user.emailVerified}` : 'not found');
-    
+
     if (!user) {
-      // Пользователь не найден - возможно, он еще не зарегистрирован
-      // Проверяем, настроен ли mailer, чтобы дать более точное сообщение
       const mailerEnabled = this.mailer.isEnabled();
-      console.log(`[AuthService] User not found, mailer enabled: ${mailerEnabled}`);
-      
       if (!mailerEnabled) {
         throw new BadRequestException('Email service is not configured. Please contact support.');
       }
-      
       // Возвращаем сообщение, которое не раскрывает, существует ли email
-      // но дает понять, что если email не зарегистрирован, письмо не придет
-      return { 
-        success: true, 
-        message: 'If this email is registered and not yet verified, a verification link has been sent. Please check your inbox. If you haven\'t registered yet, please create an account first.' 
+      return {
+        success: true,
+        message: 'If this email is registered and not yet verified, a verification link has been sent. Please check your inbox. If you haven\'t registered yet, please create an account first.'
       };
     }
 
-    // КРИТИЧЕСКИ ВАЖНО: Отправляем токен ВСЕГДА, даже если email уже подтвержден
-    // Это нужно, если пользователь забыл пароль и не может войти
-    // Токен можно использовать для сброса пароля или повторного входа
-    if (user.emailVerified) {
-      console.log(`[AuthService] ⚠️ User email already verified for user: ${user.id}, email: ${user.email}`);
-      console.log(`[AuthService] ⚠️ BUT sending verification token anyway (user may need password reset or token for login)`);
-    } else {
-      console.log(`[AuthService] User email NOT verified for user: ${user.id}, email: ${user.email}`);
-    }
-    
     const mailerEnabled = this.mailer.isEnabled();
-    console.log(`[AuthService] Mailer enabled: ${mailerEnabled}`);
-    
     if (!mailerEnabled) {
-      console.error(`[AuthService] Mailer is not enabled, throwing error`);
       throw new BadRequestException('Email service is not configured. Please contact support.');
     }
 
-    console.log(`[AuthService] Creating verification token for user ${user.id} (emailVerified=${user.emailVerified})`);
+    // Не чаще раза в две минуты. Возвращаем остаток секунд, чтобы клиент
+    // показал таймер, а не просто заблокировал кнопку вслепую.
+    const cooldownMs = await this.getResendCooldownMs(user.id);
+    if (cooldownMs > 0) {
+      throw new BadRequestException({
+        message: 'Please wait before requesting a new code',
+        retryAfterSeconds: Math.ceil(cooldownMs / 1000),
+      });
+    }
+
     const token = await this.createEmailVerificationToken(user.id);
-    console.log(`[AuthService] ✅ Token created successfully, length: ${token.length}, first 20 chars: ${token.substring(0, 20)}...`);
-    
+
     try {
-      console.log(`[AuthService] 📧 Calling mailer.sendVerificationEmail(${user.email}, token)...`);
       await this.mailer.sendVerificationEmail(user.email, token);
-      console.log(`[AuthService] ✅✅✅ Verification email sent successfully to ${user.email} (emailVerified=${user.emailVerified})`);
-      this.logger.log(`✅ Verification email sent to ${user.email} (emailVerified=${user.emailVerified})`);
-      return { 
-        success: true, 
-        message: user.emailVerified 
-          ? 'Verification email sent. Please check your inbox (including spam folder). You can use this token if you need to reset your password or verify your account again.' 
+      this.logger.log(`Verification email sent to ${user.email}`);
+      return {
+        success: true,
+        message: user.emailVerified
+          ? 'Verification email sent. Please check your inbox (including spam folder). You can use this token if you need to reset your password or verify your account again.'
           : 'Verification email sent. Please check your inbox (including spam folder) and verify your email address.'
       };
     } catch (error: any) {
-      console.error(`[AuthService] ❌❌❌ Failed to send verification email to ${user.email}:`, error?.message || error);
-      console.error(`[AuthService] Error code: ${error?.code}`);
-      console.error(`[AuthService] Error command: ${error?.command}`);
-      console.error(`[AuthService] Error response: ${error?.response}`);
-      console.error(`[AuthService] Error stack:`, error?.stack);
-      this.logger.error(`❌ Failed to send verification email to ${user.email}: ${error?.message || error}`);
-      
-      // Более детальное сообщение об ошибке
+      this.logger.error(`Failed to send verification email to ${user.email}: ${error?.message || error}`);
+
       let errorMessage = 'Failed to send verification email. ';
       if (error?.message?.includes('Yandex Cloud')) {
         errorMessage += error.message;
@@ -355,7 +333,7 @@ export class AuthService {
       } else {
         errorMessage += error?.message || 'Unknown error';
       }
-      
+
       throw new BadRequestException(`${errorMessage} Please check your email configuration or contact support.`);
     }
   }
@@ -419,23 +397,46 @@ export class AuthService {
     return { user: profile, ...tokens };
   }
 
+  // Шесть цифр живут 15 минут. Прежний hex-токен жил сутки — для длинной
+  // случайной строки это нормально, для шестизначного кода срок надо резать:
+  // чем дольше он валиден, тем больше времени на перебор.
+  private static readonly OTP_TTL_MS = 15 * 60 * 1000;
+  // Не чаще одного письма в две минуты.
+  private static readonly OTP_RESEND_COOLDOWN_MS = 2 * 60 * 1000;
+  private static readonly OTP_MAX_ATTEMPTS = 5;
+
+  private generateOtp(): string {
+    // randomInt из crypto, а не Math.random: код — секрет.
+    return String(randomInt(0, 1_000_000)).padStart(6, '0');
+  }
+
+  /** Сколько миллисекунд осталось до следующей разрешённой отправки (0 — можно слать). */
+  private async getResendCooldownMs(userId: string): Promise<number> {
+    const last = await this.prisma.emailVerificationToken.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    if (!last) return 0;
+    const elapsed = Date.now() - last.createdAt.getTime();
+    return Math.max(0, AuthService.OTP_RESEND_COOLDOWN_MS - elapsed);
+  }
+
   private async createEmailVerificationToken(userId: string) {
-    const token = randomBytes(32).toString('hex');
-    console.log(`[AuthService] Creating verification token for user ${userId}, token length: ${token.length}, token: ${token.substring(0, 10)}...${token.substring(token.length - 10)}`);
-    
-    // НЕ удаляем старые токены - они могут быть еще активны
-    // Пользователь может запросить повторную отправку, но старый токен все еще должен работать
-    // await this.prisma.emailVerificationToken.deleteMany({ where: { userId } });
-    
+    const token = this.generateOtp();
+
+    // Прежние коды гасим: иначе одновременно живут несколько валидных,
+    // и счётчик попыток обходится переключением между ними.
+    await this.prisma.emailVerificationToken.deleteMany({ where: { userId } });
+
     await this.prisma.emailVerificationToken.create({
       data: {
         userId,
         token,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        expiresAt: new Date(Date.now() + AuthService.OTP_TTL_MS),
       },
     });
-    
-    console.log(`[AuthService] Token created and saved to database for user ${userId}`);
+
     return token;
   }
 

@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /settings
+Disallow: /inbox/
+Disallow: /add-account
+Disallow: /add-account-verify
+Disallow: /admin/
+
+Host: https://iwent.ru
+Sitemap: https://iwent.ru/sitemap.xml

@@ -1,0 +1,30 @@
+/* Простой индикатор без VKUI Spinner (избегаем React #130 из-за бандлинга @vkontakte/icons) */
+.vk-app-loading-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff3b3b;
+  animation: vk-app-pulse 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.vk-app-loading-label {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 16px;
+}
+
+.vk-app-loading-label--light {
+  color: #0a0a0a;
+}
+
+@keyframes vk-app-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

@@ -102,7 +102,11 @@ export class NotificationsService {
 
     // Извлекаем дату и время из startTime
     const eventDate = event.startTime ? event.startTime.toISOString().split('T')[0] : undefined;
-    const eventTime = event.startTime ? event.startTime.toISOString().slice(11, 16) : undefined;
+    const eventTime = event.startTime
+      ? new Date(event.startTime.getTime() + 3 * 60 * 60 * 1000)
+          .toISOString()
+          .slice(11, 16)
+      : undefined;
 
     // Создаем уведомления для всех участников
     const notifications = Array.from(participantIds).map(userId =>

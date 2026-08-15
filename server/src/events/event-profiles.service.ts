@@ -88,7 +88,11 @@ export class EventProfilesService {
               name: event.title,
               description: event.description || '',
               date: event.startTime.toISOString().split('T')[0],
-              time: event.startTime.toISOString().slice(11, 16),
+              // Горячий фикс часового пояса: считаем, что startTime хранится в UTC,
+              // а пользователю нужно локальное время (UTC+3, Москва)
+              time: new Date(event.startTime.getTime() + 3 * 60 * 60 * 1000)
+                .toISOString()
+                .slice(11, 16),
               location: event.location || '',
               avatar: event.originalMediaUrl || event.mediaUrl || null,
               participants: {
@@ -381,7 +385,9 @@ export class EventProfilesService {
             name: event.title,
             description: event.description || '',
             date: event.startTime.toISOString().split('T')[0],
-            time: event.startTime.toISOString().slice(11, 16),
+            time: new Date(event.startTime.getTime() + 3 * 60 * 60 * 1000)
+              .toISOString()
+              .slice(11, 16),
             location: event.location || '',
             participants: {
               create: uniqueParticipantIds.map(participantId => ({
@@ -596,7 +602,9 @@ export class EventProfilesService {
             name: event.title,
             description: event.description || '',
             date: event.startTime.toISOString().split('T')[0],
-            time: event.startTime.toISOString().slice(11, 16),
+            time: new Date(event.startTime.getTime() + 3 * 60 * 60 * 1000)
+              .toISOString()
+              .slice(11, 16),
             location: event.location || '',
             participants: {
               create: uniqueParticipantIds.map(participantId => ({
@@ -815,6 +823,18 @@ export class EventProfilesService {
       logger.error(`Error adding comment: ${error?.message}`, error?.stack);
       throw error;
     }
+  }
+
+  async toggleLike(postId: string, userId: string) {
+    const post = await this.prisma.eventProfilePost.findUnique({ where: { id: postId }, select: { likes: true } });
+    if (!post) throw new NotFoundException('Post not found');
+    const likes = post.likes || [];
+    const hasLiked = likes.includes(userId);
+    await this.prisma.eventProfilePost.update({
+      where: { id: postId },
+      data: { likes: hasLiked ? likes.filter(id => id !== userId) : [...likes, userId] },
+    });
+    return { liked: !hasLiked, likesCount: hasLiked ? likes.length - 1 : likes.length + 1 };
   }
 
   async updatePost(eventId: string, postId: string, userId: string, updates: Partial<CreateEventProfilePostDto>) {

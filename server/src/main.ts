@@ -9,6 +9,7 @@ import { RedisIoAdapter } from './ws/redis-io.adapter';
 import { createLogger } from './shared/utils/logger';
 import { StorageService } from './storage/storage.service';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { LegacyDomainInterceptor } from './shared/interceptors/legacy-domain.interceptor';
 
 const logger = createLogger('Main');
 
@@ -38,6 +39,7 @@ async function bootstrap() {
       },
     }),
   );
+  app.useGlobalInterceptors(new LegacyDomainInterceptor());
 
   app.enableCors({
     origin: configService.get<string>('CORS_ORIGIN')?.split(',') || '*',
