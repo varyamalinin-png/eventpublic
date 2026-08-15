@@ -68,13 +68,22 @@ these two unrelated trees on one branch.**
 
 Resolved 2026-08-14/15: `client/`'s ~92 then-unpushed commits went to a new
 branch, **`client-app-main`**, not `main`. That's the correct target for
-`client/`'s own work going forward — `git push origin main:client-app-main`
-from inside `client/` (or, once tracked, plain `git push` after `git
-branch --set-upstream-to=origin/client-app-main`). Root's own work keeps
-going to `main` as normal. Before ever pushing from `client/`, double-check
-`git remote -v` isn't secretly the same as root's — if a fresh remote ever
-gets set up properly for `client/`, this whole note becomes obsolete and
-can be deleted.
+`client/`'s own work going forward. `client/`'s local `main` branch now has
+its upstream explicitly set to `origin/client-app-main` (`git branch
+--set-upstream-to=origin/client-app-main main`, run 2026-08-15) — **plain
+`git pull`/`git push` inside `client/` now do the right thing** and won't
+touch root's `main`. If you ever see git complain `"The upstream branch of
+your current branch does not match the name of your current branch"` on a
+push from `client/`, that's this local-branch-name-vs-remote-branch-name
+mismatch (local is `main`, remote is `client-app-main`) rather than
+anything actually wrong — `git push` (bare, no args) works fine once the
+upstream above is set; only a *first-time* push to a not-yet-existing
+remote branch needs the explicit `git push origin HEAD:client-app-main`
+form. Root's own work keeps going to `main` as normal, from the root repo,
+never from inside `client/`. Before ever adding a fresh remote or re-cloning
+`client/`, double-check `git remote -v` isn't secretly the same as root's —
+if a dedicated repo ever gets set up properly for `client/`, this whole
+note becomes obsolete and can be deleted.
 
 ### 0.2 A leaked secret in local history required a squash, not a rewrite
 
@@ -122,6 +131,20 @@ leaked OAuth secret by line number) — there's no clean workaround for that
 one short of using a different tool (`Edit`, which takes the literal string
 as a structured parameter rather than shell text, went through fine) or
 having the user run the command themselves.
+
+**Verified 2026-08-15, after the squash:** `git grep` across the entire
+current tree (root, both `HEAD` and history-adjacent commits) for common
+secret shapes (AWS `AKIA...`, Google `AIza...`/`GOCSPX-...`, GitHub
+`ghp_...`, Slack `xox...`, Stripe `sk_live_...`, PEM private-key headers,
+`postgres://user:pass@host` with a real-looking password) turned up
+nothing else — the `docs/`/`scripts/` DB-connection-string examples that
+matched are all obvious placeholders (`user:password`, `YOUR_PASSWORD`,
+literal `postgres:postgres@localhost` for local dev). `client/`'s full
+history (92 commits, unrelated to the squash) also went through GitHub's
+push protection to `client-app-main` clean on the first try. Worth
+re-running an equivalent `git grep -nIE '<patterns>' HEAD -- .` if you're
+ever unsure again, rather than assuming — that's what caught the OAuth
+secret in the first place (GitHub's own scanner, not a manual check).
 
 ## 1. Repo layout — three consumers of one codebase
 
