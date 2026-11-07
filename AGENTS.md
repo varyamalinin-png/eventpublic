@@ -1015,6 +1015,31 @@ Still missing, and each needs an account only the owner can create:
   must then run **closed testing with 12 testers for 14 consecutive days**
   before production access. That 14-day clock, not the code, is the long pole.
 
+## 2.9 reg.ru's upstream DDoS filter quietly blocks *your* IP — looks like an app bug
+
+Twice in the night of 2026-11-08 the Mac suddenly could not reach iwent.ru at
+all — `curl` 000/timeout, 100% ping loss — while the site was **fully up for
+the rest of the world** (verified via an external fetch service and by
+strangers' traffic in `/var/log/nginx/access.log`). SSH to the VM kept working
+the whole time; only web ports (80/443) and ICMP were dropped, and the blocked
+IP never appeared in nginx's log — the packets are dropped **upstream of the
+VM**, at reg.ru's DDoS-scrubbing layer, almost certainly triggered by the
+night's heavy deploy/test traffic from one IP. There is nothing to fix on the
+VM (`iptables` clean, fail2ban only has the sshd jail). The block lifts by
+itself — observed windows were ~3 and ~20 minutes — and flaps if you keep
+hammering while testing.
+
+The diagnostic trap: the iOS simulator shares the Mac's network, so during a
+blocked window the app shows covers as "no cover" placeholders and empty
+skeletons — indistinguishable from a media/frontend bug. The simulator log
+(`xcrun simctl spawn <udid> log show --predicate 'process == "iwent"'`) tells
+the truth: every image task ends `-1001 "The request timed out"` with 0
+response bytes. Before debugging "images don't load", check plain
+`curl https://iwent.ru` from the same machine and an external vantage point.
+Companion fix shipped the same night (`client` 216e759): `EventCard`'s image
+fallback no longer latches the placeholder on the first failed load — cover
+and avatar retry with backoff (4s/10s/20s/40s/60s/60s) before settling.
+
 ## 3. Native app builds
 
 `scripts/build-ios-release.sh` / `build-standalone-ios.sh` build from the
