@@ -555,18 +555,23 @@ note in this file that names `213.165.213.224`, `/home/ubuntu/...` or the user
   `awscli` is not in the Ubuntu 24.04 repos).
 - Domain `iwent.ru` → nginx → these two pm2 processes. `docs/SSL_RENEW_IVENTAPP.md`
   and `scripts/renew-ssl-on-prod.sh` cover certs.
-- **`scripts/deploy-nextjs-to-vm.sh` only deploys `web/`** — and it builds
-  **locally on the Mac** (`rm -rf .next && npm run build` in `web/`), then
-  rsyncs the resulting `.next` up. It defaults to the new host
-  and `/opt/iwent/web` since the move; `VM_HOST`, `VM_USER` and `VM_PATH`
-  override it. **Never build or delete `.next` on the VM itself**: there is
-  no `/opt/iwent/client` on the VM, the web bundle aliases `@/client` into
-  it, so a remote `npm run build` fails on module resolution — and if you
-  already deleted `.next`, the site stays down (500/000) until the next
-  full local deploy. This exact mistake took iwent.ru down once
-  (2026-11-07); the fix is simply re-running the deploy script. The 500
-  "Cannot find module './NNN.js'" right after a deploy means a stale/mixed
-  `.next` — same cure. There is no script for
+- **`scripts/deploy-nextjs-to-vm.sh` only deploys `web/`** — and since
+  2026-11-08 it **builds on the VM** by default: rsyncs `web/` AND
+  `client/` sources into a staging dir `/opt/iwent/build` (the web bundle
+  aliases `@/client` → `../client`, so a build without client sources is
+  impossible), runs `npm install && npm run build` there, then rsyncs the
+  fresh `.next` into the live `/opt/iwent/web` and restarts pm2 — the site
+  does not go down during the build. `LOCAL_BUILD=1` switches back to the
+  old mode (build on the Mac, upload the finished `.next`). **Never run
+  `npm run build` in the live `/opt/iwent/web` and never delete its
+  `.next`** — building only works in `/opt/iwent/build` (client/ sits next
+  to web/ only there); wiping the live `.next` takes the site down (500
+  "Cannot find module './NNN.js'") until the next deploy. This exact
+  mistake took iwent.ru down once (2026-11-07). Web builds must stay
+  independent of `client/node_modules`: native-only packages imported by
+  client code need a stub alias in `web/next.config.js` (expo-blur got one
+  — `web/src/lib/expo-blur-stub.js` — because the VM has no client deps).
+  There is no script for
   the NestJS server — deploying server changes is a manual process:
   diff each changed file against what's actually on the VM (its working
   tree has independent, uncommitted, real production features — chat

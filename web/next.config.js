@@ -30,6 +30,7 @@ const nextConfig = {
       'expo-modules-core': path.resolve(__dirname, 'src/lib/expo-modules-core-stub.js'),
       'expo-image-picker': path.resolve(__dirname, 'src/lib/expo-image-picker-stub.js'),
       'expo-linear-gradient': path.resolve(__dirname, 'src/lib/expo-linear-gradient-stub.js'),
+      'expo-blur': path.resolve(__dirname, 'src/lib/expo-blur-stub.js'),
       'expo-auth-session': path.resolve(__dirname, 'src/lib/expo-auth-session-stub.js'),
       'expo-web-browser': path.resolve(__dirname, 'src/lib/expo-web-browser-stub.js'),
       '@react-navigation/native': path.resolve(__dirname, 'src/lib/react-navigation-stub.js'),
