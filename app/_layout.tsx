@@ -109,10 +109,16 @@ function RouterGate() {
   // текущем маршруте и видел пустые "Авторизуйтесь"/"Нет событий" вместо
   // формы входа. Здесь ловим именно переход в разлогин и толкаем на /login,
   // если человек всё ещё стоит вне (auth).
+  //
+  // Гостевой режим: без аккаунта разрешён раздел (tabs) — открыт Explore
+  // с заблюренными параметрами, остальные табы перехватывает tabPress-guard
+  // в (tabs)/_layout.tsx. Поэтому на /login уводим только с маршрутов
+  // вне (tabs) и (auth) (settings и прочие глобальные экраны).
   React.useEffect(() => {
     if (initializing || isAuthenticated) return;
     const inAuthGroup = segments[0] === '(auth)';
-    if (!inAuthGroup) {
+    const inTabsGroup = segments[0] === '(tabs)';
+    if (!inAuthGroup && !inTabsGroup) {
       router.replace('/(auth)/login');
     }
   }, [isAuthenticated, initializing, segments, router]);
@@ -170,7 +176,13 @@ function RouterGate() {
         <Stack.Screen key="admin/mail" name="admin/mail" options={{ freezeOnBlur: true }} />,
         <Stack.Screen key="+not-found" name="+not-found" />,
       ]
-    : [<Stack.Screen key="(auth)" name="(auth)" />];
+    : [
+        // Гостю нужен раздел (tabs) — Explore открыт без аккаунта,
+        // плюс (auth) для экрана входа/регистрации.
+        <Stack.Screen key="(tabs)" name="(tabs)" />,
+        <Stack.Screen key="(auth)" name="(auth)" />,
+        <Stack.Screen key="+not-found" name="+not-found" />,
+      ];
 
   return (
     <Stack

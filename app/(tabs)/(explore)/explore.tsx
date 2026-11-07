@@ -932,6 +932,11 @@ export default function ExploreScreen() {
       <TouchableOpacity
         style={[styles.tab, activeTab === 'FRIENDS' && styles.activeTab]}
         onPress={() => {
+          // Лента друзей требует аккаунта — гостя ведём на регистрацию.
+          if (!authContext?.user) {
+            router.push('/(auth)/login?mode=register');
+            return;
+          }
           setActiveTab('FRIENDS');
           setShowOrganizers(false);
           translateX.setValue(0);

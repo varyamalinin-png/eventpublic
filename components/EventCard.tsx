@@ -25,6 +25,7 @@ import EventCardMiniature from './EventCard/EventCardMiniature';
 import EventShareModal from './EventShareModal';
 import InviteFriendsModal from './InviteFriendsModal';
 import { AppIcon, AppIconName } from './ui/AppIcon';
+import { GuestBlurredValue } from './GuestBlurredValue';
 import { Palette, Radius } from '../constants/DesignSystem';
 import { sizedImage } from '../utils/imageSize';
 
@@ -215,6 +216,10 @@ function EventCard({
   const router = useRouter();
   const { user: authUser } = useAuth();
   const currentUserId = authUser?.id ?? null;
+  // Гостевой режим: без аккаунта карточка видна, но дата/время/место
+  // заблюрены (настоящие значения сервер гостю вообще не отдаёт), а действия
+  // вроде GO ведут на регистрацию.
+  const isGuest = !currentUserId;
   // Теги всегда видимы, кроме контекста memories (там есть переключатель)
   const { 
     updateEvent, 
@@ -1236,6 +1241,22 @@ function EventCard({
         }).start();
         break;
       case 'go':
+        // Гость: GO — это точка конверсии. Свайп закрываем и ведём на
+        // регистрацию вместо календаря.
+        if (isGuest) {
+          setShowSwipeButtons(false);
+          swipeButtonsVisibleRef.current = false;
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+            speed: 20,
+            bounciness: 0,
+            restDisplacementThreshold: 0.5,
+            restSpeedThreshold: 0.5,
+          }).start();
+          router.push('/(auth)/login?mode=register');
+          break;
+        }
         // Для регулярных событий показываем модальное окно со списком дат
         if (event?.isRecurring) {
           setShowRecurringDatesModal(true);
@@ -1933,6 +1954,13 @@ function EventCard({
                           return;
                         }
                       }
+                      // Гость: на нативе внутрь события не пускаем — ведём на
+                      // регистрацию. На вебе открываем публичную страницу
+                      // события (EventProfileClient сам покажет PublicEventPreview).
+                      if (isGuest && Platform.OS !== 'web') {
+                        router.push('/(auth)/login?mode=register');
+                        return;
+                      }
                       const url = viewerUserId
                         ? `/event-profile/${id}?viewerUserId=${viewerUserId}`
                         : `/event-profile/${id}`;
@@ -2070,6 +2098,21 @@ function EventCard({
                               <AppIcon name="lock" size={12} color="rgba(255,255,255,0.8)" />
                             </View>
                           )}
+                          {isGuest ? (
+                            <>
+                              {/* Гость: дата/время и место заблюрены. Реальных
+                                  значений в данных нет — их вырезал сервер. */}
+                              <View style={exploreStyles.exploreInfoItem}>
+                                <AppIcon name="calendar" size={12} color="rgba(255,255,255,0.8)" />
+                                <GuestBlurredValue text={t.guest.hiddenDateTime} style={exploreStyles.exploreInfoText} />
+                              </View>
+                              <View style={exploreStyles.exploreInfoItem}>
+                                <AppIcon name="pin" size={12} color="rgba(255,255,255,0.8)" />
+                                <GuestBlurredValue text={t.guest.hiddenLocation} style={exploreStyles.exploreInfoText} />
+                              </View>
+                            </>
+                          ) : (
+                          <>
                           {dateText ? renderParameterWithOverlay('date', (
                             <View style={exploreStyles.exploreInfoItem}>
                               <AppIcon name="calendar" size={12} color="rgba(255,255,255,0.8)" />
@@ -2104,6 +2147,8 @@ function EventCard({
                               </TouchableOpacity>
                             )
                           ), Boolean(hiddenParameters.location))}
+                          </>
+                          )}
                           {/* Цена. Проп price карточка получала всегда, но нигде
                               не показывала — параметр был виден только в профиле
                               события. Ключ hiddenParameters тот же (price), чтобы

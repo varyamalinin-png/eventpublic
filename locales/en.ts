@@ -1110,6 +1110,15 @@ export const en = {
   },
 
 
+  // Guest mode (browsing without an account): blurred card parameters
+  // and the link on the login screen.
+  guest: {
+    hiddenDateTime: 'December 12, 7:00 PM',
+    hiddenLocation: 'City center',
+    continueWithoutAccount: 'Continue without an account',
+    signUpToSee: 'Sign up to see the date and place',
+  },
+
   // Map
   map: {
     filterGlob: 'Global',

@@ -3,6 +3,7 @@ import { View, TextInput, TouchableOpacity, StyleSheet, Text } from 'react-nativ
 import { useRouter } from 'expo-router';
 import { AppIcon } from './ui/AppIcon';
 import { Palette, Radius } from '../constants/DesignSystem';
+import { useAuth } from '../context/AuthContext';
 
 interface TopBarProps {
   searchPlaceholder: string;
@@ -30,12 +31,22 @@ export default function TopBar({
   onSettingsPress,
 }: TopBarProps) {
   const router = useRouter();
+  const { user } = useAuth();
 
+  // Гостю календарь и карта недоступны — оба ведут на регистрацию.
   const handleCalendarPress = () => {
+    if (!user) {
+      router.push('/(auth)/login?mode=register');
+      return;
+    }
     router.push(userId ? `/calendar?userId=${userId}` : '/calendar');
   };
 
   const handleMapPress = () => {
+    if (!user) {
+      router.push('/(auth)/login?mode=register');
+      return;
+    }
     let url = '/map';
     const params: string[] = [];
     if (userId) params.push(`userId=${userId}`);

@@ -1113,8 +1113,11 @@ export function EventsProvider({ children }: EventsProviderProps) {
     // вопрос «событие уже прошло».
     const localDate = (d: Date) =>
       `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const date = start ? localDate(start) : localDate(new Date());
-    const time = start ? start.toTimeString().slice(0, 5) : '00:00';
+    // Гостю сервер зануляет startTime (guest-sanitize). Дата всё равно прячется
+    // под блюром, но она НЕ должна быть в прошлом — иначе isEventPast выкинет
+    // событие из ленты. Поэтому заглушка в далёком будущем, а не «сегодня».
+    const date = start ? localDate(start) : '2099-12-12';
+    const time = start ? start.toTimeString().slice(0, 5) : '19:00';
 
     // Фильтруем только ACCEPTED memberships - pending приглашения не должны показываться как участники
     const participantsData = (serverEvent.memberships ?? [])
@@ -1148,7 +1151,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
       displayTime: time,
       location: serverEvent.location ?? '',
       price: serverEvent.price ?? 'Бесплатно',
-      participants: participantsData.length,
+      participants: serverEvent.participantsCount ?? participantsData.length,
       maxParticipants: serverEvent.maxParticipants ?? 0,
       organizerAvatar: normalizeMediaUrl(serverEvent.organizer?.avatarUrl) ?? '',
       organizerId: serverEvent.organizerId,
@@ -2052,11 +2055,13 @@ export function EventsProvider({ children }: EventsProviderProps) {
     // Используем актуальный токен из ref
     const actualToken = currentAccessTokenRef.current;
     const actualUserId = currentUserIdRef.current;
-    
-    if (!actualToken || !actualUserId) return;
-    
+
+    // Гостевой режим: без токена ленту тоже загружаем — сервер отдаёт
+    // публичные события с вырезанными датой и местом (guest-sanitize.ts).
+    const isGuestSync = !actualToken || !actualUserId;
+
     // Проверяем, что токен не изменился
-    if (actualToken !== accessToken || actualUserId !== currentUserId) {
+    if (!isGuestSync && (actualToken !== accessToken || actualUserId !== currentUserId)) {
       logger.debug('syncEventsFromServer: токен или userId изменились, отменяем');
       return;
     }
@@ -2239,8 +2244,9 @@ export function EventsProvider({ children }: EventsProviderProps) {
         refreshPendingJoinRequests(mapped).catch(err => logger.warn('refreshPendingJoinRequests after sync:', err));
       }
     } catch (error) {
-      // Проверяем только 401/403 - другие ошибки не должны вызывать logout
-      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+      // Проверяем только 401/403 - другие ошибки не должны вызывать logout.
+      // У гостя сессии нет — разлогинивать некого, просто логируем.
+      if (!isGuestSync && error instanceof ApiError && (error.status === 401 || error.status === 403)) {
         if (await handleUnauthorizedError(error)) {
           return;
         }
@@ -2383,6 +2389,10 @@ export function EventsProvider({ children }: EventsProviderProps) {
     userId: null,
     accessToken: null,
   });
+  // Гостевая лента: отдельный флаг, потому что у гостя и userId, и токен
+  // равны null — по lastSyncRef «уже синхронизировали» не отличить от
+  // «ещё не синхронизировали».
+  const guestSyncDoneRef = useRef(false);
 
   useEffect(() => {
     const previousUserId = previousUserIdRef.current;
@@ -2454,10 +2464,6 @@ export function EventsProvider({ children }: EventsProviderProps) {
         syncInFlightRef.current = false;
         setInitialSyncing(false);
       });
-    } else if (!authInitializing && !syncInFlightRef.current) {
-      // Синхронизировать нечего (гость либо синхронизация уже прошла) —
-      // иначе скелетон висел бы вечно.
-      setInitialSyncing(false);
     }
 
     if (!currentUserId && userChanged) {
@@ -2477,11 +2483,35 @@ export function EventsProvider({ children }: EventsProviderProps) {
       setSavedMemoryPosts([]);
       // loadedChatMessages теперь в useChats хуке, очистка происходит через setChatMessages([])
       lastSyncRef.current = { userId: null, accessToken: null };
+      // После выхода гостевая лента должна загрузиться заново
+      guestSyncDoneRef.current = false;
       // Кэш ответов тоже: ключи привязаны к аккаунту, но держать их на диске
       // после выхода незачем.
       clearQueryCache();
       // Отключаем WebSocket при выходе
       disconnectSocket();
+    }
+
+    // Решение о «пустой» синхронизации — после блока выхода: он сбрасывает
+    // guestSyncDoneRef, и гостю надо заново подтянуть публичную ленту.
+    if (!shouldSync && !authInitializing && !syncInFlightRef.current) {
+      if (!accessToken && !currentUserId && !guestSyncDoneRef.current) {
+        // Гостевой режим: без сессии тянем только публичную ленту событий —
+        // дата и место приходят вырезанными, карточки рисуются с блюром.
+        guestSyncDoneRef.current = true;
+        syncInFlightRef.current = true;
+        setInitialSyncing(true);
+        syncEventsFromServer()
+          .catch((error) => logger.warn('Guest events sync failed:', error))
+          .finally(() => {
+            syncInFlightRef.current = false;
+            setInitialSyncing(false);
+          });
+      } else {
+        // Синхронизировать нечего (синхронизация уже прошла) —
+        // иначе скелетон висел бы вечно.
+        setInitialSyncing(false);
+      }
     }
 
     previousUserIdRef.current = currentUserId ?? null;

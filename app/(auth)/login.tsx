@@ -582,6 +582,15 @@ export default function AuthScreen() {
             )}
           </View>
         )}
+
+        {/* Гостевой режим: лента открыта без аккаунта, параметры заблюрены */}
+        <TouchableOpacity
+          style={styles.guestButton}
+          onPress={() => router.replace('/(tabs)/explore')}
+          disabled={loading}
+        >
+          <Text style={styles.guestButtonText}>{t.guest.continueWithoutAccount}</Text>
+        </TouchableOpacity>
       </ScrollView>
       <LegalDocumentModal kind={legalModalKind} onClose={() => setLegalModalKind(null)} />
     </KeyboardAvoidingView>
@@ -709,6 +718,17 @@ const styles = StyleSheet.create({
   forgotText: {
     color: 'rgba(244,244,245,0.6)',
     fontSize: 14,
+  },
+  guestButton: {
+    alignSelf: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    marginTop: 4,
+  },
+  guestButtonText: {
+    color: 'rgba(244,244,245,0.45)',
+    fontSize: 14,
+    textDecorationLine: 'underline',
   },
   primaryButtonText: {
     color: '#0A0A0A',

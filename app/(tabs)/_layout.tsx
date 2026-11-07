@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router';
 import { Ionicons, FontAwesome, MaterialIcons } from '@expo/vector-icons';
 import { View, StyleSheet, TouchableOpacity, Text, Platform, Animated } from 'react-native';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { useEvents } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
 import { useMemo, useRef, useCallback } from 'react';
@@ -51,11 +51,23 @@ function AnimatedTabBarButton({ children, onPress, accessibilityState, style, ..
 export default function TabLayout() {
   const { t } = useLanguage();
   const isWeb = Platform.OS === 'web';
+  const router = useRouter();
 
 
   const { chats, unreadNotificationsCount } = useEvents();
   const { user } = useAuth();
   const currentUserId = useMemo(() => user?.id ?? null, [user]);
+
+  // Гостю (без аккаунта) открыт только Explore — остальные табы ведут
+  // на регистрацию. Explore свободен: лента видна с заблюренными параметрами.
+  const guestGuardListeners = useMemo(() => ({
+    tabPress: (e: { preventDefault: () => void }) => {
+      if (!user) {
+        e.preventDefault();
+        router.push('/(auth)/login?mode=register');
+      }
+    },
+  }), [user, router]);
 
   // КРИТИЧЕСКИ ВАЖНО: Не считаем непрочитанные сообщения, так как нет правильной логики определения прочитанности
   // Текущая логика просто проверяет, что последнее сообщение не от текущего пользователя,
@@ -108,6 +120,7 @@ export default function TabLayout() {
       {/* Memories - лента меморис постов (второй таб) */}
       <Tabs.Screen
         name="(memories)"
+        listeners={guestGuardListeners}
         options={{
           title: '',
           headerShown: false,
@@ -120,6 +133,7 @@ export default function TabLayout() {
       {/* Create - скрыт на вебе, показывается только на мобильных */}
       <Tabs.Screen
         name="(create)"
+        listeners={guestGuardListeners}
         options={{
           title: t.tabs.create,
           headerShown: false,
@@ -137,6 +151,7 @@ export default function TabLayout() {
       {/* Inbox - сообщения (четвертый таб) */}
       <Tabs.Screen
         name="(inbox)"
+        listeners={guestGuardListeners}
         options={{
           title: '',
           headerShown: false,
@@ -158,6 +173,7 @@ export default function TabLayout() {
       {/* Profile - скрыт на вебе, показывается только на мобильных */}
       <Tabs.Screen
         name="(profile)"
+        listeners={guestGuardListeners}
         options={{
           title: '',
           headerShown: false,
