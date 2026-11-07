@@ -8,6 +8,8 @@ import {
   TouchableOpacity,
   Modal,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
   Alert,
   RefreshControl,
 } from 'react-native';
@@ -95,7 +97,7 @@ export default function SupportComplaintsScreen() {
       setComplaints(data);
     } catch (error) {
       logger.error('Failed to fetch complaints:', error);
-      Alert.alert(t.common.error, 'Не удалось загрузить жалобы');
+      Alert.alert(t.common.error, t.messages.complaintsLoadFailed);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -129,7 +131,7 @@ export default function SupportComplaintsScreen() {
         accessToken,
       );
 
-      Alert.alert(t.common.success, 'Ответ отправлен');
+      Alert.alert(t.common.success, t.messages.replySent);
       setShowResponseModal(false);
       setShowDetailModal(false);
       fetchComplaints();
@@ -155,7 +157,7 @@ export default function SupportComplaintsScreen() {
         accessToken,
       );
 
-      Alert.alert(t.common.success, `Жалоба ${status === 'RESOLVED' ? t.support.resolvedFem : 'отклонена'}`);
+      Alert.alert(t.common.success, status === 'RESOLVED' ? t.messages.complaintResolved : t.messages.complaintRejected);
       setShowDetailModal(false);
       fetchComplaints();
     } catch (error) {
@@ -391,7 +393,12 @@ export default function SupportComplaintsScreen() {
         animationType="slide"
         onRequestClose={() => setShowResponseModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        {/* Поле ответа — в нижней части центрированной модалки,
+            клавиатура его перекрывала */}
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t.support.replyToComplaint}</Text>
@@ -431,7 +438,7 @@ export default function SupportComplaintsScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

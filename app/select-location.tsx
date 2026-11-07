@@ -1,7 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useLanguage } from '../context/LanguageContext';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
+import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { createLogger } from '../utils/logger';
 import { AppIcon } from '../components/ui/AppIcon';
@@ -57,6 +58,63 @@ export default function SelectLocationScreen() {
     generateMapHtml();
   }, []);
 
+  /**
+   * Карта открывается там, где человек сейчас, а не на Москве.
+   *
+   * Координаты приходят асинхронно — карта к этому времени уже нарисована с
+   * Москвы, поэтому переносим её скриптом (window.__centerOn). Если место уже
+   * выбрано тапом или поиском, ничего не двигаем. Нет разрешения на
+   * геолокацию — остаётся Москва, как раньше.
+   */
+  const userCoordsRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const selectedLocationRef = useRef<typeof selectedLocation>(null);
+  selectedLocationRef.current = selectedLocation;
+  const centerOnUser = useCallback(() => {
+    const coords = userCoordsRef.current;
+    if (!coords || selectedLocationRef.current) return;
+    webViewRef.current?.injectJavaScript(
+      `window.__centerOn && window.__centerOn(${coords.latitude}, ${coords.longitude}); true;`,
+    );
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        let { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          ({ status } = await Location.requestForegroundPermissionsAsync());
+        }
+        if (status !== 'granted' || cancelled) return;
+        const apply = (position: Location.LocationObject | null) => {
+          if (!position || cancelled) return;
+          userCoordsRef.current = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          };
+          centerOnUser();
+        };
+        // Сначала последняя известная точка — она мгновенная. Но она бывает
+        // устаревшей (город, где телефон был вчера), поэтому следом берём
+        // свежую и, пока место не выбрано, переносим карту на неё.
+        apply(await Location.getLastKnownPositionAsync());
+        apply(await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+      } catch (error) {
+        logger.debug('Не удалось получить местоположение для карты', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [centerOnUser]);
+
+  // ВНИМАНИЕ: html ниже — шаблонная строка, и всё, что должно попасть внутрь
+  // из React-кода, обязано подставляться через ${...}. Раньше переводы были
+  // записаны как «t.map.selectedPlace» БЕЗ подстановки: в браузер уходил
+  // буквальный текст, переменной t там нет, и при клике по карте падал
+  // ReferenceError — метка не ставилась, координаты не отправлялись, а кнопка
+  // «Подтвердить место» так и оставалась неактивной. Строки подставляем через
+  // JSON.stringify, чтобы кавычки внутри перевода не ломали скрипт.
   const generateMapHtml = () => {
     const mapsApiKey = process.env.EXPO_PUBLIC_YANDEX_MAPS_API_KEY || 'e95f18c1-e796-4e6a-b2a9-0aafe5e420c4';
     const html = `
@@ -74,13 +132,62 @@ export default function SelectLocationScreen() {
       <body>
         <div id="map"></div>
         <script>
+          // Приложение зовёт это, когда узнает, где человек (centerOnUser).
+          // Карта может быть ещё не готова — тогда точку применит ymaps.ready.
+          window.__centerOn = function (lat, lon) {
+            window.__pendingCenter = [lat, lon];
+            if (window.__map) {
+              window.__map.setCenter([lat, lon], 14);
+            }
+          };
+
           ymaps.ready(function () {
             var myMap = new ymaps.Map('map', {
               center: [55.7558, 37.6176],
               zoom: 10
             });
+            window.__map = myMap;
+            if (window.__pendingCenter) {
+              myMap.setCenter(window.__pendingCenter, 14);
+            }
 
             var placemark;
+
+            // Поиск по адресу из поля над картой. Раньше поле было просто
+            // текстом без обработчика: ввод ни к чему не приводил, выбрать
+            // место получалось только касанием карты. Геокодируем строку,
+            // ставим метку и отправляем в приложение то же, что и при касании.
+            window.searchAddress = function (query) {
+              var notFound = function () {
+                if (window.ReactNativeWebView) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'searchNotFound' }));
+                }
+              };
+              ymaps.geocode(query, { results: 1 }).then(function (res) {
+                var found = res.geoObjects.get(0);
+                if (!found) { notFound(); return; }
+                var coords = found.geometry.getCoordinates();
+                var address = found.getAddressLine();
+                if (placemark) {
+                  myMap.geoObjects.remove(placemark);
+                }
+                placemark = new ymaps.Placemark(coords, {
+                  balloonContentBody: address
+                }, {
+                  preset: 'islands#circleDotIcon',
+                  iconColor: '#FF8D32'
+                });
+                myMap.geoObjects.add(placemark);
+                myMap.setCenter(coords, 16);
+                if (window.ReactNativeWebView) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'addressReceived',
+                    address: address,
+                    coordinates: { latitude: coords[0], longitude: coords[1] }
+                  }));
+                }
+              }, notFound);
+            };
 
             myMap.events.add('click', function (e) {
               var coords = e.get('coords');
@@ -92,8 +199,8 @@ export default function SelectLocationScreen() {
               placemark = new ymaps.Placemark(coords, {
                 balloonContentBody: [
                   '<address>',
-                  '<strong>' + t.map.selectedPlace + '</strong><br/>',
-                  t.map.coordinates + coords[0].toPrecision(6) + ', ' + coords[1].toPrecision(6),
+                  '<strong>' + ${JSON.stringify(t.map.selectedPlace)} + '</strong><br/>',
+                  ${JSON.stringify(t.map.coordinates)} + coords[0].toPrecision(6) + ', ' + coords[1].toPrecision(6),
                   '</address>'
                 ].join('')
               }, {
@@ -168,6 +275,8 @@ export default function SelectLocationScreen() {
           longitude: data.coordinates.longitude,
           address: data.address
         });
+      } else if (data.type === 'searchNotFound') {
+        Alert.alert(t.common.error, t.messages.selectPlaceOnMap);
       } else if (data.type === 'locationSelected') {
         setSelectedLocation({
           latitude: data.coordinates.latitude,
@@ -180,9 +289,17 @@ export default function SelectLocationScreen() {
     }
   };
 
+  const handleSearch = () => {
+    const query = searchQuery.trim();
+    if (!query) return;
+    webViewRef.current?.injectJavaScript(
+      `window.searchAddress && window.searchAddress(${JSON.stringify(query)}); true;`,
+    );
+  };
+
   const handleConfirm = () => {
     if (!selectedLocation) {
-      Alert.alert(t.common.error, 'Пожалуйста, выберите место на карте');
+      Alert.alert(t.common.error, t.messages.selectPlaceOnMap);
       return;
     }
 
@@ -212,6 +329,9 @@ export default function SelectLocationScreen() {
           placeholderTextColor="#999"
           value={searchQuery}
           onChangeText={setSearchQuery}
+          onSubmitEditing={handleSearch}
+          returnKeyType="search"
+          autoCorrect={false}
         />
       </View>
 
@@ -224,6 +344,8 @@ export default function SelectLocationScreen() {
           javaScriptEnabled={true}
           domStorageEnabled={true}
           onMessage={handleWebViewMessage}
+          // Координаты могли прийти раньше, чем загрузилась страница карты.
+          onLoadEnd={centerOnUser}
         />
       </View>
 

@@ -105,6 +105,7 @@ export const useMessageFolders = ({
         }
       } catch (error) {
         logger.error('Failed to create message folder', error);
+        throw error;
       }
       return null;
     },
@@ -134,7 +135,10 @@ export const useMessageFolders = ({
           await syncMessageFolders();
         }
       } catch (error) {
+        // Ошибку пробрасываем: раньше она глохла здесь, и экран просто
+        // закрывал окно — со стороны «нажимаю, и ничего не происходит».
         logger.error('Failed to add chats to folder', error);
+        throw error;
       }
     },
     [syncMessageFolders],

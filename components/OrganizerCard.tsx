@@ -5,8 +5,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useLanguage } from '../context/LanguageContext';
 import { useEvents } from '../context/EventsContext';
+import { openUserProfile } from '../utils/openUserProfile';
 import { formatUsername } from '../utils/username';
 import { Palette } from '../constants/DesignSystem';
+import { sizedImage } from '../utils/imageSize';
 
 /** Счётчики Organized/Participated временно скрыты — как и в шапке профиля.
  *  Вернуть их можно, переключив флаг в true: разметка сохранена. */
@@ -70,13 +72,41 @@ function OrganizerCard({
   }, [isOnline, pulseAnim]);
   // Грузим реальную статистику лениво — один раз при монтировании карточки.
   // Это изолирует N+1 API-вызовы внутри карточки и не вызывает ре-рендеры explore.
-  const { getOrganizerStats } = useEvents();
+  const { getOrganizerStats, fetchUserById } = useEvents();
   const [stats, setStats] = useState<OrganizerStats>(initialStats);
 
-  // Длинное «о себе» ломало карточку — сворачиваем и раскрываем по кнопке
-  const BIO_PREVIEW_LIMIT = 80;
+  // «О себе» появлялось с задержкой: в списках событий организатор приходит
+  // урезанно (id/имя/username/аватар), без bio, и текст возникал только когда
+  // полный профиль подтягивался откуда-то ещё. Запрашиваем его сразу —
+  // fetchUserById дедуплицирует запросы по id, так что на всю ленту
+  // приходится один запрос на организатора.
+  useEffect(() => {
+    if (organizerId && !bio) {
+      fetchUserById(organizerId);
+    }
+  }, [organizerId, bio, fetchUserById]);
+
+  // Длинное «о себе» ломало карточку — сворачиваем и раскрываем по кнопке.
+  // Раньше «длинным» считалось био длиннее 80 символов, но в узкую карточку
+  // не влезает и куда более короткий текст: он обрезался троеточием, а кнопки
+  // «Ещё» не было — раскрыть было нечем. Поэтому факт обрезки определяем по
+  // реальной вёрстке (onTextLayout), а не по длине строки.
   const [bioExpanded, setBioExpanded] = useState(false);
-  const isBioLong = !!bio && bio.length > BIO_PREVIEW_LIMIT;
+  // Измеритель срабатывает только после первой раскладки, и кнопка «Ещё»
+  // из-за этого появлялась заметно позже самого текста. Поэтому стартовое
+  // значение берём из длины: заведомо длинный текст в узкую карточку в одну
+  // строку не поместится никогда, так что кнопку можно показать сразу, а
+  // измеритель ниже уточнит пограничные случаи.
+  const BIO_DEFINITELY_LONG = 28;
+  const [isBioTruncated, setIsBioTruncated] = useState(
+    !!bio && bio.length > BIO_DEFINITELY_LONG,
+  );
+
+  // Новое био — заново измеряем
+  useEffect(() => {
+    setIsBioTruncated(!!bio && bio.length > BIO_DEFINITELY_LONG);
+    setBioExpanded(false);
+  }, [bio]);
 
   useEffect(() => {
     if (!getOrganizerStats) return;
@@ -96,12 +126,7 @@ function OrganizerCard({
   const isOwnProfile = currentUserId === organizerId;
   
   const handleProfilePress = () => {
-    if (isOwnProfile) {
-      // Переходим на таб профиля, а не на /profile/[id]
-      router.push('/(tabs)/profile');
-    } else {
-      router.push(`/profile/${organizerId}`);
-    }
+    openUserProfile(organizerId, currentUserId);
   };
   
   const handleAllEventsPress = () => {
@@ -132,7 +157,7 @@ function OrganizerCard({
         <View style={styles.avatarContainer}>
           <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.9} style={styles.avatarTouch}>
             <Image
-              source={{ uri: avatar }}
+              source={{ uri: sizedImage(avatar, 44) }}
               style={styles.profileAvatar}
             />
           </TouchableOpacity>
@@ -150,24 +175,46 @@ function OrganizerCard({
 
         {/* Информация о пользователе */}
         <View style={[styles.userProfileContainer, eventHeight ? styles.userProfileContainerWithHeight : null]}>
-          {/* Юзернейм */}
-          <Text style={styles.username}>{formatUsername(username)}</Text>
+          {/* Юзернейм и имя ведут в профиль — как и аватар выше.
+              Раньше кликабельной была только аватарка. */}
+          <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7} hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}>
+            <Text style={styles.username}>{formatUsername(username)}</Text>
+          </TouchableOpacity>
 
-          {/* Имя и возраст */}
-          <Text style={styles.nameAndAge}>{name}, {age}</Text>
+          <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7} hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}>
+            <Text style={styles.nameAndAge}>{name}{age ? `, ${age}` : ''}</Text>
+          </TouchableOpacity>
 
-          {/* О себе — длинный текст в одну строку, «Ещё» сразу справа от него */}
+          {/* О себе. Кнопка «Ещё» появляется, только если текст реально
+              не поместился — факт обрезки меряем через onTextLayout. */}
           {!!bio && (
-            isBioLong ? (
+            <>
               <View style={styles.bioRow}>
                 <Text style={[styles.bio, styles.bioInline]} numberOfLines={1}>{bio}</Text>
-                <TouchableOpacity onPress={() => setBioExpanded(true)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 6, right: 8 }}>
-                  <Text style={styles.bioMore}>{t.common.showMore}</Text>
-                </TouchableOpacity>
+                {isBioTruncated && (
+                  <TouchableOpacity onPress={() => setBioExpanded(true)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 6, right: 8 }}>
+                    <Text style={styles.bioMore}>{t.common.showMore}</Text>
+                  </TouchableOpacity>
+                )}
               </View>
-            ) : (
-              <Text style={styles.bio} numberOfLines={2}>{bio}</Text>
-            )
+              {/* Невидимый измеритель: рисует то же био без ограничения по
+                  строкам. Видимый текст стоит в одну строку, поэтому если
+                  здесь строк больше одной — текст не влез, и нужна кнопка.
+                  Мерить сам видимый Text нельзя: при numberOfLines RN вернёт
+                  ровно столько строк, сколько отрисовал, и факт обрезки
+                  из этого не виден. */}
+              <Text
+                style={[styles.bio, styles.bioMeasure]}
+                pointerEvents="none"
+                onTextLayout={(e) => {
+                  if (!isBioTruncated && e.nativeEvent.lines.length > 1) {
+                    setIsBioTruncated(true);
+                  }
+                }}
+              >
+                {bio}
+              </Text>
+            </>
           )}
           
           {/* Статистика - все сразу без раскрытия, как в профиле */}
@@ -191,33 +238,34 @@ function OrganizerCard({
                 <Text style={styles.statNumber}>{stats.complaints}</Text>
                 <Text style={styles.statLabel}>{t.profile.statsComplaints}</Text>
               </View>
-            </View>
-            
-            {/* Второй ряд: Organized/Participated скрыты флагом SHOW_ORG_PART,
-                разметка сохранена — вернуть можно переключением в true */}
-            <View style={styles.statsRow}>
-              {SHOW_ORG_PART && (
-                <TouchableOpacity style={styles.statItem} onPress={handleOrganizedPress}>
-                  <Text style={styles.statNumber}>{stats.organizedEvents}</Text>
-                  <Text style={styles.statLabel}>{t.profile.statsOrganized}</Text>
-                </TouchableOpacity>
-              )}
 
-              {SHOW_ORG_PART && (
-                <TouchableOpacity style={styles.statItem} onPress={handleParticipatedPress}>
-                  <Text style={styles.statNumber}>{stats.participatedEvents}</Text>
-                  <Text style={styles.statLabel}>{t.profile.statsParticipated}</Text>
-                </TouchableOpacity>
-              )}
-
+              {/* "Shared" живёт в первом ряду, а не в отдельном втором —
+                  отдельный почти всегда пустой ряд (Organized/Participated
+                  скрыты флагом SHOW_ORG_PART) добавлял лишнюю высоту и
+                  обрезался фиксированной высотой карточки (overflow: hidden). */}
               {currentUserId && currentUserId !== organizerId && stats.sharedEvents !== undefined && (
                 <TouchableOpacity style={styles.statItem} onPress={handleSharedPress}>
                   <Text style={styles.statNumber}>{stats.sharedEvents}</Text>
                   <Text style={styles.statLabel}>{t.profile.statsShared}</Text>
                 </TouchableOpacity>
               )}
-              
             </View>
+
+            {/* Organized/Participated скрыты флагом SHOW_ORG_PART,
+                разметка сохранена — вернуть можно переключением в true */}
+            {SHOW_ORG_PART && (
+              <View style={styles.statsRow}>
+                <TouchableOpacity style={styles.statItem} onPress={handleOrganizedPress}>
+                  <Text style={styles.statNumber}>{stats.organizedEvents}</Text>
+                  <Text style={styles.statLabel}>{t.profile.statsOrganized}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.statItem} onPress={handleParticipatedPress}>
+                  <Text style={styles.statNumber}>{stats.participatedEvents}</Text>
+                  <Text style={styles.statLabel}>{t.profile.statsParticipated}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
 
@@ -336,8 +384,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     marginBottom: 6,
   },
+  // Невидимый измеритель обрезки био: занимает ту же ширину, но не влияет
+  // на раскладку и не виден пользователю.
+  bioMeasure: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    opacity: 0,
+    zIndex: -1,
+  },
   bioInline: {
-    flexShrink: 1,
+    flex: 1,
+    // Классическая ловушка flexbox: flex-item не сжимается меньше своего
+    // содержимого без явного minWidth:0 — из-за этого длинный текст в одну
+    // строку раздвигал bioRow шире карточки, «Ещё» уезжала за overflow:hidden
+    // карточки (сам текст показывал «…», но кнопка была не видна), а
+    // раздутая по ширине строка иногда переносилась и на вторую строку,
+    // отжимая статистику вниз за пределы фиксированной высоты карточки.
+    minWidth: 0,
     marginBottom: 0,
     paddingHorizontal: 0,
     textAlign: 'left',

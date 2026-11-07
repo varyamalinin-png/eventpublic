@@ -6,8 +6,31 @@ import { EventsProvider } from '../context/EventsContext';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { LanguageProvider } from '../context/LanguageContext';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 import { ThemeProvider } from '../context/ThemeContext';
 import OfflineBanner from '../components/OfflineBanner';
+import * as SplashScreen from 'expo-splash-screen';
+import { hydrateQueryCache } from '../utils/queryCache';
+import { installNavigationGuard } from '../utils/navigationGuard';
+
+// Гасит повторные переходы на один и тот же экран (двойные нажатия).
+// Ставится один раз на модуле — патчится singleton router из expo-router.
+installNavigationGuard();
+
+// Держим нативный сплэш до конца инициализации авторизации.
+// Без этого сплэш прячется на ПЕРВОМ отрисованном кадре — то есть раньше,
+// чем прочитан токен из SecureStore, — и пользователь на мгновение видел
+// экран входа при каждом запуске, даже будучи авторизованным.
+SplashScreen.preventAutoHideAsync().catch(() => {
+  // Вызов до маунта на некоторых платформах бросает — это не критично.
+});
+
+// Кэш серверных ответов поднимаем в память сразу при старте, пока держится
+// сплэш: к моменту, когда человек дойдёт до списка друзей, читать его можно
+// будет синхронно, без пустого экрана в ожидании сети.
+hydrateQueryCache().catch(() => {
+  // Нет кэша — просто загрузимся с сети, как раньше.
+});
 
 // Обработка ошибок инициализации Metro и router для всех платформ
   const originalError = console.error;
@@ -74,6 +97,12 @@ function RouterGate() {
   const router = useRouter();
   const segments = useSegments();
 
+  // Пуши регистрируем здесь, а не в самом верху дерева: хуку нужны и
+  // AuthProvider (токен доступа), и LanguageProvider (язык текста пуша),
+  // а RouterGate живёт внутри обоих. Разрешение спрашивается только после
+  // входа — см. комментарий в самом хуке.
+  usePushNotifications();
+
   // Раньше при обрыве сессии (выход, истёкший токен) index.tsx уже не
   // перевызывался — он редиректит один раз при первом заходе. RouterGate
   // просто убирал защищённые экраны из стека, поэтому человек оставался на
@@ -88,6 +117,20 @@ function RouterGate() {
     }
   }, [isAuthenticated, initializing, segments, router]);
 
+  // Сплэш убираем ровно тогда, когда уже известно, авторизован ли человек,
+  // — первый видимый кадр сразу правильный. Таймаут страхует от зависания
+  // сплэша, если инициализация почему-то не завершится.
+  React.useEffect(() => {
+    if (!initializing) {
+      SplashScreen.hideAsync().catch(() => {});
+      return;
+    }
+    const safety = setTimeout(() => {
+      SplashScreen.hideAsync().catch(() => {});
+    }, 5000);
+    return () => clearTimeout(safety);
+  }, [initializing]);
+
   if (initializing) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0c' }}>
@@ -96,6 +139,19 @@ function RouterGate() {
     );
   }
 
+  /**
+   * КОРНЕВОЙ стек — только глобальные экраны.
+   *
+   * После перехода на постабные стеки экраны-детали (профиль пользователя,
+   * профиль события, папки, меморис-пост, календарь, карта, списки событий)
+   * живут в app/(tabs)/(explore,memories,inbox,profile)/ и здесь их быть не
+   * должно. Пока они оставались перечислены тут, роутер ругался
+   * «No route named "calendar" exists in nested children» на каждый такой
+   * экран — объявления указывали на маршруты, которых в корне уже нет.
+   *
+   * freezeOnBlur этим экранам тоже больше не нужен: он задан на уровне
+   * screenOptions в стеке каждого раздела.
+   */
   const authScreens = isAuthenticated
     ? [
         <Stack.Screen key="(tabs)" name="(tabs)" />,
@@ -103,33 +159,37 @@ function RouterGate() {
         <Stack.Screen key="settings" name="settings" />,
         <Stack.Screen key="add-account" name="add-account" />,
         <Stack.Screen key="add-account-verify" name="add-account-verify" />,
-        <Stack.Screen key="calendar" name="calendar" />,
-        <Stack.Screen key="map" name="map" />,
-        <Stack.Screen key="profile/[id]" name="profile/[id]" />,
-        <Stack.Screen key="friends-list" name="friends-list" />,
-        <Stack.Screen key="friends-list/[id]" name="friends-list/[id]" />,
-        <Stack.Screen key="event-profile/[id]" name="event-profile/[id]" />,
-        <Stack.Screen key="all-events/[userId]" name="all-events/[userId]" />,
-        <Stack.Screen key="organized-events/[userId]" name="organized-events/[userId]" />,
-        <Stack.Screen key="participated-events/[userId]" name="participated-events/[userId]" />,
-        <Stack.Screen key="shared-events/[userId]" name="shared-events/[userId]" />,
-        <Stack.Screen key="payment" name="payment" />,
+        // Экраны с незавершённым вводом — без freezeOnBlur, чтобы не терять черновик.
         <Stack.Screen key="create-event" name="create-event" />,
-        <Stack.Screen key="my-events" name="my-events" />,
-        <Stack.Screen key="my-complaints" name="my-complaints" />,
-        <Stack.Screen key="support/complaints" name="support/complaints" />,
         <Stack.Screen key="select-location" name="select-location" />,
-        <Stack.Screen key="event-folder/[id]" name="event-folder/[id]" />,
-        <Stack.Screen key="event-folder-view/[id]" name="event-folder-view/[id]" />,
-        <Stack.Screen key="memory-post/[eventId]/[postId]" name="memory-post/[eventId]/[postId]" />,
-        <Stack.Screen key="admin/index" name="admin/index" />,
-        <Stack.Screen key="admin/complaints" name="admin/complaints" />,
+        <Stack.Screen key="my-events" name="my-events" options={{ freezeOnBlur: true }} />,
+        <Stack.Screen key="my-complaints" name="my-complaints" options={{ freezeOnBlur: true }} />,
+        <Stack.Screen key="support/complaints" name="support/complaints" options={{ freezeOnBlur: true }} />,
+        <Stack.Screen key="admin/index" name="admin/index" options={{ freezeOnBlur: true }} />,
+        <Stack.Screen key="admin/complaints" name="admin/complaints" options={{ freezeOnBlur: true }} />,
+        <Stack.Screen key="admin/mail" name="admin/mail" options={{ freezeOnBlur: true }} />,
         <Stack.Screen key="+not-found" name="+not-found" />,
       ]
     : [<Stack.Screen key="(auth)" name="(auth)" />];
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        /**
+         * Зона свайпа-назад.
+         *
+         * Здесь стояло `{ start: 50 }` — то есть ровно значение по умолчанию:
+         * комментарий обещал расширение, а на деле оставалась та же полоска у
+         * самой рамки.
+         *
+         * 120 точек: жест можно начать заметно дальше от края, но не с середины
+         * экрана — иначе он начнёт спорить с горизонтальными жестами внутри
+         * экранов (свайп карточки события, карусели фотографий).
+         */
+        gestureResponseDistance: { start: 120 },
+      }}
+    >
       <Stack.Screen name="index" />
       {authScreens}
     </Stack>

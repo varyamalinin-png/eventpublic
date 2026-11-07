@@ -426,6 +426,20 @@ export const eventCardStyles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   // Участники для мини-карточки
+  // Замок приватного события — левый нижний угол миниатюры. Правый нижний
+  // занят участниками, правый верхний — аватаркой организатора.
+  miniatureLockBadge: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    zIndex: 10,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+  },
   miniatureParticipantsContainer: {
     position: 'absolute',
     bottom: 8,
@@ -575,6 +589,14 @@ export const eventCardStyles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
     zIndex: 10,
+  },
+  // Метки одной группой: так их можно скрыть целиком одним параметром и
+  // повесить на группу один глазик вместо значка на каждой метке.
+  tagsGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    justifyContent: 'flex-end',
   },
   tagBadge: {
     paddingHorizontal: 12,

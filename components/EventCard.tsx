@@ -10,6 +10,7 @@ import ParticipantsModal from './ParticipantsModal';
 import ComplaintForm from './ComplaintForm';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
+import { openUserProfile } from '../utils/openUserProfile';
 import { formatRecurringEventDate } from '../utils/dateHelpers';
 import { createLogger } from '../utils/logger';
 import { getAllRecurringDates } from '../utils/recurringEventUtils';
@@ -17,9 +18,15 @@ import { eventCardStyles } from './EventCard/EventCard.styles';
 import { LazyImage } from './ui/LazyImage';
 import { useEventCardActions } from '../hooks/events/useEventCardActions';
 import EventCardActionsModal from './EventCard/EventCardActionsModal';
+import { showInDevelopmentHint } from '../utils/showInDevelopmentHint';
+import { getPersonalEventPhoto } from '../utils/personalEventPhoto';
+import { interpolate } from '../utils/interpolate';
 import EventCardMiniature from './EventCard/EventCardMiniature';
+import EventShareModal from './EventShareModal';
+import InviteFriendsModal from './InviteFriendsModal';
 import { AppIcon, AppIconName } from './ui/AppIcon';
 import { Palette, Radius } from '../constants/DesignSystem';
+import { sizedImage } from '../utils/imageSize';
 
 const logger = createLogger('EventCard');
 
@@ -209,13 +216,14 @@ function EventCard({
   const { user: authUser } = useAuth();
   const currentUserId = authUser?.id ?? null;
   // Теги всегда видимы, кроме контекста memories (там есть переключатель)
-  const [tagsVisible, setTagsVisible] = useState<boolean>(true); // Состояние для видимости меток в memories
   const { 
     updateEvent, 
     getUserData, 
     sendEventRequest, 
     getEventParticipants,
     getEventProfile,
+    memoryVisibility,
+    setMemoryVisibility,
     isUserEventMember,
     isEventPast,
     getEventPhotoForUser,
@@ -237,6 +245,7 @@ function EventCard({
     getChat,
     getFriendsList,
     eventFolders,
+    refreshEventFolders,
     removeEventFromFolder,
     addEventToFolder,
     sendEventToChats,
@@ -256,6 +265,9 @@ function EventCard({
     return events.find(e => e.id === id);
   }, [events, id]);
   
+  // Видимость «только я»: событие видно лишь автору и только в его профиле.
+  const isOnlyMeEvent = (event as any)?.visibility?.type === 'only_me';
+
   // Получаем профиль события из контекста (более надежно, чем getEventProfile)
   const eventProfile = useMemo(() => {
     return eventProfiles.find(p => p.eventId === id) || null;
@@ -295,11 +307,11 @@ function EventCard({
   const [showShareModal, setShowShareModal] = useState(false);
   const [showAddToFolderModal, setShowAddToFolderModal] = useState(false);
   const [selectedFolderIds, setSelectedFolderIds] = useState<Set<string>>(new Set());
-  const [shareSearchQuery, setShareSearchQuery] = useState('');
-  const [selectedShareChats, setSelectedShareChats] = useState<string[]>([]);
   const [showRecurringDatesModal, setShowRecurringDatesModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
   const [showTransferOrganizerModal, setShowTransferOrganizerModal] = useState(false);
+  const [showMemoryVisibilityModal, setShowMemoryVisibilityModal] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
   const [selectedNewOrganizerId, setSelectedNewOrganizerId] = useState<string | null>(null);
   // Состояние для режима редактирования видимости параметров (только для прошедших событий в меморис)
   const [isEditingParameterVisibility, setIsEditingParameterVisibility] = useState(false);
@@ -317,6 +329,9 @@ function EventCard({
     }
   }, [eventProfile]);
   const translateX = useRef(new Animated.Value(0)).current;
+  // Текущее состояние видимости кнопок — чтобы не дёргать setState на каждом
+  // кадре жеста (см. onGestureEvent).
+  const swipeButtonsVisibleRef = useRef(false);
   // Bounce animation for save/bookmark action (Task 2a)
   const saveScaleAnim = useRef(new Animated.Value(1)).current;
   const animateSaveBounce = useCallback(() => {
@@ -327,6 +342,20 @@ function EventCard({
   }, [saveScaleAnim]);
   const [isJoined, setIsJoined] = useState(false);
   const [showSwipeButtons, setShowSwipeButtons] = useState(false);
+  /**
+   * «Карточка зафиксирована открытой» — отдельно от showSwipeButtons.
+   *
+   * showSwipeButtons переключается ПОСРЕДИ жеста (как только палец прошёл
+   * 45% хода), а от него зависели activeOffsetX/failOffsetX самого
+   * PanGestureHandler. Смена конфигурации на лету перезапускает нативный
+   * распознаватель — жест обрывался, карточка застывала на полпути, и
+   * следующие короткие движения пальцем она игнорировала. Этот флаг меняется
+   * только когда жест закончился, поэтому во время свайпа настройки
+   * обработчика постоянны.
+   */
+  const [swipeOpen, setSwipeOpen] = useState(false);
+  /** Жест прямо сейчас в работе — пока он идёт, пропы обработчика не трогаем. */
+  const gestureActive = useRef(false);
   const swipeX = useRef(0); // Отслеживаем текущее значение свайпа
   
   const { t, language } = useLanguage();
@@ -357,7 +386,16 @@ function EventCard({
   const isOrganizer = relationship === 'organizer';
   const isMember = event && currentUserId ? isUserEventMember(event, currentUserId) : false;
   const eventParticipants = event ? getEventParticipants(id) : [];
-  const participantsCount = eventParticipants.length;
+  /**
+   * Число участников: из контекста, а если события там ещё нет — из пропа.
+   *
+   * getEventParticipants ищет событие в общем списке и на промахе возвращает
+   * пустой массив. У карточки-превью при создании события id вида
+   * `preview-event-temp`, в общий список оно не попадает, поэтому счётчик
+   * показывал «0/8» — хотя организатор уже участник и проп participants
+   * приходит правильный. Ноль держался, пока событие не приезжало с сервера.
+   */
+  const participantsCount = event ? eventParticipants.length : (participants || 0);
   
   // Проверяем, приглашен ли пользователь на событие (для обратной совместимости)
   const inviteRequest = event ? eventRequests.find(req => 
@@ -383,7 +421,6 @@ function EventCard({
     participantsCount,
     isEventSaved,
     eventId: id,
-    tagsVisible,
     hasEventFolders: eventFolders && Array.isArray(eventFolders) && eventFolders.length > 0,
     folderId,
   });
@@ -593,11 +630,24 @@ function EventCard({
   
   const swipeButtons = getSwipeButtons();
   
-  // Получаем фото с учетом персонализации
-  // viewerUserId передается из props, если карточка просматривается через профиль участника
-  // ВАЖНО: Если mediaUrl передан напрямую через props, используем его (для карточек событий)
-  // Иначе используем getEventPhotoForUser для персонализированных фото (для прошедших событий)
-  const displayMediaUrl = mediaUrl || (event ? getEventPhotoForUser(id, currentUserId || '', viewerUserId) : undefined) || (event?.mediaUrl) || organizerAvatar;
+  // Получаем фото с учетом персонализации.
+  // Порядок такой же, как в EventCardMiniature: персонализированное фото
+  // СНАЧАЛА, prop mediaUrl — только фолбэк, когда события нет в сторе.
+  // Раньше mediaUrl стоял первым и всегда выигрывал, поэтому «изменить фото
+  // события для себя» меняло картинку в мини-карточке и в профиле события,
+  // а в самой карточке оставалось старое общее фото.
+  // getEventPhotoForUser сам откатывается на event.mediaUrl, если персонального
+  // фото нет, так что для остальных случаев поведение не меняется.
+  // Порядок: персональное фото (если оно реально задано) -> фото, переданное
+  // карточке -> фото события -> аватар организатора.
+  // Раньше первым стоял getEventPhotoForUser, но он помимо персонального фото
+  // подставляет и запасные значения (в том числе аватар профиля события) —
+  // они выигрывали у mediaUrl, и у нового события карточка оставалась без фото.
+  const displayMediaUrl =
+    getPersonalEventPhoto(event, currentUserId || undefined, viewerUserId)
+    || mediaUrl
+    || event?.mediaUrl
+    || organizerAvatar;
 
   const { width: windowWidth } = useWindowDimensions();
   const eventMedia = useImageFallbackUri(displayMediaUrl, EVENT_MEDIA_PLACEHOLDER_URI);
@@ -709,18 +759,15 @@ function EventCard({
           onPress={() => toggleParameterVisibility(parameterName)}
           activeOpacity={0.7}
         >
-          <Text style={styles.eyeIcon}>{isHidden ? '👁️‍🗨️' : '👁️'}</Text>
+          {/* Тот же значок, что в профиле события, — раньше здесь была эмодзи */}
+          <AppIcon name="eye" size={18} color={isHidden ? 'rgba(244,244,245,0.3)' : Palette.accent} />
         </TouchableOpacity>
       </View>
     );
   };
 
   const handleParticipantPress = (userId: string) => {
-    if (currentUserId === userId) {
-      router.push('/(tabs)/profile');
-    } else {
-      router.push(`/profile/${userId}`);
-    }
+    openUserProfile(userId, currentUserId);
   };
 
   // Обработка отмены события с поддержкой веба
@@ -757,8 +804,6 @@ function EventCard({
   // Обработчик действий из модального окна
   const handleActionPress = useCallback((actionId: string) => {
     if (actionId === 'share') {
-      setSelectedShareChats([]);
-      setShareSearchQuery('');
       setShowShareModal(true);
       setShowEventActionsModal(false);
     } else if (actionId === 'change_photo') {
@@ -796,8 +841,16 @@ function EventCard({
         handleCancelEvent(id);
         setShowEventActionsModal(false);
       }
+    } else if (actionId === 'transfer_organizer_role') {
+      // Пункта с таким id в меню больше нет — там «Отменить событие», которое
+      // само открывает это окно. Обработчик оставлен на всякий случай: раньше
+      // его не было вовсе, и нажатие молча закрывало меню.
+      setShowTransferOrganizerModal(true);
+      setShowEventActionsModal(false);
     } else if (actionId === 'view_requests') {
-      router.push('/(tabs)/inbox');
+      // Именно вкладка «Исходящие», а не общий список чатов.
+      // В этом файле ДВА обработчика действий — второй правится ниже.
+      router.push('/inbox?tab=requests&requestsTab=outgoing');
       setShowEventActionsModal(false);
     } else if (actionId === 'go_to_chat') {
       const eventChat = getChatsForUser(currentUserId || '').find(c => c.eventId === id && c.type === 'event');
@@ -823,11 +876,29 @@ function EventCard({
     } else if (actionId === 'change_parameters') {
       router.push(`/create?eventId=${id}`);
       setShowEventActionsModal(false);
+    } else if (actionId === 'invite_friends') {
+      setShowEventActionsModal(false);
+      setShowInviteModal(true);
     } else if (actionId === 'remove_participant') {
       if (viewerUserId) {
         removeParticipantFromEvent(id, viewerUserId);
       }
       setShowEventActionsModal(false);
+    } else if (actionId === 'change_visibility') {
+      setShowEventActionsModal(false);
+      /**
+       * У ПРОШЕДШЕГО события в своём профиле это рабочая настройка: кому
+       * видно это событие именно у меня. У остальных участников того же
+       * события своя настройка, их профилей она не касается.
+       *
+       * Везде ещё (предстоящие события, чужой профиль, лента) функции пока
+       * нет — там остаётся подсказка «в разработке».
+       */
+      if ((context === 'own_profile' || context === 'folder') && isPast) {
+        setShowMemoryVisibilityModal(true);
+      } else {
+        showInDevelopmentHint(t.events.inDevelopment, t.events.inDevelopmentMsg);
+      }
     } else if (actionId === 'hide_parameters') {
       setIsEditingParameterVisibility(true);
       setShowEventActionsModal(false);
@@ -844,9 +915,6 @@ function EventCard({
     } else if (actionId === 'report') {
       setShowEventActionsModal(false);
       setShowComplaintForm(true);
-    } else if (actionId === 'toggle_tags') {
-      setTagsVisible(!tagsVisible);
-      setShowEventActionsModal(false);
     } else if (actionId === 'remove_from_folder') {
       if (folderId) {
         Alert.alert(
@@ -885,6 +953,7 @@ function EventCard({
                 logger.debug(`Отменяем участие в прошедшем событии ${id} (событие остается для других участников)`);
                 if (currentUserId) {
                   await cancelEventParticipation(id, currentUserId);
+                  await refreshEventFolders?.();
                 }
                 setShowEventActionsModal(false);
                 // Обновляем страницу на вебе после удаления
@@ -931,6 +1000,10 @@ function EventCard({
                     logger.debug(`Отменяем участие в прошедшем событии ${id} (событие остается для других участников)`);
                     if (currentUserId) {
                       await cancelEventParticipation(id, currentUserId);
+                      // Из своих папок событие убирает сервер (см.
+                      // cancelMyParticipation) — перечитываем их, иначе
+                      // карточка остаётся висеть в открытой папке.
+                      await refreshEventFolders?.();
                     }
                     setShowEventActionsModal(false);
                   } else {
@@ -958,7 +1031,6 @@ function EventCard({
     event,
     viewerUserId,
     folderId,
-    tagsVisible,
     router,
     t,
     events,
@@ -970,11 +1042,11 @@ function EventCard({
     removeParticipantFromEvent,
     rejectInvitation,
     removeEventFromFolder,
+    refreshEventFolders,
     deleteEvent,
     saveEvent,
     removeSavedEvent,
     getChatsForUser,
-    setTagsVisible,
     setIsEditingParameterVisibility,
     setShowEventActionsModal,
     setShowShareModal,
@@ -982,8 +1054,6 @@ function EventCard({
     setShowAddToFolderModal,
     setShowTransferOrganizerModal,
     setShowRecurringDatesModal,
-    setSelectedShareChats,
-    setShareSearchQuery,
     handleCancelEvent,
   ]);
 
@@ -1032,7 +1102,7 @@ function EventCard({
       }
     } catch (error) {
       logger.error('Ошибка при выборе фото:', error);
-      Alert.alert(t.common.error, `Не удалось открыть галерею: ${error instanceof Error ? error.message : t.events.unknownError}`);
+      Alert.alert(t.common.error, interpolate(t.messages.openGalleryFailed, { reason: error instanceof Error ? error.message : t.events.unknownError }));
     }
   }, [id, currentUserId, setPersonalEventPhoto]);
 
@@ -1048,7 +1118,7 @@ function EventCard({
         logger.debug('Открываем галерею после закрытия модального окна (задержка 800ms)');
         handleChangeEventPhoto().catch(error => {
           logger.error('Ошибка при открытии галереи:', error);
-          Alert.alert(t.common.error, `Не удалось открыть галерею: ${error instanceof Error ? error.message : t.events.unknownError}`);
+          Alert.alert(t.common.error, interpolate(t.messages.openGalleryFailed, { reason: error instanceof Error ? error.message : t.events.unknownError }));
         });
       }, 800);
     });
@@ -1096,9 +1166,18 @@ function EventCard({
                 style: 'cancel',
                 onPress: () => {
                   setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
                   Animated.spring(translateX, {
                     toValue: 0,
                     useNativeDriver: true,
+                    // Явные параметры вместо стандартной пружины RN
+                    // (friction 7 / tension 40): она медленная и с раскачкой,
+                    // из-за чего возврат карточки после свайпа ощущался
+                    // как подлагивание. Тут — быстрый возврат без отскока.
+                    speed: 20,
+                    bounciness: 0,
+                    restDisplacementThreshold: 0.5,
+                    restSpeedThreshold: 0.5,
                   }).start();
                 }
               },
@@ -1121,9 +1200,18 @@ function EventCard({
                     }
                   } finally {
                     setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
                     Animated.spring(translateX, {
                       toValue: 0,
                       useNativeDriver: true,
+                      // Явные параметры вместо стандартной пружины RN
+                      // (friction 7 / tension 40): она медленная и с раскачкой,
+                      // из-за чего возврат карточки после свайпа ощущался
+                      // как подлагивание. Тут — быстрый возврат без отскока.
+                      speed: 20,
+                      bounciness: 0,
+                      restDisplacementThreshold: 0.5,
+                      restSpeedThreshold: 0.5,
                     }).start();
                   }
                 },
@@ -1133,9 +1221,18 @@ function EventCard({
           return;
         }
         setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
+          // Явные параметры вместо стандартной пружины RN
+          // (friction 7 / tension 40): она медленная и с раскачкой,
+          // из-за чего возврат карточки после свайпа ощущался
+          // как подлагивание. Тут — быстрый возврат без отскока.
+          speed: 20,
+          bounciness: 0,
+          restDisplacementThreshold: 0.5,
+          restSpeedThreshold: 0.5,
         }).start();
         break;
       case 'go':
@@ -1143,9 +1240,18 @@ function EventCard({
         if (event?.isRecurring) {
           setShowRecurringDatesModal(true);
           setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
           Animated.spring(translateX, {
             toValue: 0,
             useNativeDriver: true,
+            // Явные параметры вместо стандартной пружины RN
+            // (friction 7 / tension 40): она медленная и с раскачкой,
+            // из-за чего возврат карточки после свайпа ощущался
+            // как подлагивание. Тут — быстрый возврат без отскока.
+            speed: 20,
+            bounciness: 0,
+            restDisplacementThreshold: 0.5,
+            restSpeedThreshold: 0.5,
           }).start();
         } else {
           // Переходим в календарь в режиме предпросмотра
@@ -1155,8 +1261,9 @@ function EventCard({
         break;
         
       case 'view_requests':
-        // Переход на страницу "мои запросы"
-        router.push('/(tabs)/inbox');
+        // Переход на страницу «мои запросы» — вкладка «Исходящие».
+        // Раньше вело на /inbox, то есть в общий список чатов.
+        router.push('/inbox?tab=requests&requestsTab=outgoing');
         break;
         
       case 'cancel_request':
@@ -1166,9 +1273,18 @@ function EventCard({
         }
         // Возвращаем карточку на место
         setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
+          // Явные параметры вместо стандартной пружины RN
+          // (friction 7 / tension 40): она медленная и с раскачкой,
+          // из-за чего возврат карточки после свайпа ощущался
+          // как подлагивание. Тут — быстрый возврат без отскока.
+          speed: 20,
+          bounciness: 0,
+          restDisplacementThreshold: 0.5,
+          restSpeedThreshold: 0.5,
         }).start();
         break;
         
@@ -1178,9 +1294,18 @@ function EventCard({
           cancelEventParticipation(id, currentUserId);
         }
         setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
+          // Явные параметры вместо стандартной пружины RN
+          // (friction 7 / tension 40): она медленная и с раскачкой,
+          // из-за чего возврат карточки после свайпа ощущался
+          // как подлагивание. Тут — быстрый возврат без отскока.
+          speed: 20,
+          bounciness: 0,
+          restDisplacementThreshold: 0.5,
+          restSpeedThreshold: 0.5,
         }).start();
         break;
         
@@ -1190,17 +1315,35 @@ function EventCard({
         if (participantsCount > 1) {
           setShowTransferOrganizerModal(true);
           setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
           Animated.spring(translateX, {
             toValue: 0,
             useNativeDriver: true,
+            // Явные параметры вместо стандартной пружины RN
+            // (friction 7 / tension 40): она медленная и с раскачкой,
+            // из-за чего возврат карточки после свайпа ощущался
+            // как подлагивание. Тут — быстрый возврат без отскока.
+            speed: 20,
+            bounciness: 0,
+            restDisplacementThreshold: 0.5,
+            restSpeedThreshold: 0.5,
           }).start();
         } else {
           // Если участник только организатор, просто отменяем событие
           handleCancelEvent(id);
           setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
           Animated.spring(translateX, {
             toValue: 0,
             useNativeDriver: true,
+            // Явные параметры вместо стандартной пружины RN
+            // (friction 7 / tension 40): она медленная и с раскачкой,
+            // из-за чего возврат карточки после свайпа ощущался
+            // как подлагивание. Тут — быстрый возврат без отскока.
+            speed: 20,
+            bounciness: 0,
+            restDisplacementThreshold: 0.5,
+            restSpeedThreshold: 0.5,
           }).start();
         }
         break;
@@ -1209,9 +1352,18 @@ function EventCard({
         // Отмена участия организатора
         cancelOrganizerParticipation(id);
         setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
+          // Явные параметры вместо стандартной пружины RN
+          // (friction 7 / tension 40): она медленная и с раскачкой,
+          // из-за чего возврат карточки после свайпа ощущался
+          // как подлагивание. Тут — быстрый возврат без отскока.
+          speed: 20,
+          bounciness: 0,
+          restDisplacementThreshold: 0.5,
+          restSpeedThreshold: 0.5,
         }).start();
         break;
         
@@ -1228,9 +1380,18 @@ function EventCard({
           router.push(`/calendar?date=${encodeURIComponent(isoDateTime)}&mode=preview&eventId=${id}${inviteId ? `&inviteId=${inviteId}` : ''}`);
         }
         setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
+          // Явные параметры вместо стандартной пружины RN
+          // (friction 7 / tension 40): она медленная и с раскачкой,
+          // из-за чего возврат карточки после свайпа ощущался
+          // как подлагивание. Тут — быстрый возврат без отскока.
+          speed: 20,
+          bounciness: 0,
+          restDisplacementThreshold: 0.5,
+          restSpeedThreshold: 0.5,
         }).start();
         break;
     }
@@ -1245,9 +1406,18 @@ function EventCard({
           cancelEventRequest(id, currentUserId);
         }
         setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
+          // Явные параметры вместо стандартной пружины RN
+          // (friction 7 / tension 40): она медленная и с раскачкой,
+          // из-за чего возврат карточки после свайпа ощущался
+          // как подлагивание. Тут — быстрый возврат без отскока.
+          speed: 20,
+          bounciness: 0,
+          restDisplacementThreshold: 0.5,
+          restSpeedThreshold: 0.5,
         }).start();
         break;
         
@@ -1256,18 +1426,36 @@ function EventCard({
           cancelEventParticipation(id, currentUserId);
         }
         setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
+          // Явные параметры вместо стандартной пружины RN
+          // (friction 7 / tension 40): она медленная и с раскачкой,
+          // из-за чего возврат карточки после свайпа ощущался
+          // как подлагивание. Тут — быстрый возврат без отскока.
+          speed: 20,
+          bounciness: 0,
+          restDisplacementThreshold: 0.5,
+          restSpeedThreshold: 0.5,
         }).start();
         break;
         
       case 'cancel_organizer_participation':
         cancelOrganizerParticipation(id);
         setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
+          // Явные параметры вместо стандартной пружины RN
+          // (friction 7 / tension 40): она медленная и с раскачкой,
+          // из-за чего возврат карточки после свайпа ощущался
+          // как подлагивание. Тут — быстрый возврат без отскока.
+          speed: 20,
+          bounciness: 0,
+          restDisplacementThreshold: 0.5,
+          restSpeedThreshold: 0.5,
         }).start();
         break;
         
@@ -1277,9 +1465,18 @@ function EventCard({
           removeParticipantFromEvent(id, viewerUserId);
         }
         setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
+          // Явные параметры вместо стандартной пружины RN
+          // (friction 7 / tension 40): она медленная и с раскачкой,
+          // из-за чего возврат карточки после свайпа ощущался
+          // как подлагивание. Тут — быстрый возврат без отскока.
+          speed: 20,
+          bounciness: 0,
+          restDisplacementThreshold: 0.5,
+          restSpeedThreshold: 0.5,
         }).start();
         break;
         
@@ -1292,9 +1489,18 @@ function EventCard({
           });
         }
         setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
+          // Явные параметры вместо стандартной пружины RN
+          // (friction 7 / tension 40): она медленная и с раскачкой,
+          // из-за чего возврат карточки после свайпа ощущался
+          // как подлагивание. Тут — быстрый возврат без отскока.
+          speed: 20,
+          bounciness: 0,
+          restDisplacementThreshold: 0.5,
+          restSpeedThreshold: 0.5,
         }).start();
         break;
     }
@@ -1335,6 +1541,14 @@ function EventCard({
     Animated.spring(translateX, {
       toValue: 0,
       useNativeDriver: true,
+      // Явные параметры вместо стандартной пружины RN
+      // (friction 7 / tension 40): она медленная и с раскачкой,
+      // из-за чего возврат карточки после свайпа ощущался
+      // как подлагивание. Тут — быстрый возврат без отскока.
+      speed: 20,
+      bounciness: 0,
+      restDisplacementThreshold: 0.5,
+      restSpeedThreshold: 0.5,
     }).start();
     
     // Переходим в календарь
@@ -1347,6 +1561,14 @@ function EventCard({
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const isDragging = useRef(false);
+  /**
+   * После перетаскивания браузер всё равно шлёт click по элементу под пальцем,
+   * и нажатие на карточке открывало событие — до кнопки GO было не добраться.
+   * isDragging для этого не годится: его сбрасывает touchend, который
+   * приходит РАНЬШЕ click. Поэтому запоминаем момент, до которого клик по
+   * карточке считается хвостом свайпа и игнорируется.
+   */
+  const swipeClickGuardUntil = useRef(0);
   const lastMoveX = useRef<number | null>(null);
   const lastMoveTime = useRef<number | null>(null);
   const mouseDown = useRef(false);
@@ -1391,6 +1613,7 @@ function EventCard({
           setShowSwipeButtons(true);
         } else {
           setShowSwipeButtons(false);
+        swipeButtonsVisibleRef.current = false;
         }
       }
     }
@@ -1439,9 +1662,22 @@ function EventCard({
       Animated.spring(translateX, {
         toValue: 0,
         useNativeDriver: true,
+        // Явные параметры вместо стандартной пружины RN
+        // (friction 7 / tension 40): она медленная и с раскачкой,
+        // из-за чего возврат карточки после свайпа ощущался
+        // как подлагивание. Тут — быстрый возврат без отскока.
+        speed: 20,
+        bounciness: 0,
+        restDisplacementThreshold: 0.5,
+        restSpeedThreshold: 0.5,
         friction: 8,
         tension: 40,
       }).start();
+    }
+
+    // Сдвиг больше нескольких пикселей — это свайп, а не нажатие.
+    if (isDragging.current || Math.abs(deltaX) > 8) {
+      swipeClickGuardUntil.current = Date.now() + 400;
     }
 
     touchStartX.current = null;
@@ -1451,6 +1687,18 @@ function EventCard({
     isDragging.current = false;
     mouseDown.current = false;
   }, [shouldShowSwipeButtons, translateX, swipeButtons]);
+
+  /**
+   * Вне жеста настройка обработчика следует за фактическим положением
+   * карточки. Кнопки закрываются не только свайпом, но и из обработчиков
+   * действий (их около двадцати) — там свой setShowSwipeButtons(false), и
+   * без этой синхронизации карточка осталась бы «открытой» с точки зрения
+   * жеста и продолжала бы перехватывать свайп вправо у ленты организаторов.
+   */
+  useEffect(() => {
+    if (gestureActive.current) return;
+    setSwipeOpen(showSwipeButtons);
+  }, [showSwipeButtons]);
 
   // Текущее «зафиксированное» положение карточки: 0 либо offset открытых кнопок.
   // Раньше translationX писался в translateX напрямую, без учёта этого сдвига —
@@ -1477,27 +1725,90 @@ function EventCard({
     const next = Math.min(0, Math.max(swipeMinOffset(), swipeBase.current + tx));
     swipeX.current = next;
     translateX.setValue(next);
-    setShowSwipeButtons(next < -20);
+
+    /**
+     * Состояние трогаем ТОЛЬКО когда видимость кнопок реально меняется.
+     *
+     * Раньше setShowSwipeButtons вызывался на каждом кадре жеста — то есть
+     * десятки раз за один свайп, и каждый вызов гнал перерисовку карточки со
+     * всем её содержимым (медиа, аватарки, участники). Отсюда и ощущение,
+     * что карточка «залипает» при движении туда-обратно.
+     */
+    /**
+     * Кнопки показываем, когда карточка прошла заметную часть хода, а не
+     * после первых двадцати точек: при 120 точках полного хода это шестая
+     * часть жеста, и «GO» выскакивал практически при касании — в том числе
+     * когда человек просто листал ленту и палец чуть ушёл вбок.
+     */
+    const shouldShow = next <= swipeMinOffset() * 0.45;
+    if (shouldShow !== swipeButtonsVisibleRef.current) {
+      swipeButtonsVisibleRef.current = shouldShow;
+      setShowSwipeButtons(shouldShow);
+    }
+  };
+
+  /** Довести карточку до ближайшего устойчивого положения и запомнить его. */
+  const settleSwipe = (shouldOpen: boolean) => {
+      const target = shouldOpen ? swipeMinOffset() : 0;
+
+      swipeBase.current = target;
+      setShowSwipeButtons(shouldOpen);
+      setSwipeOpen(shouldOpen);
+      swipeButtonsVisibleRef.current = shouldOpen;
+      Animated.spring(translateX, {
+        toValue: target,
+        // ОБЯЗАТЕЛЬНО true, как и во всех остальных анимациях translateX.
+        //
+        // React Native запрещает гонять один и тот же Animated.Value то
+        // нативным драйвером, то JS-овым. Здесь стояло false, а все
+        // восемнадцать анимаций в обработчиках кнопок свайпа — true. Стоило
+        // свайпнуть карточку (эта анимация, JS) и нажать кнопку действия
+        // (та анимация, нативная), как RN бросал
+        // «Attempting to run JS driven animation on animated node that has
+        // been moved to "native" earlier». В Release необработанное
+        // исключение JS уходит в RCTFatal — приложение просто закрывается.
+        // Отсюда и падение при отмене заявки свайпом по карточке.
+        //
+        // translateX живёт в transform, а трансформации нативный драйвер
+        // поддерживает, так что true здесь корректен.
+        useNativeDriver: true,
+      }).start();
   };
 
   const onHandlerStateChange = Platform.OS === 'web' ? undefined : (event: { nativeEvent: { state: number; translationX: number; velocityX: number } }) => {
-    if (event.nativeEvent.state === State.END) {
-      const { translationX, velocityX } = event.nativeEvent;
-      
+    const { state, translationX, velocityX } = event.nativeEvent;
+
+    if (state === State.BEGAN || state === State.ACTIVE) {
+      gestureActive.current = true;
+      return;
+    }
+    gestureActive.current = false;
+
+    if (state === State.END) {
       const offset = swipeMinOffset();
       const current = Math.min(0, Math.max(offset, swipeBase.current + translationX));
       // Открываем, если утащили влево дальше половины хода или резким жестом;
       // во всех остальных случаях — закрываем
-      const shouldOpen = shouldShowSwipeButtons &&
-        (current <= offset / 2 || (translationX < -50 && velocityX < -500));
-      const target = shouldOpen ? offset : 0;
+      settleSwipe(
+        shouldShowSwipeButtons &&
+          (current <= offset / 2 || (translationX < -50 && velocityX < -500)),
+      );
+      return;
+    }
 
-      swipeBase.current = target;
-      setShowSwipeButtons(shouldOpen);
-      Animated.spring(translateX, {
-        toValue: target,
-        useNativeDriver: false,
-      }).start();
+    /**
+     * Отмена и провал жеста — обязательно, иначе карточка застревает.
+     *
+     * shouldCancelWhenOutside={true} отменяет жест, стоит пальцу уйти за
+     * границы карточки, и то же самое делает лента, когда перехватывает
+     * вертикальный скролл. Раньше обрабатывался только END, поэтому в этих
+     * случаях translateX оставался там, где палец бросил карточку, а
+     * swipeBase про сдвиг не знал — карточка «зависала» криво, и следующий
+     * короткий свайп сначала возвращал её к нулю вместо того, чтобы
+     * продолжить с места.
+     */
+    if (state === State.CANCELLED || state === State.FAILED) {
+      settleSwipe(swipeBase.current <= swipeMinOffset() / 2);
     }
   };
 
@@ -1569,12 +1880,9 @@ function EventCard({
       {(() => {
         const cardContent = (
           <>
-            {/* Метка "Вас пригласили" - показывается только если пользователь приглашен */}
-            {isInvited && variant === 'default' && (
-              <View style={styles.invitedLabel}>
-                <Text style={styles.invitedLabelText}>{t.events.invitedYou}</Text>
-              </View>
-            )}
+            {/* Метку «Вас пригласили» здесь больше не рисуем: вторая такая же
+                живёт внутри карточки (exploreInvitedLabel), и на приглашённом
+                событии надпись выходила дважды. */}
 
             {/* Card layout: Full-bleed image card with gradient overlay (Airbnb-style) — universal for all contexts */}
           {(() => {
@@ -1606,6 +1914,25 @@ function EventCard({
                     style={[exploreStyles.exploreCardContainer]}
                     onPress={(e) => {
                       e?.stopPropagation?.();
+                      if (Platform.OS === 'web') {
+                        // Хвост свайпа — не нажатие.
+                        if (Date.now() < swipeClickGuardUntil.current) return;
+                        // Кнопки открыты: первый тап по карточке закрывает их,
+                        // а не уводит внутрь события.
+                        if (showSwipeButtons) {
+                          setShowSwipeButtons(false);
+                          swipeButtonsVisibleRef.current = false;
+                          swipeX.current = 0;
+                          swipeBase.current = 0;
+                          Animated.spring(translateX, {
+                            toValue: 0,
+                            useNativeDriver: true,
+                            speed: 20,
+                            bounciness: 0,
+                          }).start();
+                          return;
+                        }
+                      }
                       const url = viewerUserId
                         ? `/event-profile/${id}?viewerUserId=${viewerUserId}`
                         : `/event-profile/${id}`;
@@ -1630,7 +1957,7 @@ function EventCard({
                             },
                           })
                         : <LazyImage
-                            source={{ uri: eventMedia.uri }}
+                            source={{ uri: sizedImage(eventMedia.uri, 200) }}
                             style={exploreStyles.exploreImage}
                             onError={eventMedia.onError}
                           />
@@ -1650,7 +1977,7 @@ function EventCard({
                         activeOpacity={0.8}
                       >
                         <Image
-                          source={{ uri: exploreAvatarUrl || ORGANIZER_AVATAR_PLACEHOLDER_URI }}
+                          source={{ uri: sizedImage(exploreAvatarUrl, 40) || ORGANIZER_AVATAR_PLACEHOLDER_URI }}
                           style={exploreStyles.exploreOrganizerAvatar}
                         />
                         <Text style={exploreStyles.exploreOrganizerName} numberOfLines={1}>
@@ -1672,7 +1999,7 @@ function EventCard({
                               {displayParticipants.slice(0, 3).map((p, index) => (
                                 <Image
                                   key={p.userId}
-                                  source={{ uri: p.avatar || ORGANIZER_AVATAR_PLACEHOLDER_URI }}
+                                  source={{ uri: sizedImage(p.avatar, 28) || ORGANIZER_AVATAR_PLACEHOLDER_URI }}
                                   style={[styles.participantMiniAvatarCard, { marginLeft: index > 0 ? -5 : 0 }]}
                                 />
                               ))}
@@ -1687,11 +2014,18 @@ function EventCard({
                             </Text>
                           </View>
                         </TouchableOpacity>
-                        {finalTags.map((tag, index) => (
-                          <View key={index} style={styles.tagBadge}>
-                            <Text style={styles.tagText}>{TAG_LABELS[tag] || tag}</Text>
+                        {/* Метки скрываются одним параметром целиком, а не по
+                            одной: они всегда идут группой, и глазик на каждой
+                            превратил бы угол карточки в частокол значков. */}
+                        {!isPast && finalTags.length > 0 && renderParameterWithOverlay('tags', (
+                          <View style={styles.tagsGroup}>
+                            {finalTags.map((tag, index) => (
+                              <View key={index} style={styles.tagBadge}>
+                                <Text style={styles.tagText}>{TAG_LABELS[tag] || tag}</Text>
+                              </View>
+                            ))}
                           </View>
-                        ))}
+                        ), Boolean(hiddenParameters.tags))}
                       </View>
 
                       {/* Invited label */}
@@ -1720,26 +2054,68 @@ function EventCard({
 
                         {/* Date + Location row */}
                         <View style={exploreStyles.exploreInfoRow}>
-                          {dateText ? (
+                          {/* Параметры обёрнуты в renderParameterWithOverlay — иначе
+                              режим «скрыть параметры» включался, но на карточке
+                              ничего не происходило: функция была объявлена и ни
+                              разу не вызвана. Ключи те же, что в профиле события
+                              (date/time/location/description), чтобы скрытое
+                              совпадало на обоих экранах. */}
+                          {/* Событие «только я» — маленький замок первым в
+                              строке параметров. Такое событие не попадает в
+                              ленту (фильтр видимости на сервере) и живёт
+                              только в профиле автора, поэтому по карточке
+                              должно быть понятно, что она приватная. */}
+                          {isOnlyMeEvent && (
+                            <View style={exploreStyles.exploreInfoItem}>
+                              <AppIcon name="lock" size={12} color="rgba(255,255,255,0.8)" />
+                            </View>
+                          )}
+                          {dateText ? renderParameterWithOverlay('date', (
                             <View style={exploreStyles.exploreInfoItem}>
                               <AppIcon name="calendar" size={12} color="rgba(255,255,255,0.8)" />
                               <Text style={exploreStyles.exploreInfoText} numberOfLines={1}>{dateText}</Text>
                             </View>
-                          ) : null}
-                          {time ? (
+                          ), Boolean(hiddenParameters.date)) : null}
+                          {time ? renderParameterWithOverlay('time', (
                             <View style={exploreStyles.exploreInfoItem}>
                               <AppIcon name="clock" size={12} color="rgba(255,255,255,0.8)" />
                               <Text style={exploreStyles.exploreInfoText}>{time}</Text>
                             </View>
-                          ) : null}
-                          <View style={exploreStyles.exploreInfoItem}>
-                            <AppIcon name="pin" size={12} color="rgba(255,255,255,0.8)" />
-                            <Text style={exploreStyles.exploreInfoText} numberOfLines={1}>
-                              {isOnlineEvent ? t.events.online : (location || t.events.locationFallback)}
-                            </Text>
-                          </View>
+                          ), Boolean(hiddenParameters.time)) : null}
+                          {renderParameterWithOverlay('location', (
+                            isOnlineEvent ? (
+                              <View style={exploreStyles.exploreInfoItem}>
+                                <AppIcon name="pin" size={12} color="rgba(255,255,255,0.8)" />
+                                <Text style={exploreStyles.exploreInfoText} numberOfLines={1}>{t.events.online}</Text>
+                              </View>
+                            ) : (
+                              <TouchableOpacity
+                                style={exploreStyles.exploreInfoItem}
+                                onPress={(e) => {
+                                  e.stopPropagation();
+                                  router.push(`/map?eventId=${id}`);
+                                }}
+                                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                              >
+                                <AppIcon name="pin" size={12} color="rgba(255,255,255,0.8)" />
+                                <Text style={exploreStyles.exploreInfoText} numberOfLines={1}>
+                                  {location || t.events.locationFallback}
+                                </Text>
+                              </TouchableOpacity>
+                            )
+                          ), Boolean(hiddenParameters.location))}
+                          {/* Цена. Проп price карточка получала всегда, но нигде
+                              не показывала — параметр был виден только в профиле
+                              события. Ключ hiddenParameters тот же (price), чтобы
+                              «скрыть параметр» работал одинаково на обоих экранах. */}
+                          {price ? renderParameterWithOverlay('price', (
+                            <View style={exploreStyles.exploreInfoItem}>
+                              <AppIcon name="card" size={12} color="rgba(255,255,255,0.8)" />
+                              <Text style={exploreStyles.exploreInfoText} numberOfLines={1}>{price}</Text>
+                            </View>
+                          ), Boolean(hiddenParameters.price)) : null}
                         </View>
-                        {description ? (
+                        {description ? renderParameterWithOverlay('description', (
                           <View style={{ marginTop: 8 }}>
                             <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', lineHeight: 18 }} numberOfLines={descriptionExpanded ? undefined : 2}>
                               {description}
@@ -1752,7 +2128,7 @@ function EventCard({
                               </TouchableOpacity>
                             )}
                           </View>
-                        ) : null}
+                        ), Boolean(hiddenParameters.description)) : null}
                       </LinearGradient>
 
                     </View>
@@ -1775,10 +2151,10 @@ function EventCard({
                 activeOpacity={0.7}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
-                <AppIcon name="more" size={18} color={Palette.text} />
+                <AppIcon name="more" size={15} color={Palette.text} />
               </TouchableOpacity>
             )}
-            
+
             {/* Кнопка "Сохранить" в режиме редактирования видимости параметров */}
             {shouldShowSaveButton && (
               <TouchableOpacity 
@@ -1862,8 +2238,8 @@ function EventCard({
               // отдаёт ленте организаторов. Когда кнопки открыты, правый свайп
               // должен закрывать их, иначе он уводил в ленту, а карточка
               // оставалась сдвинутой и накладывалась поверх.
-              activeOffsetX={showSwipeButtons ? [-10, 10] : -10}
-              failOffsetX={showSwipeButtons ? undefined : 10}
+              activeOffsetX={swipeOpen ? [-10, 10] : -10}
+              failOffsetX={swipeOpen ? undefined : 10}
             >
               <Animated.View 
                 style={[
@@ -1908,183 +2284,21 @@ function EventCard({
         onActionPress={handleActionPressWithPhoto}
       />
 
-      {/* Модальное окно для выбора чатов и друзей для отправки события */}
-      <Modal
+      {/* Пригласить друзей в уже созданное событие — только организатору */}
+      {isOrganizer && event && (
+        <InviteFriendsModal
+          visible={showInviteModal}
+          event={event}
+          onClose={() => setShowInviteModal(false)}
+        />
+      )}
+
+      {/* Модалка "Поделиться событием" — общая с event-profile, см. EventShareModal */}
+      <EventShareModal
+        eventId={id}
         visible={showShareModal}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowShareModal(false)}
-      >
-        <View style={styles.shareModalOverlay}>
-          <View style={styles.shareModalContent}>
-            <View style={styles.shareModalHeader}>
-              <Text style={styles.shareModalTitle}>{t.events.shareEvent}</Text>
-              <TouchableOpacity onPress={() => setShowShareModal(false)}>
-                <AppIcon name="close" size={18} color={Palette.textDim} />
-              </TouchableOpacity>
-            </View>
-            
-            {/* Копировать ссылку */}
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 4, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' }}
-              onPress={async () => {
-                const url = `https://iwent.ru/event-profile/${id}`;
-                try {
-                  const { Share, Platform } = require('react-native');
-                  if (Platform.OS === 'web') {
-                    await navigator.clipboard.writeText(url);
-                  } else {
-                    await Share.share({ message: url, url });
-                  }
-                } catch {}
-              }}
-            >
-              <AppIcon name="link" size={18} color={Palette.accent} />
-              <Text style={{ color: '#f4f4f5', fontSize: 15, fontWeight: '500' }}>{t.events.shareLink}</Text>
-            </TouchableOpacity>
-
-            {/* Поле поиска */}
-            <TextInput
-              style={styles.shareModalSearchInput}
-              placeholder={t.events.searchChatsAndFriends}
-              placeholderTextColor="rgba(244,244,245,0.35)"
-              value={shareSearchQuery}
-              onChangeText={setShareSearchQuery}
-            />
-            
-            {/* Список чатов и друзей */}
-            <ScrollView style={styles.shareModalScrollView}>
-              {/* Чаты */}
-              <Text style={styles.shareModalSectionTitle}>{t.events.chatsLabel}</Text>
-
-              {getChatsForUser(currentUserId || '')
-                .filter(chat => 
-                  chat.name.toLowerCase().includes(shareSearchQuery.toLowerCase())
-                )
-                .map(chat => (
-                  <TouchableOpacity
-                    key={chat.id}
-                    style={styles.shareModalItem}
-                    onPress={() => {
-                      const isSelected = selectedShareChats.includes(chat.id);
-                      if (isSelected) {
-                        setSelectedShareChats(prev => prev.filter(id => id !== chat.id));
-                      } else {
-                        setSelectedShareChats(prev => [...prev, chat.id]);
-                      }
-                    }}
-                  >
-                    <Image
-                      source={{ 
-                        uri: chat.avatar || (
-                          chat.type === 'event' 
-                            ? events.find(e => e.id === chat.eventId)?.mediaUrl 
-                            : (() => {
-                                // Для личных чатов: находим аватарку другого участника (не текущего пользователя)
-                                const otherParticipant = chat.participants.find(p => p !== currentUserId);
-                                return otherParticipant ? getUserData(otherParticipant)?.avatar : '';
-                              })()
-                        ) 
-                      }}
-                      style={styles.shareModalAvatar}
-                    />
-                    <View style={styles.shareModalItemInfo}>
-                      <Text style={styles.shareModalItemName}>{chat.name}</Text>
-                      <Text style={styles.shareModalItemSubtext}>
-                        {chat.type === 'event' ? t.events.eventChat : t.events.personalChat2}
-                      </Text>
-                    </View>
-                    {renderCheckbox(selectedShareChats.includes(chat.id))}
-                  </TouchableOpacity>
-                ))}
-              
-              {/* Друзья (создаем личные чаты) */}
-              <Text style={styles.shareModalSectionTitle}>{t.events.friendsLabel}</Text>
-              {getFriendsList()
-                .filter(friend => 
-                  friend.name.toLowerCase().includes(shareSearchQuery.toLowerCase()) ||
-                  friend.username.toLowerCase().includes(shareSearchQuery.toLowerCase())
-                )
-                .map(friend => {
-                  // Находим существующий личный чат
-
-                  const existingChat = currentUserId ? getChatsForUser(currentUserId).find(
-                    chat => chat.type === 'personal' && chat.participants.includes(friend.id)
-                  ) : undefined;
-                  const chatId = existingChat ? existingChat.id : null;
-                  // Используем friend.id как ключ для отслеживания выбранных друзей
-                  const friendKey = `friend_${friend.id}`;
-                  const isSelected = selectedShareChats.includes(friendKey) || (chatId && selectedShareChats.includes(chatId));
-                  
-                  return (
-                    <TouchableOpacity
-                      key={friend.id}
-                      style={styles.shareModalItem}
-                      onPress={async () => {
-                        let targetChatId = chatId;
-                        // Если чата нет, создаем его
-                        if (!targetChatId) {
-                          try {
-                            targetChatId = await createPersonalChat(friend.id);
-                          } catch (error) {
-                            logger.error('Failed to create personal chat', error);
-                            return; // Не продолжаем, если не удалось создать чат
-                          }
-                        }
-                        
-                        // Используем chatId для выбора, но также отслеживаем через friendKey
-                        const isCurrentlySelected = selectedShareChats.includes(targetChatId) || selectedShareChats.includes(friendKey);
-                        
-                        if (isCurrentlySelected) {
-                          // Удаляем и chatId, и friendKey на случай, если были добавлены оба
-                          setSelectedShareChats(prev => prev.filter(id => id !== targetChatId && id !== friendKey));
-                        } else {
-                          // Добавляем chatId (удаляем friendKey, если он был)
-                          if (targetChatId) {
-                            setSelectedShareChats(prev => [...prev.filter(id => id !== friendKey), targetChatId]);
-                          }
-                        }
-                      }}
-                    >
-                      <Image
-                        source={{ uri: friend.avatar }}
-                        style={styles.shareModalAvatar}
-                      />
-                      <View style={styles.shareModalItemInfo}>
-                        <Text style={styles.shareModalItemName}>{friend.name}</Text>
-                        <Text style={styles.shareModalItemSubtext}>@{friend.username}</Text>
-                      </View>
-                      {renderCheckbox(isSelected)}
-                    </TouchableOpacity>
-                  );
-                })}
-            </ScrollView>
-            
-            {/* Кнопка отправки */}
-            <TouchableOpacity
-              style={[
-                styles.shareModalSendButton,
-                selectedShareChats.filter(chatId => !chatId.startsWith('friend_')).length === 0 && styles.shareModalSendButtonDisabled
-              ]}
-              onPress={() => {
-                // Фильтруем только валидные chatId (не friendKey)
-                const validChatIds = selectedShareChats.filter(chatId => !chatId.startsWith('friend_'));
-                if (validChatIds.length > 0) {
-                  sendEventToChats(id, validChatIds);
-                  setShowShareModal(false);
-                  setSelectedShareChats([]);
-                  setShareSearchQuery('');
-                }
-              }}
-              disabled={selectedShareChats.filter(chatId => !chatId.startsWith('friend_')).length === 0}
-            >
-              <Text style={styles.shareModalSendButtonText}>
-                {t.common.send} ({selectedShareChats.filter(chatId => !chatId.startsWith('friend_')).length})
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setShowShareModal(false)}
+      />
 
       {/* Модальное окно для добавления события в папку */}
       <Modal
@@ -2138,7 +2352,7 @@ function EventCard({
                     >
                       <Image
                         source={{ 
-                          uri: folder.coverPhotoUrl || folder.events?.[0]?.mediaUrl || 'https://via.placeholder.com/40'
+                          uri: folder.coverPhotoUrl || folder.events?.[0]?.mediaUrl
                         }}
                         style={styles.shareModalAvatar}
                       />
@@ -2318,6 +2532,58 @@ function EventCard({
         </View>
       </Modal>
 
+      {/* Кому видно это прошедшее событие в МОЁМ профиле */}
+      <Modal
+        visible={showMemoryVisibilityModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowMemoryVisibilityModal(false)}
+      >
+        <View style={styles.shareModalOverlay}>
+          <View style={styles.shareModalContent}>
+            <View style={styles.shareModalHeader}>
+              <Text style={styles.shareModalTitle}>{t.events.memoryVisibilityTitle}</Text>
+              <TouchableOpacity onPress={() => setShowMemoryVisibilityModal(false)}>
+                <AppIcon name="close" size={18} color={Palette.textDim} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.transferOrganizerDescription}>
+              {t.events.memoryVisibilityHint}
+            </Text>
+
+            <View style={styles.shareModalList}>
+              {([
+                { value: 'all' as const, label: t.events.memoryVisibilityAll },
+                { value: 'friends' as const, label: t.events.memoryVisibilityFriends },
+                { value: 'only_me' as const, label: t.events.memoryVisibilityOnlyMe },
+              ]).map(option => {
+                const current = memoryVisibility?.[id] ?? 'all';
+                const isSelected = current === option.value;
+                return (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={styles.memoryVisibilityOption}
+                    onPress={async () => {
+                      setShowMemoryVisibilityModal(false);
+                      try {
+                        await setMemoryVisibility?.(id, option.value);
+                      } catch {
+                        Alert.alert(t.common.error, t.events.memoryVisibilityFailed);
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.memoryVisibilityOptionText}>{option.label}</Text>
+                    {isSelected && <AppIcon name="check" size={16} color={Palette.accent} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Модальное окно для передачи роли организатора */}
       <Modal
         visible={showTransferOrganizerModal}
@@ -2340,7 +2606,7 @@ function EventCard({
             </View>
             
             <Text style={styles.transferOrganizerDescription}>
-              Выберите участника, которому хотите передать роль организатора. После передачи вы выйдете из события, а новый организатор будет управлять им.
+              {t.events.transferOrganizerHint}
             </Text>
             
             <ScrollView style={styles.shareModalList}>
@@ -2353,7 +2619,7 @@ function EventCard({
                   return (
                     <View style={styles.emptyParticipantsContainer}>
                       <Text style={styles.emptyParticipantsText}>
-                        Нет других участников для передачи роли
+                        {t.events.transferOrganizerNoParticipants}
                       </Text>
                     </View>
                   );
@@ -2373,7 +2639,7 @@ function EventCard({
                       onPress={() => setSelectedNewOrganizerId(participantId)}
                     >
                       <Image
-                        source={{ uri: participantData?.avatar || '' }}
+                        source={{ uri: sizedImage(participantData?.avatar, 40) || '' }}
                         style={styles.shareModalAvatar}
                       />
                       <View style={styles.shareModalItemInfo}>
@@ -2440,7 +2706,7 @@ function EventCard({
               disabled={!selectedNewOrganizerId}
             >
               <Text style={styles.shareModalSendButtonText}>
-                Передать роль и выйти из события
+                {t.events.transferOrganizerConfirm}
               </Text>
             </TouchableOpacity>
           </View>
@@ -2467,7 +2733,17 @@ function EventCard({
               <AppIcon name="close" size={22} color="#fff" />
             </TouchableOpacity>
             {(() => {
-              const originalUrl = originalMediaUrl || event?.originalMediaUrl || displayMediaUrl;
+              // useOriginal=true: getEventPhotoForUser отдаёт персональное фото,
+              // если оно есть, и только иначе — общий originalMediaUrl. Иначе
+              // после «изменить фото для себя» полноэкранный просмотр открывал
+              // старую картинку.
+              // Тот же порядок для полноэкранного просмотра: персональное фото,
+              // затем оригинал, затем то, что показано на карточке.
+              const originalUrl =
+                getPersonalEventPhoto(event, currentUserId || undefined, viewerUserId)
+                || originalMediaUrl
+                || event?.originalMediaUrl
+                || displayMediaUrl;
               return originalUrl ? (
                 <Image 
                   source={{ uri: originalUrl }} 
@@ -2574,11 +2850,14 @@ const styles = {
   // Стили для трех точек и модального окна действий
   eventActionsButton: {
     position: 'absolute',
-    bottom: 15,
-    right: 15,
-    width: 38,
-    height: 38,
-    borderRadius: 13,
+    // Раньше 38x38 у самого текста нижней части карточки перекрывал его
+    // собой — уменьшила сам оверлей и сдвинула чуть ниже, к самому краю
+    // карточки, чтобы под текстом оставалось больше места.
+    bottom: 10,
+    right: 12,
+    width: 30,
+    height: 30,
+    borderRadius: 10,
     backgroundColor: 'rgba(20, 20, 24, 0.6)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
@@ -2723,6 +3002,20 @@ const styles = {
     marginTop: 16,
     marginBottom: 8,
     textTransform: 'uppercase',
+  },
+  memoryVisibilityOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 15,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.07)',
+  },
+  memoryVisibilityOptionText: {
+    color: '#f4f4f5',
+    fontSize: 15.5,
+    fontWeight: '500',
   },
   transferOrganizerDescription: {
     color: '#DDD',

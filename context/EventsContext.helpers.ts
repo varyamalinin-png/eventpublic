@@ -23,12 +23,19 @@ export const calculateAge = (dateOfBirth: string | Date | null | undefined): str
       age--;
     }
     
-    return age > 0 ? `${age} лет` : undefined;
+    // Только число. Суффикс («лет» / «y.o.») подставляется при отрисовке из
+    // локали — раньше он вшивался сюда, и английский интерфейс показывал
+    // «58 лет» независимо от выбранного языка.
+    return age > 0 ? String(age) : undefined;
   } catch (error) {
     logger.warn('Failed to calculate age from dateOfBirth:', error);
     return undefined;
   }
 };
+
+/** Служебная заглушка имени. Показывать её пользователю нельзя — если она
+ *  где-то всплыла, значит профиль ещё не подгрузился. */
+export const USER_NAME_FALLBACK = 'Пользователь';
 
 export const DEFAULT_AVATAR_URL = 'https://cdn.jsdelivr.net/gh/identicons/jasonlong/resources/png/identicon.png';
 
@@ -38,12 +45,13 @@ export const mapServerUserToClient = (user: ServerUser): User => {
   }
   return {
     id: user.id,
-    name: user.name ?? user.username ?? 'Пользователь',
+    name: user.name ?? user.username ?? USER_NAME_FALLBACK,
     username: user.username ?? '',
     avatar: String(user.avatarUrl ?? DEFAULT_AVATAR_URL),
     bio: user.bio ?? '',
     age: user.age ?? '',
     geoPosition: user.geoPosition ?? '',
+    gender: typeof user.gender === 'string' ? user.gender : undefined,
   };
 };
 
@@ -66,9 +74,30 @@ export const mergeUserRecord = (record: Record<string, UserProfilePatch>, userId
     }
   });
   if (Object.keys(nextEntry).length === 0) {
+    if (!(userId in record)) return record;
     const { [userId]: _removed, ...rest } = record;
     return rest;
   }
+
+  /**
+   * Если ничего не изменилось — возвращаем ПРЕЖНИЙ объект.
+   *
+   * Раньше здесь всегда создавался новый: значит каждая запись пользователя,
+   * даже точь-в-точь совпадающая с уже лежащей в кэше, меняла состояние
+   * контекста и перерисовывала ВСЕХ его потребителей — а это почти всё
+   * приложение. Одни и те же люди приезжают с сервера постоянно: в событиях,
+   * заявках, участниках, чатах, авторах постов, — так что таких пустых
+   * перерисовок были сотни, отсюда и общая вязкость интерфейса.
+   */
+  const previousEntry = record[userId];
+  if (previousEntry) {
+    const keys = Object.keys(nextEntry);
+    const sameSize = keys.length === Object.keys(previousEntry).length;
+    if (sameSize && keys.every(key => (previousEntry as any)[key] === (nextEntry as any)[key])) {
+      return record;
+    }
+  }
+
   return {
     ...record,
     [userId]: nextEntry,

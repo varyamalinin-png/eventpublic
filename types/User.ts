@@ -7,6 +7,7 @@ export interface User {
   bio: string;
   geoPosition: string;
   accountType?: 'personal' | 'business'; // Тип аккаунта: личный или бизнес
+  gender?: string; // 'male' | 'female' | … — необязателен, у большинства не указан
 }
 
 export interface UserFolder {

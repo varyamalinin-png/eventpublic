@@ -1,0 +1,225 @@
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useState, useRef, useMemo } from 'react';
+import { useStableItemHandler } from '../hooks/useStableItemHandler';
+import EventCard from '../components/EventCard';
+import { useEvents, Event } from '../context/EventsContext';
+import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
+import ProfileEventsGrid from '../components/ProfileEventsGrid';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+export default function SharedEventsScreen() {
+  const { userId } = useLocalSearchParams();
+  const router = useRouter();
+  const { events, eventProfiles, getUserData, isUserEventMember, isEventPast } = useEvents();
+  const { user: authUser } = useAuth();
+  const { t } = useLanguage();
+  const [showEventFeed, setShowEventFeed] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+  
+  const targetUserId = Array.isArray(userId) ? userId[0] : userId || 'organizer-1';
+  const currentUserId = authUser?.id ?? null;
+  const userData = getUserData(targetUserId);
+
+  // Член события: для прошедших — организатор или profile.participants (единый принцип)
+  const isMember = useMemo(() => {
+    return (event: Event, uid: string) => {
+      if (!isEventPast(event)) return isUserEventMember(event, uid);
+      if (event.organizerId === uid) return true;
+      const profile = eventProfiles.find(p => p.eventId === event.id);
+      return profile ? profile.participants.includes(uid) : false;
+    };
+  }, [eventProfiles, isEventPast, isUserEventMember]);
+
+  // События где и я и он члены (текущие и прошлые)
+  const sharedEvents = useMemo(
+    () =>
+      currentUserId
+        ? events.filter(event => isMember(event, currentUserId) && isMember(event, targetUserId))
+        : [],
+    [events, currentUserId, targetUserId, isMember],
+  );
+
+  const handleEventPress = (event: Event) => {
+    setSelectedEvent(event);
+    setShowEventFeed(true);
+    
+    // Прокручиваем к нужному событию после рендера
+    setTimeout(() => {
+      const eventIndex = sharedEvents.findIndex(e => e.id === event.id);
+      if (eventIndex !== -1 && scrollViewRef.current) {
+        const cardHeight = 400;
+        const marginBottom = 20;
+        const totalItemHeight = cardHeight + marginBottom;
+        const screenHeight = 800;
+        const cardPosition = eventIndex * totalItemHeight;
+        const centerOffset = (screenHeight - cardHeight) / 2;
+        let scrollToY = cardPosition - centerOffset;
+        const totalContentHeight = sharedEvents.length * totalItemHeight - marginBottom + 20;
+        const maxScrollY = Math.max(0, totalContentHeight - screenHeight);
+        scrollToY = Math.max(0, Math.min(scrollToY, maxScrollY));
+        scrollViewRef.current.scrollTo({ y: scrollToY, animated: true });
+      }
+    }, 200);
+  };
+
+  // Одна ссылка на событие вместо новой стрелки на каждый рендер —
+  // иначе memo у EventCard не срабатывает
+  const getEventPressHandler = useStableItemHandler(sharedEvents, handleEventPress);
+
+  // Если показываем ленту событий
+  if (showEventFeed) {
+    return (
+      <View style={styles.container}>
+        <TouchableOpacity 
+          style={styles.backToGrid}
+          onPress={() => {
+            setShowEventFeed(false);
+            setSelectedEvent(null);
+          }}
+        >
+          <Text style={styles.backText}>← {t.profile.backToGrid}</Text>
+        </TouchableOpacity>
+        <ScrollView 
+          ref={scrollViewRef} 
+          style={styles.feedContainer}
+          contentContainerStyle={styles.feedContentContainer}
+          showsVerticalScrollIndicator={true}
+          bounces={true}
+          alwaysBounceVertical={true}
+          scrollEventThrottle={16}
+          removeClippedSubviews={false}
+        >
+          {sharedEvents.map((event, index) => (
+            <View 
+              key={event.id} 
+              style={[
+                styles.eventCardWrapper,
+                index === sharedEvents.length - 1 && styles.lastEventCard
+              ]}
+            >
+              <EventCard
+                id={event.id}
+                title={event.title}
+                description={event.description}
+                date={event.date}
+                time={event.time}
+                displayDate={event.displayDate}
+                location={event.location}
+                price={event.price}
+                participants={event.participants}
+                maxParticipants={event.maxParticipants}
+                organizerAvatar={event.organizerAvatar}
+                organizerId={event.organizerId}
+                variant="default"
+                showSwipeAction={true}
+                mediaUrl={event.mediaUrl}
+                mediaType={event.mediaType}
+                mediaAspectRatio={event.mediaAspectRatio}
+                participantsList={event.participantsList}
+                participantsData={event.participantsData}
+                viewerUserId={targetUserId}
+              />
+            </View>
+          ))}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Text style={styles.backText}>← {t.common.back}</Text>
+        </TouchableOpacity>
+        <Text style={styles.title}>{t.profile.sharedEventsTitle} {userData.name}</Text>
+      </View>
+      
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        {/* Та же сетка, что в профиле (ProfileEventsGrid). Раньше на этом
+            экране была своя раскладка (padding 40, gap 15) — карточки
+            выглядели крупнее, чем в профиле. */}
+        <ProfileEventsGrid
+          items={sharedEvents.map(event => ({ type: 'event' as const, data: event }))}
+          emptyText={t.profile.noSharedEventsFound}
+          emptyTextStyle={styles.emptyText}
+          screenWidth={SCREEN_WIDTH}
+          viewerUserId={targetUserId}
+          onFolderPress={() => {}}
+          onEventPress={(event) => getEventPressHandler(event.id)}
+        />
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0a0a0c',
+  },
+  header: {
+    paddingTop: 60,
+    paddingBottom: 15,
+    paddingHorizontal: 20,
+    backgroundColor: '#0a0a0c',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    marginRight: 15,
+  },
+  backText: {
+    color: '#FF8D32',
+    fontSize: 16,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#f4f4f5',
+    flex: 1,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 100,
+  },
+  eventsContainer: {
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: 'rgba(244,244,245,0.35)',
+    textAlign: 'center',
+    marginTop: 20,
+    width: '100%',
+  },
+  backToGrid: {
+    paddingHorizontal: 20,
+    paddingTop: 60,
+    paddingBottom: 10,
+  },
+  feedContainer: {
+    flex: 1,
+  },
+  feedContentContainer: {
+    paddingHorizontal: 12, // Соответствует marginHorizontal в MemoryPost
+    flexGrow: 1,
+    paddingBottom: 100,
+  },
+  eventCardWrapper: {
+    marginBottom: 15,
+  },
+  lastEventCard: {
+    marginBottom: 200,
+  },
+});
+

@@ -21,18 +21,7 @@ export default function MyEventsScreen() {
   const [showEventFeed, setShowEventFeed] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
-  const currentUserId = authUser?.id ?? null;
-  
-  if (!currentUserId) {
-    return (
-      <View style={[styles.container, styles.centered]}>
-        <Text style={styles.loginPromptTitle}>{t.auth.pleaseSignIn}</Text>
-        <Text style={styles.loginPromptText}>
-          Войдите, чтобы увидеть ваши события и участие в мероприятиях.
-        </Text>
-      </View>
-    );
-  }
+  const currentUserId = authUser?.id ?? '';
   
   const isMember = useMemo(() => (event: Event) => isMemberOfEvent(event, currentUserId, eventProfiles, isUserOrganizer, isUserEventMember, isEventPast), [currentUserId, eventProfiles, isUserOrganizer, isUserEventMember, isEventPast]);
 
@@ -87,6 +76,20 @@ export default function MyEventsScreen() {
       }
     }
   }, [eventId, userEvents]);
+
+  // Ранний выход — ПОСЛЕ всех хуков: при разлогине authUser исчезает, и
+  // проверка, стоявшая выше useMemo/useEffect, отрисовывала меньше хуков —
+  // React ронял приложение с «Rendered fewer hooks than expected».
+  if (!currentUserId) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={styles.loginPromptTitle}>{t.auth.pleaseSignIn}</Text>
+        <Text style={styles.loginPromptText}>
+          Войдите, чтобы увидеть ваши события и участие в мероприятиях.
+        </Text>
+      </View>
+    );
+  }
 
   if (showEventFeed) {
     return (

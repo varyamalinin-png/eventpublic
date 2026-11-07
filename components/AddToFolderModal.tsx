@@ -4,6 +4,7 @@ import { useEvents } from '../context/EventsContext';
 import { AppIcon } from './ui/AppIcon';
 import { Palette } from '../constants/DesignSystem';
 import { useLanguage } from '../context/LanguageContext';
+import { sizedImage } from '../utils/imageSize';
 
 interface AddToFolderModalProps {
   visible?: boolean;
@@ -64,13 +65,13 @@ export default function AddToFolderModal({ visible = true, eventIds, onClose, on
                 activeOpacity={0.7}
               >
                 <Image
-                  source={{ uri: folder.coverPhotoUrl || folder.events?.[0]?.mediaUrl || 'https://via.placeholder.com/44' }}
+                  source={{ uri: sizedImage(folder.coverPhotoUrl || folder.events?.[0]?.mediaUrl, 200) }}
                   style={styles.folderAvatar}
                 />
                 <View style={styles.folderInfo}>
                   <Text style={styles.folderName} numberOfLines={1}>{folder.name}</Text>
                   <Text style={styles.folderCount}>
-                    {folder.eventCount || folder.events?.length || 0} событий
+                    {folder.eventCount || folder.events?.length || 0} {t.profile.eventsWordPlural}
                   </Text>
                 </View>
                 <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>

@@ -132,11 +132,16 @@ export const profileStyles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#1c1c20',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
     borderColor: '#0a0a0c',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 3,
   },
   settingsIcon: {
     fontSize: 18,
@@ -322,15 +327,17 @@ export const profileStyles = StyleSheet.create({
     alignItems: 'center',
   },
   avatarModalContent: {
-    width: '90%',
-    height: '80%',
+    // Квадрат, а не произвольный прямоугольник — чтобы borderRadius ниже
+    // давал ровный круг, как у маленькой аватарки, а не скруглённый овал.
+    width: '85%',
+    aspectRatio: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarModalImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 20,
+    borderRadius: 9999,
   },
   // Стили для режима select
   selectableCardWrapper: {
@@ -369,11 +376,15 @@ export const profileStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
     borderRadius: 20,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    // Компактнее прежнего: при трёх кнопках в ряд («Cancel», «Delete (n)»,
+    // «To folder (n)») крупные отступы и шрифт 16 не помещались, и подписи
+    // переносились на две-три строки — панель выглядела массивной.
+    paddingVertical: 10,
+    paddingHorizontal: 10,
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.4,
@@ -384,15 +395,15 @@ export const profileStyles = StyleSheet.create({
   actionButton: {
     flex: 1,
     backgroundColor: '#FF8D32',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    marginHorizontal: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 8,
+    borderRadius: 11,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   actionButtonText: {
     color: '#0A0A0A',
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '600',
   },
   actionButtonDisabled: {
@@ -400,13 +411,15 @@ export const profileStyles = StyleSheet.create({
     opacity: 0.5,
   },
   cancelButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   cancelButtonText: {
     color: '#f4f4f5',
-    fontSize: 16,
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
 

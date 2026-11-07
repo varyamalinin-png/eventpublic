@@ -67,11 +67,7 @@ export default function VerifyEmailScreen() {
       // Сервер разрешает не чаще раза в две минуты — блокируем кнопку на это время
       cooldown.start();
       setStatusMessage(t.auth.verificationSent);
-      Alert.alert(
-        t.auth.emailSent,
-        'Проверьте вашу почту (включая папку "Спам") и следуйте инструкциям в письме для подтверждения email.',
-        [{ text: 'OK' }]
-      );
+      Alert.alert(t.auth.emailSent, t.auth.checkInbox, [{ text: 'OK' }]);
     } catch (error: any) {
       logger.error('Failed to resend verification email', error);
       // Если отказ именно по частоте, сервер вернул остаток секунд — показываем его
@@ -85,8 +81,9 @@ export default function VerifyEmailScreen() {
     }
   }, [email, resendVerificationEmail, cooldown]);
 
-  const handleVerifyToken = useCallback(async () => {
-    if (!token.trim()) {
+  const handleVerifyToken = useCallback(async (code?: string) => {
+    const activeToken = (code ?? token).trim();
+    if (!activeToken) {
       setErrorMessage(t.auth.enterToken);
       return;
     }
@@ -98,7 +95,7 @@ export default function VerifyEmailScreen() {
     try {
       // Токен должен быть уже декодирован expo-router, но на всякий случай пробуем декодировать
       // Если декодирование не нужно, оно не сломает токен (токены hex не содержат %)
-      let processedToken = token.trim();
+      let processedToken = activeToken;
       try {
         // Пробуем декодировать только если токен содержит % (признак URL encoding)
         if (processedToken.includes('%')) {
@@ -109,11 +106,11 @@ export default function VerifyEmailScreen() {
         logger.warn('Failed to decode token, using original', e);
       }
       
-      logger.debug('Verifying token', { 
-        originalLength: token.trim().length, 
+      logger.debug('Verifying token', {
+        originalLength: activeToken.length,
         processedLength: processedToken.length,
         tokenPreview: processedToken.substring(0, 20) + '...',
-        containsPercent: token.trim().includes('%')
+        containsPercent: activeToken.includes('%')
       });
       const result = await verifyEmail(email.trim(), processedToken);
       
@@ -161,25 +158,20 @@ export default function VerifyEmailScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.content}>
           <Text style={styles.title}>{t.auth.verifyEmailTitle}</Text>
-          <Text style={styles.subtitle}>
-            Для завершения регистрации необходимо подтвердить ваш email адрес
-          </Text>
+          <Text style={styles.subtitle}>{t.auth.verifyEmailSubtitle}</Text>
 
               {/* Инструкция */}
               <View style={styles.instructionBox}>
                 <Text style={styles.instructionTitle}>{t.auth.howToVerify}</Text>
                 <View style={styles.instructionList}>
                   <Text style={styles.instructionItem}>
-                    1. Проверьте вашу почту ({email || t.auth.usedAtSignUp})
+                    1. {t.auth.verifyStepInbox} ({email || t.auth.usedAtSignUp})
                   </Text>
                   <Text style={styles.instructionItem}>
-                    2. ⚠️ Обязательно проверьте папку "Спам" - письмо может попасть туда
+                    2. {t.auth.verifyStepSpam}
                   </Text>
                   <Text style={styles.instructionItem}>
-                    3. Найдите письмо от нашего сервиса
-                  </Text>
-                  <Text style={styles.instructionItem}>
-                    4. Введите 6-значный код из письма ниже
+                    3. {t.auth.verifyStepCode}
                   </Text>
                 </View>
               </View>
@@ -201,9 +193,7 @@ export default function VerifyEmailScreen() {
           {/* Повторная отправка письма */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t.auth.notReceived}</Text>
-            <Text style={styles.sectionDescription}>
-              Введите ваш email и мы отправим письмо с подтверждением повторно
-            </Text>
+            <Text style={styles.sectionDescription}>{t.auth.resendDescription}</Text>
             <View style={styles.inputContainer}>
               <Text style={styles.inputLabel}>Email</Text>
               <TextInput
@@ -249,7 +239,7 @@ export default function VerifyEmailScreen() {
             </View>
             <TouchableOpacity
               style={[styles.primaryButton, (loading || token.length < 6) && styles.disabledButton]}
-              onPress={handleVerifyToken}
+              onPress={() => handleVerifyToken()}
               disabled={loading || token.length < 6}
             >
               {loading ? (

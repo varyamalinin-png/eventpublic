@@ -3,9 +3,11 @@ import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
+import { openUserProfile } from '../utils/openUserProfile';
 import { createLogger } from '../utils/logger';
 import { AppIcon } from './ui/AppIcon';
 import { Palette } from '../constants/DesignSystem';
+import { sizedImage } from '../utils/imageSize';
 
 const logger = createLogger('RequestMiniCard');
 
@@ -59,7 +61,7 @@ function RequestMiniCard({
         logger.warn('Пользователь не найден, переход невозможен');
         return;
       }
-      router.push(`/profile/${userId}`);
+      openUserProfile(userId, currentUserId);
     }
   };
   
@@ -80,7 +82,7 @@ function RequestMiniCard({
         return displayPhoto ? (
           <View style={styles.miniatureBackgroundContainer}>
             <Image 
-              source={{ uri: displayPhoto }} 
+              source={{ uri: sizedImage(displayPhoto, 200) }} 
               style={styles.miniatureBackgroundImage} 
             />
             <View style={styles.miniatureOverlay} />
@@ -91,12 +93,12 @@ function RequestMiniCard({
       {/* Аватарка организатора/пользователя в правом верхнем углу */}
       {type === 'event' && event ? (
         <Image 
-          source={{ uri: event.organizerAvatar }} 
+          source={{ uri: sizedImage(event.organizerAvatar, 40) }} 
           style={styles.miniatureOrganizerAvatar} 
         />
       ) : type === 'friend' && user ? (
         <Image 
-          source={{ uri: user.avatar }} 
+          source={{ uri: sizedImage(user.avatar, 40) }} 
           style={styles.miniatureOrganizerAvatar} 
         />
       ) : null}
@@ -124,7 +126,7 @@ function RequestMiniCard({
               {user.username}
             </Text>
             <Text style={styles.miniatureDate}>
-              {user.age} • {user.geoPosition}
+              {String(user.age ?? '').match(/\d+/)?.[0] ?? ''} • {user.geoPosition}
             </Text>
           </>
         ) : null}

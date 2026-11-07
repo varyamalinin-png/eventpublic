@@ -21,6 +21,28 @@ const logger = createLogger('useEventProfiles');
  * и данные не меняются — меняется только то, как быстро/плавно всё это летит.
  */
 const PROFILE_FETCH_CONCURRENCY = 4;
+
+/**
+ * Дедупликация, кэш и отступление при 429.
+ *
+ * Ограничитель ниже сдерживает ОДНОВРЕМЕННОСТЬ (4 запроса), но не частоту:
+ * при нескольких десятках событий запросы всё равно уходят пачкой и упираются
+ * в серверный лимит (@nestjs/throttler, 100 запросов в минуту) — в логах
+ * появлялись подряд идущие 429 на /events/<id>/profile, причём одни и те же
+ * id повторялись, потому что дедупликации не было вовсе.
+ *
+ * Здесь три меры:
+ *  - один запрос на eventId одновременно (остальные ждут тот же промис);
+ *  - уже загруженный профиль не перезапрашивается заданное время;
+ *  - после 429 запросы не отправляются вообще до истечения паузы, иначе
+ *    приложение продолжает долбить лимит и не даёт ему восстановиться.
+ */
+const PROFILE_CACHE_TTL_MS = 60_000;
+const RATE_LIMIT_COOLDOWN_MS = 30_000;
+
+const _inFlightProfiles = new Map<string, Promise<EventProfile | null>>();
+const _lastProfileFetchAt = new Map<string, number>();
+let _rateLimitedUntil = 0;
 const _fetchState = { active: 0, queue: [] as Array<() => void> };
 
 function runWithProfileFetchLimit<T>(task: () => Promise<T>): Promise<T> {
@@ -59,6 +81,7 @@ export interface UseEventProfilesReturn {
   setEventProfiles: React.Dispatch<React.SetStateAction<EventProfile[]>>;
   getEventProfile: (eventId: string) => EventProfile | null;
   fetchEventProfile: (eventId: string) => Promise<EventProfile | null>;
+  fetchEventProfiles: (eventIds: string[], force?: boolean) => Promise<void>;
   createEventProfile: (eventId: string) => Promise<void>;
   addEventProfilePost: (eventId: string, post: Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>) => Promise<EventProfilePost | null>;
   updateEventProfile: (eventId: string, updates: Partial<EventProfile>) => Promise<void>;
@@ -66,6 +89,79 @@ export interface UseEventProfilesReturn {
   deleteEventProfilePost: (eventId: string, postId: string) => Promise<void>;
   canEditEventProfile: (eventId: string, userId: string) => boolean;
   addPostComment: (eventId: string, postId: string, comment: Omit<import('../../types').PostComment, 'id' | 'postId' | 'createdAt'>) => Promise<void>;
+}
+
+/** id участников из ответа сервера: там либо строки, либо строки-связки. */
+function participantIdsOf(list: any): string[] {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((p: any) => (typeof p === 'string' ? p : p?.userId || p?.user?.id))
+    .filter(Boolean) as string[];
+}
+
+/**
+ * Ответ сервера -> клиентская модель профиля события.
+ *
+ * Вынесено из doFetchEventProfile, чтобы этим же кодом разбирался и пакетный
+ * ответ /event-profiles/batch. Иначе разбор пришлось бы держать в двух местах,
+ * а он нетривиальный: дедупликация постов, нормализация ссылок на медиа,
+ * подстановка полей события там, где профиль их не хранит.
+ */
+function mapServerProfileToClient(
+  response: ServerEventProfile,
+  eventId: string,
+  event: any,
+  // normalizeMediaUrl приходит в хук пропом, а не импортом, поэтому функции
+  // его надо передать явно.
+  normalizeMediaUrl: (input?: string | null) => string | undefined,
+): EventProfile {
+  return {
+  id: response.id || `profile-${eventId}`,
+  eventId,
+  name: (response.name || event?.title || (response.event as any)?.name || '') as string,
+  description: (response.description || event?.description || (response.event as any)?.description || '') as string,
+  date: (response.date || event?.date || (response.event as any)?.date || '') as string,
+  time: (response.time || event?.time || (response.event as any)?.time || '') as string,
+  location: (response.location || event?.location || (response.event as any)?.location || '') as string,
+  participants: participantIdsOf(response.participants),
+  // Вышедшие из события — сервер отдаёт их только своим (см. EventProfile).
+  formerParticipants: participantIdsOf((response as any).formerParticipants),
+  organizerId: (event?.organizerId || response.organizerId || (response.event as any)?.organizerId || '') as string,
+  isCompleted: response.isCompleted || false,
+  hiddenParameters: (response.hiddenParameters || {}) as Record<string, boolean>,
+  posts: (() => {
+    // Дедупликация постов по ID перед маппингом
+    const postsMap = new Map<string, ServerEventProfilePost>();
+    (response.posts || []).forEach((post: ServerEventProfilePost) => {
+      if (post.id && !postsMap.has(post.id)) {
+        postsMap.set(post.id, post);
+      } else if (post.id) {
+        logger.warn(`Обнаружен дубликат поста с ID ${post.id} в ответе сервера`);
+      }
+    });
+    return Array.from(postsMap.values()).map((post: ServerEventProfilePost) => ({
+      id: post.id,
+      eventId,
+      authorId: (post.authorId || post.author?.id || '') as string,
+      content: post.content,
+      photoUrl: normalizeMediaUrl(post.photoUrl),
+      photoUrls: post.photoUrls && Array.isArray(post.photoUrls) 
+        ? post.photoUrls.map(url => normalizeMediaUrl(url))
+        : undefined,
+      captions: post.captions && Array.isArray(post.captions) 
+        ? post.captions 
+        : undefined,
+    // Лайки и комментарии приходят с сервера, но в клиентскую модель
+    // не переносились — из-за этого после перезахода в приложение
+    // они пропадали.
+    likes: Array.isArray((post as any).likes) ? ((post as any).likes as string[]) : [],
+    comments: Array.isArray((post as any).comments) ? (post as any).comments : [],
+    createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
+    }));
+  })(),
+  createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
+  avatar: normalizeMediaUrl(response.avatar) || normalizeMediaUrl(event?.mediaUrl) || normalizeMediaUrl((response.event as any)?.mediaUrl),
+};
 }
 
 export const useEventProfiles = ({
@@ -97,6 +193,108 @@ export const useEventProfiles = ({
     const actualToken = currentAccessTokenRef.current;
     if (!actualToken) return null;
 
+    // Сервер ответил 429 — выдерживаем паузу, не отправляя новых запросов.
+    if (Date.now() < _rateLimitedUntil) {
+      logger.debug(`Пропускаем профиль ${eventId}: действует пауза после 429`);
+      return null;
+    }
+
+    // Тот же профиль уже грузится — ждём тот же запрос, а не шлём второй.
+    const inFlight = _inFlightProfiles.get(eventId);
+    if (inFlight) return inFlight;
+
+    // Недавно загружали — данные ещё свежие.
+    const lastAt = _lastProfileFetchAt.get(eventId);
+    if (lastAt && Date.now() - lastAt < PROFILE_CACHE_TTL_MS) {
+      return eventProfiles.find(profile => profile.eventId === eventId) ?? null;
+    }
+
+    const request = doFetchEventProfile(eventId, actualToken);
+    _inFlightProfiles.set(eventId, request);
+    try {
+      return await request;
+    } finally {
+      _inFlightProfiles.delete(eventId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventProfiles]);
+
+  /**
+   * Профили сразу для набора событий — ОДНИМ запросом.
+   *
+   * Экраны профиля и мемориса запрашивали профиль каждого прошедшего события
+   * отдельно: на боевых данных это под сотню параллельных запросов при каждом
+   * открытии экрана. Они упирались в ограничитель частоты, отдавали 429 и
+   * оставляли экраны пустыми, а главный поток — занятым.
+   *
+   * Отметки в _lastProfileFetchAt проставляем и для событий, у которых профиля
+   * не оказалось: иначе поштучный загрузчик тут же пошёл бы добирать их по
+   * одному и мы вернулись бы к тому же шквалу.
+   */
+  const fetchEventProfiles = useCallback(async (eventIds: string[], force = false): Promise<void> => {
+    const actualToken = currentAccessTokenRef.current;
+    if (!actualToken || !eventIds.length) return;
+    if (Date.now() < _rateLimitedUntil) return;
+
+    // Свежие пропускаем — как и в поштучной загрузке. Кроме случая, когда
+    // обновление запросил сам пользователь (потянул ленту вниз): тогда кэш
+    // на минуту только мешал бы.
+    const stale = force
+      ? eventIds
+      : eventIds.filter(id => {
+          const lastAt = _lastProfileFetchAt.get(id);
+          return !lastAt || Date.now() - lastAt >= PROFILE_CACHE_TTL_MS;
+        });
+    if (!stale.length) return;
+
+    // Сервер ограничивает список 200 идентификаторами — режем на части.
+    const CHUNK = 100;
+    for (let i = 0; i < stale.length; i += CHUNK) {
+      const chunk = stale.slice(i, i + CHUNK);
+      try {
+        const response = await apiRequest(
+          `/event-profiles/batch?ids=${encodeURIComponent(chunk.join(','))}`,
+          { method: 'GET' },
+          actualToken,
+        ) as ServerEventProfile[] | null;
+
+        const list = Array.isArray(response) ? response : [];
+        logger.info(`Пакетная загрузка профилей: запрошено ${chunk.length}, получено ${list.length}`);
+
+        const mapped = list
+          .map(item => {
+            const eventId = (item as any).eventId as string;
+            if (!eventId) return null;
+            const event = events.find(e => e.id === eventId);
+            return mapServerProfileToClient(item, eventId, event, normalizeMediaUrl);
+          })
+          .filter(Boolean) as EventProfile[];
+
+        if (mapped.length) {
+          // Одно обновление состояния на всю пачку, а не по разу на профиль.
+          setEventProfiles(prev => {
+            const byEventId = new Map(prev.map(profile => [profile.eventId, profile]));
+            mapped.forEach(profile => byEventId.set(profile.eventId, profile));
+            return Array.from(byEventId.values());
+          });
+        }
+
+        const now = Date.now();
+        chunk.forEach(id => _lastProfileFetchAt.set(id, now));
+      } catch (error: any) {
+        if (error?.status === 429) {
+          _rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+          logger.warn('Пакетная загрузка профилей: 429, выдерживаем паузу');
+          return;
+        }
+        logger.warn('Пакетная загрузка профилей не удалась', error);
+        return;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events, normalizeMediaUrl, setEventProfiles]);
+
+  const doFetchEventProfile = useCallback(async (eventId: string, actualToken: string): Promise<EventProfile | null> => {
     try {
       logger.info(`Загружаем профиль для события ${eventId}`);
       const response = await runWithProfileFetchLimit(() => apiRequest(
@@ -116,49 +314,7 @@ export const useEventProfiles = ({
       }
       
       if (response) {
-        const mappedProfile: EventProfile = {
-          id: response.id || `profile-${eventId}`,
-          eventId,
-          name: (response.name || event?.title || (response.event as any)?.name || '') as string,
-          description: (response.description || event?.description || (response.event as any)?.description || '') as string,
-          date: (response.date || event?.date || (response.event as any)?.date || '') as string,
-          time: (response.time || event?.time || (response.event as any)?.time || '') as string,
-          location: (response.location || event?.location || (response.event as any)?.location || '') as string,
-          participants: (response.participants || []).map((p) => {
-            if (typeof p === 'string') return p;
-            return p.userId || (p as { user?: { id: string } }).user?.id;
-          }).filter(Boolean) as string[],
-          organizerId: (event?.organizerId || response.organizerId || (response.event as any)?.organizerId || '') as string,
-          isCompleted: response.isCompleted || false,
-          hiddenParameters: (response.hiddenParameters || {}) as Record<string, boolean>,
-          posts: (() => {
-            // Дедупликация постов по ID перед маппингом
-            const postsMap = new Map<string, ServerEventProfilePost>();
-            (response.posts || []).forEach((post: ServerEventProfilePost) => {
-              if (post.id && !postsMap.has(post.id)) {
-                postsMap.set(post.id, post);
-              } else if (post.id) {
-                logger.warn(`Обнаружен дубликат поста с ID ${post.id} в ответе сервера`);
-              }
-            });
-            return Array.from(postsMap.values()).map((post: ServerEventProfilePost) => ({
-              id: post.id,
-              eventId,
-              authorId: (post.authorId || post.author?.id || '') as string,
-              content: post.content,
-              photoUrl: normalizeMediaUrl(post.photoUrl),
-              photoUrls: post.photoUrls && Array.isArray(post.photoUrls) 
-                ? post.photoUrls.map(url => normalizeMediaUrl(url))
-                : undefined,
-              captions: post.captions && Array.isArray(post.captions) 
-                ? post.captions 
-                : undefined,
-              createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
-            }));
-          })(),
-          createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
-          avatar: normalizeMediaUrl(response.avatar) || normalizeMediaUrl(event?.mediaUrl) || normalizeMediaUrl((response.event as any)?.mediaUrl),
-        };
+        const mappedProfile = mapServerProfileToClient(response, eventId, event, normalizeMediaUrl);
         
         logger.info(`✅ Профиль загружен для события ${eventId}, постов: ${mappedProfile.posts?.length || 0}, участников: ${mappedProfile.participants.length}`);
 
@@ -193,12 +349,13 @@ export const useEventProfiles = ({
           return [...prev, mappedProfile];
         });
 
+        _lastProfileFetchAt.set(eventId, Date.now());
         return mappedProfile;
       }
       
       // Если сервер возвращает null - это нормально, может быть временная проблема
       logger.debug(`Профиль не найден для события ${eventId}`);
-      
+      _lastProfileFetchAt.set(eventId, Date.now());
       return null;
     } catch (error) {
       // Обрабатываем различные типы ошибок
@@ -210,6 +367,14 @@ export const useEventProfiles = ({
         }
         // 403/500 - пользователь не имеет доступа или временная проблема сервера
         if (error.status === 403 || error.status === 500) {
+          return null;
+        }
+        // 429 — упёрлись в лимит запросов. Замолкаем на паузу: продолжать
+        // слать запросы бессмысленно, они всё равно вернут 429 и не дадут
+        // счётчику лимита восстановиться.
+        if (error.status === 429) {
+          _rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+          logger.warn(`Лимит запросов исчерпан (429), пауза ${RATE_LIMIT_COOLDOWN_MS / 1000}с`);
           return null;
         }
         // Для других ошибок логируем как предупреждение
@@ -276,10 +441,8 @@ export const useEventProfiles = ({
           date: response.date || event.date,
           time: response.time || event.time,
           location: response.location || event.location,
-          participants: (response.participants || []).map((p) => {
-            if (typeof p === 'string') return p;
-            return (p as { userId?: string; user?: { id?: string } }).userId || (p as { user?: { id?: string } }).user?.id;
-          }).filter(Boolean) as string[],
+          participants: participantIdsOf(response.participants),
+          formerParticipants: participantIdsOf((response as any).formerParticipants),
           organizerId: event.organizerId,
           isCompleted: response.isCompleted || false,
           hiddenParameters: (response.hiddenParameters || {}) as Record<string, boolean>,
@@ -289,6 +452,11 @@ export const useEventProfiles = ({
             authorId: (post.authorId || post.author?.id || '') as string,
             content: post.content,
             photoUrl: post.photoUrl,
+            // Лайки и комментарии приходят с сервера, но в клиентскую модель
+            // не переносились — из-за этого после перезахода в приложение
+            // они пропадали.
+            likes: Array.isArray((post as any).likes) ? ((post as any).likes as string[]) : [],
+            comments: Array.isArray((post as any).comments) ? (post as any).comments : [],
             createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
           })),
           createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
@@ -715,7 +883,8 @@ export const useEventProfiles = ({
           date: response.date || updates.date || '',
           time: response.time || updates.time || '',
           location: ((response.location ?? updates.location) || '') as string,
-          participants: (response.participants || []).map((p: any) => p.userId || p.user?.id).filter(Boolean),
+          participants: participantIdsOf(response.participants),
+          formerParticipants: participantIdsOf((response as any).formerParticipants),
           organizerId: updates.organizerId || '',
           isCompleted: (response.isCompleted ?? updates.isCompleted) ?? false,
           hiddenParameters: (response.hiddenParameters || updates.hiddenParameters || {}) as Record<string, boolean>,
@@ -725,6 +894,11 @@ export const useEventProfiles = ({
             authorId: (post.authorId || post.author?.id || '') as string,
             content: post.content,
             photoUrl: normalizeMediaUrl(post.photoUrl),
+            // Лайки и комментарии приходят с сервера, но в клиентскую модель
+            // не переносились — из-за этого после перезахода в приложение
+            // они пропадали.
+            likes: Array.isArray((post as any).likes) ? ((post as any).likes as string[]) : [],
+            comments: Array.isArray((post as any).comments) ? (post as any).comments : [],
             createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
           })),
           createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
@@ -759,7 +933,8 @@ export const useEventProfiles = ({
                 date: response.date || updates.date || '',
                 time: response.time || updates.time || '',
                 location: ((response.location ?? updates.location) || '') as string,
-                participants: (response.participants || []).map((p: any) => p.userId || p.user?.id).filter(Boolean),
+                participants: participantIdsOf(response.participants),
+                formerParticipants: participantIdsOf((response as any).formerParticipants),
                 organizerId: updates.organizerId || '',
                 isCompleted: (response.isCompleted ?? updates.isCompleted) ?? false,
                 posts: (response.posts || []).map((post: any) => ({
@@ -768,7 +943,12 @@ export const useEventProfiles = ({
                   authorId: (post.authorId || post.author?.id || '') as string,
                   content: post.content,
                   photoUrl: normalizeMediaUrl(post.photoUrl),
-                  createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
+            // Лайки и комментарии приходят с сервера, но в клиентскую модель
+            // не переносились — из-за этого после перезахода в приложение
+            // они пропадали.
+            likes: Array.isArray((post as any).likes) ? ((post as any).likes as string[]) : [],
+            comments: Array.isArray((post as any).comments) ? (post as any).comments : [],
+            createdAt: post.createdAt ? new Date(post.createdAt) : new Date(),
                 })),
                 createdAt: response.createdAt ? new Date(response.createdAt) : new Date(),
                 avatar: normalizeMediaUrl(response.avatar) ?? normalizeMediaUrl(updates.avatar),
@@ -1000,6 +1180,7 @@ export const useEventProfiles = ({
     setEventProfiles,
     getEventProfile,
     fetchEventProfile,
+    fetchEventProfiles,
     createEventProfile,
     addEventProfilePost,
     updateEventProfile,

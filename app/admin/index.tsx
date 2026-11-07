@@ -194,7 +194,10 @@ export default function AdminDashboardScreen() {
 
     try {
       setError(null);
-      const data = await apiRequest('/admin/statistics/overview', {}, accessToken);
+      // Через /api: путь /admin в nginx отдан веб-приложению (у него есть свои
+      // страницы админки), поэтому голый /admin/... возвращает HTML вместо
+      // данных. Префикс /api ведёт на бэкенд всегда, без списка исключений.
+      const data = await apiRequest('/api/admin/statistics/overview', {}, accessToken);
       setStats(data);
     } catch (err: any) {
       logger.error('Failed to fetch stats:', err);

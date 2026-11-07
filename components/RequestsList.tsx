@@ -4,7 +4,7 @@ import RequestItem from './RequestItem';
 
 interface Request {
   id: string;
-  type: 'event' | 'friend';
+  type: 'event' | 'friend' | 'organizer_transfer';
   eventId?: string;
   userId?: string;
   status?: 'pending' | 'accepted' | 'rejected';
@@ -68,7 +68,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   listContainer: {
-    paddingTop: 8,
+    // paddingTop убран: во «Входящих» первым идёт NotificationItem без
+    // верхнего отступа, и вкладки начинались на разной высоте от шапки.
   },
   emptyState: {
     flex: 1,

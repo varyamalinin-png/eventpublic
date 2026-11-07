@@ -19,9 +19,23 @@ import { Ionicons } from '@expo/vector-icons';
 import { OtpInput } from '../components/auth/OtpInput';
 import { useResendCooldown } from '../hooks/useResendCooldown';
 
+import { SHOW_MULTI_ACCOUNT } from '../constants/featureFlags';
+
 const logger = createLogger('AddAccountVerify');
 
 export default function AddAccountVerifyScreen() {
+  /**
+   * Второй аккаунт заморожен до после MVP (constants/featureFlags.ts).
+   * Из настроек сюда больше не попасть, но экран остаётся зарегистрированным
+   * маршрутом — по прямой ссылке просто уводим назад.
+   */
+  const guardRouter = useRouter();
+  useEffect(() => {
+    if (!SHOW_MULTI_ACCOUNT) {
+      guardRouter.back();
+    }
+  }, [guardRouter]);
+
   const router = useRouter();
   const { t } = useLanguage();
   const params = useLocalSearchParams<{ email?: string }>();

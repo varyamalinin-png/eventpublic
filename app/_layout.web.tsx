@@ -74,7 +74,6 @@ function AuthenticatedStack() {
       <Stack.Screen name="organized-events/[userId]" />
       <Stack.Screen name="participated-events/[userId]" />
       <Stack.Screen name="shared-events/[userId]" />
-      <Stack.Screen name="payment" />
       <Stack.Screen name="admin/index" />
       <Stack.Screen name="admin/complaints" />
       <Stack.Screen name="+not-found" />

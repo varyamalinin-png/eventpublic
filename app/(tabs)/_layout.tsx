@@ -52,6 +52,7 @@ export default function TabLayout() {
   const { t } = useLanguage();
   const isWeb = Platform.OS === 'web';
 
+
   const { chats, unreadNotificationsCount } = useEvents();
   const { user } = useAuth();
   const currentUserId = useMemo(() => user?.id ?? null, [user]);
@@ -94,7 +95,7 @@ export default function TabLayout() {
     >
       {/* Explore - лента глоб (первый таб) */}
       <Tabs.Screen
-        name="explore"
+        name="(explore)"
         options={{
           title: '',
           headerShown: false,
@@ -106,7 +107,7 @@ export default function TabLayout() {
 
       {/* Memories - лента меморис постов (второй таб) */}
       <Tabs.Screen
-        name="memories"
+        name="(memories)"
         options={{
           title: '',
           headerShown: false,
@@ -118,7 +119,7 @@ export default function TabLayout() {
 
       {/* Create - скрыт на вебе, показывается только на мобильных */}
       <Tabs.Screen
-        name="create"
+        name="(create)"
         options={{
           title: t.tabs.create,
           headerShown: false,
@@ -135,7 +136,7 @@ export default function TabLayout() {
 
       {/* Inbox - сообщения (четвертый таб) */}
       <Tabs.Screen
-        name="inbox"
+        name="(inbox)"
         options={{
           title: '',
           headerShown: false,
@@ -156,7 +157,7 @@ export default function TabLayout() {
 
       {/* Profile - скрыт на вебе, показывается только на мобильных */}
       <Tabs.Screen
-        name="profile"
+        name="(profile)"
         options={{
           title: '',
           headerShown: false,
@@ -166,16 +167,8 @@ export default function TabLayout() {
           )
         }}
       />
-
-      {/* Saved - скрыта из табов, доступна только через настройки */}
-      <Tabs.Screen
-        name="saved"
-        options={{
-          href: null, // Скрываем из табов
-          title: '',
-          headerShown: false,
-        }}
-      />
+      {/* Saved больше не таб: экран переехал в стек раздела Profile
+          (app/(tabs)/(profile)/saved.tsx) и открывается из настроек. */}
     </Tabs>
   );
 }

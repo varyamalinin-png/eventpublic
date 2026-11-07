@@ -29,7 +29,10 @@ export default function AdminMailScreen() {
   const fetchEmails = useCallback(async () => {
     if (!accessToken) return;
     try {
-      const url = filter ? `/admin/mail?mailbox=${filter}` : '/admin/mail';
+      // Через /api: путь /admin в nginx отдан веб-приложению (у него есть свои
+      // страницы админки), поэтому голый /admin/... возвращает HTML вместо
+      // данных. Префикс /api ведёт на бэкенд всегда, без списка исключений.
+      const url = filter ? `/api/admin/mail?mailbox=${filter}` : '/api/admin/mail';
       const data = await apiRequest(url, {}, accessToken);
       setEmails(Array.isArray(data) ? data : []);
     } catch (e) {}
@@ -43,7 +46,7 @@ export default function AdminMailScreen() {
     if (!accessToken || email.isRead) return;
     const mailbox = email.to.split('@')[0];
     try {
-      await apiRequest(`/admin/mail/${mailbox}/${email.id}/read`, { method: 'POST' }, accessToken);
+      await apiRequest(`/api/admin/mail/${mailbox}/${email.id}/read`, { method: 'POST' }, accessToken);
       setEmails(prev => prev.map(e => e.id === email.id ? { ...e, isRead: true } : e));
     } catch {}
   };

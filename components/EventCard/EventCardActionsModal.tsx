@@ -35,17 +35,17 @@ const ACTION_ICONS: Record<string, string> = {
   delete_event: 'delete',
   hide_parameters: 'eye-off',
   change_photo: 'image',
-  toggle_tags: 'tag',
   add_to_folder: 'folder',
   remove_from_folder: 'folder',
   transfer_organizer_role: 'person',
   view_requests: 'people',
   remove_participant: 'person-remove',
   extend_recurring: 'repeat',
+  invite_friends: 'userPlus',
 };
 
 const DANGER_ACTIONS = new Set(['cancel_event', 'delete_event', 'cancel_participation', 'report', 'remove_participant']);
-const PRIMARY_ACTIONS = new Set(['accept_invite', 'go_to_chat', 'share']);
+const PRIMARY_ACTIONS = new Set(['accept_invite', 'go_to_chat', 'share', 'invite_friends']);
 
 export default function EventCardActionsModal({
   visible,
@@ -132,11 +132,19 @@ export default function EventCardActionsModal({
                   <Text style={[styles.actionText, { color: textColor }]} numberOfLines={1}>
                     {action.label}
                   </Text>
-                  {!action.isClickable && (
+                  {action.inDevelopment ? (
+                    // Пункт нажимается, но функции ещё нет — подпись видна
+                    // сразу, а по нажатию показывается та же подсказка.
+                    <View style={styles.inDevelopmentBadge}>
+                      <Text style={styles.inDevelopmentText} numberOfLines={1}>
+                        {t.events.inDevelopment}
+                      </Text>
+                    </View>
+                  ) : !action.isClickable ? (
                     <View style={styles.lockedBadge}>
                       <AppIcon name="lock" size={11} color="rgba(244,244,245,0.25)" />
                     </View>
-                  )}
+                  ) : null}
                 </TouchableOpacity>
               );
             })}
@@ -234,6 +242,18 @@ const styles = StyleSheet.create({
     fontSize: 15.5,
     fontWeight: '500',
     letterSpacing: -0.1,
+  },
+  inDevelopmentBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 7,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    maxWidth: 110,
+  },
+  inDevelopmentText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(244,244,245,0.4)',
   },
   lockedBadge: {
     width: 22,

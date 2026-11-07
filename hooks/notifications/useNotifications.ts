@@ -38,8 +38,11 @@ export function useNotifications(
     if (!actualToken || !actualUserId) return;
     
     try {
+      // extended=1 — этот клиент умеет рисовать новые типы (лайки, комментарии,
+      // принятая заявка в друзья, отказ от приглашения). Без флага сервер их
+      // не отдаёт: сборка 3 показала бы на их месте пустое «Новое уведомление».
       const response = await apiRequest(
-        '/notifications?includeRead=true',
+        '/notifications?includeRead=true&extended=1',
         { method: 'GET' },
         actualToken,
       );

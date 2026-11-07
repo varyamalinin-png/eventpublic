@@ -81,6 +81,7 @@ export type UserProfilePatch = Partial<{
   dateOfBirth: string;
   showAge: boolean;
   accountType: 'personal' | 'business';
+  gender: string;
 }>;
 
 export type UserProfile = {
@@ -88,6 +89,7 @@ export type UserProfile = {
   username: string;
   avatar: string;
   age: string;
+  gender?: string;
   bio: string;
   geoPosition: string;
   accountType?: 'personal' | 'business'; // Тип аккаунта: личный или бизнес
@@ -100,7 +102,15 @@ export interface EventsContextType {
   createEvent: (input: CreateEventInput) => Promise<Event | null>;
   updateEvent: (id: string, updates: Partial<Event>) => void;
   deleteEvent: (id: string) => Promise<void>;
+  /** Идёт первая синхронизация после входа — ленты показывают скелетон,
+   *  а не пустое состояние */
+  initialSyncing: boolean;
+  /** Первая синхронизация провалилась по сети — ленты должны сказать
+   *  «не удалось загрузить», а не «пусто» */
+  initialSyncFailed: boolean;
   getUserData: (userId: string) => UserProfile;
+  /** Догружает полный профиль (bio/возраст) — списки отдают пользователя урезанно */
+  fetchUserById: (userId: string, options?: { force?: boolean }) => Promise<any | null>;
   updateUserData: (userId: string, updates: Partial<{ name: string; username: string; avatar: string; age: string; bio: string; geoPosition: string }>) => void;
   getOrganizerStats: (organizerId: string) => {
     totalEvents: number;
@@ -139,6 +149,10 @@ export interface EventsContextType {
   refreshMessageFolders: () => Promise<void>;
   createMessageFolder: (name: string) => Promise<MessageFolder | null>;
   addChatsToMessageFolder: (folderId: string, chatIds: string[]) => Promise<void>;
+  /** Личная видимость МОИХ прошедших событий: eventId -> 'friends' | 'only_me'. */
+  memoryVisibility: Record<string, 'friends' | 'only_me'>;
+  refreshMemoryVisibility: () => Promise<void>;
+  setMemoryVisibility: (eventId: string, visibility: 'all' | 'friends' | 'only_me') => Promise<void>;
   removeChatFromMessageFolder: (folderId: string, chatId: string) => Promise<void>;
   // Система чатов
   chats: Chat[];
@@ -148,6 +162,8 @@ export interface EventsContextType {
   createPersonalChat: (otherUserId: string) => Promise<string>;
   sendChatMessage: (chatId: string, text: string, eventId?: string, postId?: string) => Promise<void>;
   deleteChat: (chatId: string, leaveEvent?: boolean) => Promise<void>;
+  /** Отправить в чаты карточку профиля пользователя. */
+  sendProfileToChats: (userId: string, chatIds: string[]) => Promise<void>;
   sendEventToChats: (eventId: string, chatIds: string[]) => Promise<void>;
   sendMemoryPostToChats: (eventId: string, postId: string, chatIds: string[]) => Promise<void>;
   getChatMessages: (chatId: string) => ChatMessage[];
@@ -161,6 +177,8 @@ export interface EventsContextType {
   eventProfiles: EventProfile[];
   sendEventRequest: (eventId: string, userId: string) => void;
   sendEventInvite: (eventId: string, fromUserId: string, toUserId: string, event?: Event) => void; // Отправка приглашения на событие (event опционально для новых событий)
+  /** Пачка приглашений в уже созданное событие; возвращает, кого позвать не вышло. */
+  sendEventInvites: (eventId: string, toUserIds: string[]) => Promise<{ sent: string[]; failed: string[] }>;
   acceptInvitation: (requestId: string) => Promise<void>; // Принятие приглашения (invited → accepted)
   rejectInvitation: (requestId: string) => Promise<void>; // Отклонение приглашения (invited → rejected)
   respondToEventRequest: (requestId: string, accepted: boolean) => void;
@@ -172,7 +190,13 @@ export interface EventsContextType {
   transferOrganizerRole: (eventId: string, newOrganizerId: string) => Promise<void>; // Передача роли организатора другому участнику
   removeParticipantFromEvent: (eventId: string, userId: string) => void; // Удаление участника из события (для организатора)
   getEventProfile: (eventId: string) => EventProfile | null;
+  /** Перечитать заявки в друзья с сервера (экраны обновляют их при открытии). */
+  cacheServerUsers: (users: any[]) => void;
+  syncFriendsFromServer: () => Promise<void>;
+  syncFriendRequestsFromServer: () => Promise<void>;
   fetchEventProfile: (eventId: string) => Promise<EventProfile | null>;
+  /** Профили сразу для набора событий — одним запросом вместо запроса на каждое. */
+  fetchEventProfiles: (eventIds: string[], force?: boolean) => Promise<void>;
   createEventProfile: (eventId: string) => Promise<void>;
   addEventProfilePost: (eventId: string, post: Omit<EventProfilePost, 'id' | 'eventId' | 'createdAt'>) => Promise<EventProfilePost | null>;
   updateEventProfile: (eventId: string, updates: Partial<EventProfile>) => Promise<void>;

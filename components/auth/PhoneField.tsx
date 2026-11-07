@@ -13,6 +13,24 @@ import { Palette, Radius } from '../../constants/DesignSystem';
 import { COUNTRIES, Country, DEFAULT_COUNTRY } from '../../constants/countries';
 import { useLanguage } from '../../context/LanguageContext';
 
+/**
+ * Автозаполнение iOS вставляет номер целиком — «+7 912 345-67-89» или
+ * «8 912 345-67-89». Код страны уже стоит слева, поэтому его цифры (и
+ * российскую «восьмёрку» в начале) срезаем, иначе получалось «+7 8912…».
+ * Обычный ввод по цифре сюда не попадает: национальный номер короче.
+ */
+function normalizeNationalNumber(text: string, dial: string): string {
+  const hadPlus = text.trim().startsWith('+');
+  let digits = text.replace(/\D/g, '');
+  const dialDigits = dial.replace(/\D/g, '');
+  if (dialDigits && digits.startsWith(dialDigits) && (hadPlus || digits.length > 10)) {
+    digits = digits.slice(dialDigits.length);
+  } else if (dialDigits === '7' && digits.length === 11 && digits.startsWith('8')) {
+    digits = digits.slice(1);
+  }
+  return digits;
+}
+
 type Props = {
   /** Национальный номер без кода страны — только цифры. */
   nationalNumber: string;
@@ -72,7 +90,7 @@ export function PhoneField({
           keyboardType={Platform.OS === 'web' ? 'numeric' : 'phone-pad'}
           textContentType="telephoneNumber"
           value={nationalNumber}
-          onChangeText={(text) => onChangeNationalNumber(text.replace(/\D/g, ''))}
+          onChangeText={(text) => onChangeNationalNumber(normalizeNationalNumber(text, country.dial))}
           onBlur={onBlur}
           editable={!disabled}
           maxLength={15}

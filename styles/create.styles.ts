@@ -95,7 +95,10 @@ export const createEventStyles = StyleSheet.create({
   },
   previewScrollContent: {
     paddingHorizontal: 0, // Убираем padding - он будет в EventCard
-    paddingTop: 0,
+    // Шаг "Превью" скрывает прогресс-бар (см. currentStep !== 3), поэтому
+    // без верхнего отступа карточка события упиралась прямо в статус-бар/чёлку.
+    // 60 — тот же отступ, что и у progressContainer на шагах 1/2, для консистентности.
+    paddingTop: 60,
     paddingBottom: 100,
     flexGrow: 1,
   },

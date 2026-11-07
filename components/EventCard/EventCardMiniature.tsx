@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
+import { openUserProfile } from '../../utils/openUserProfile';
 import { useAuth } from '../../context/AuthContext';
 import { useEvents } from '../../context/EventsContext';
 import { eventCardStyles } from './EventCard.styles';
+import { AppIcon } from '../ui/AppIcon';
+import { getPersonalEventPhoto } from '../../utils/personalEventPhoto';
+import { sizedImage } from '../../utils/imageSize';
 
 const MINI_EVENT_MEDIA_PLACEHOLDER_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270" viewBox="0 0 480 270">' +
@@ -65,9 +69,20 @@ export default function EventCardMiniature({
   const router = useRouter();
   const { user: authUser } = useAuth();
   const currentUserId = authUser?.id ?? null;
-  const { getEventPhotoForUser, getUserData } = useEvents();
+  const { getUserData, events } = useEvents();
 
-  const miniPhoto = getEventPhotoForUser(id, currentUserId || '', viewerUserId) || mediaUrl || organizerAvatar;
+  // Видимость «только я»: то же правило, что на большой карточке события.
+  const isOnlyMeEvent = (events.find(e => e.id === id) as any)?.visibility?.type === 'only_me';
+
+  // Тот же порядок, что в EventCard: персональное фото -> переданное фото ->
+  // фото события -> аватар организатора. getEventPhotoForUser сюда не годится:
+  // он подмешивает запасные значения и перебивает mediaUrl (см. utils/personalEventPhoto).
+  const eventFromContext = events?.find?.((e: any) => e.id === id);
+  const miniPhoto =
+    getPersonalEventPhoto(eventFromContext, currentUserId || undefined, viewerUserId)
+    || mediaUrl
+    || eventFromContext?.mediaUrl
+    || organizerAvatar;
   const media = useImageFallbackUri(miniPhoto, MINI_EVENT_MEDIA_PLACEHOLDER_URI);
 
   const handlePress = () => {
@@ -77,11 +92,7 @@ export default function EventCardMiniature({
   };
 
   const handleOrganizerPress = () => {
-    if (currentUserId === organizerId) {
-      router.push('/(tabs)/profile');
-    } else {
-      router.push(`/profile/${organizerId}`);
-    }
+    openUserProfile(organizerId, currentUserId);
   };
 
   return (
@@ -98,7 +109,7 @@ export default function EventCardMiniature({
         {miniPhoto ? (
           <View style={eventCardStyles.miniatureBackgroundContainer}>
             <Image
-              source={{ uri: media.uri }}
+              source={{ uri: sizedImage(media.uri, 200) }}
               style={eventCardStyles.miniatureBackgroundImage}
               onError={media.onError}
             />
@@ -120,7 +131,7 @@ export default function EventCardMiniature({
               <TouchableOpacity onPress={handleOrganizerPress}>
                 <View style={eventCardStyles.miniatureOrganizerAvatarFrame}>
                   <Image
-                    source={{ uri: organizerData.avatar }}
+                    source={{ uri: sizedImage(organizerData.avatar, 32) }}
                     style={eventCardStyles.miniatureOrganizerAvatar}
                   />
                 </View>
@@ -129,13 +140,24 @@ export default function EventCardMiniature({
           );
         })()}
 
+        {/* Приватное событие («только я») — замок в левом нижнем углу.
+            Такое событие не попадает в ленту и живёт только в профиле автора,
+            поэтому по миниатюре должно быть видно, что она приватная.
+            Правый нижний угол занят участниками, правый верхний — аватаркой
+            организатора, отсюда левый. */}
+        {isOnlyMeEvent && (
+          <View style={eventCardStyles.miniatureLockBadge}>
+            <AppIcon name="lock" size={11} color="rgba(255,255,255,0.9)" />
+          </View>
+        )}
+
         {/* Участники в правом нижнем углу */}
         {participantsData && participantsData.length > 0 && (
           <View style={eventCardStyles.miniatureParticipantsContainer}>
             {participantsData.slice(0, 3).map((participant, index) => (
               <Image
                 key={participant.userId || index}
-                source={{ uri: participant.avatar }}
+                source={{ uri: sizedImage(participant.avatar, 28) }}
                 style={[
                   eventCardStyles.miniatureParticipantAvatar,
                   { marginLeft: index > 0 ? -8 : 0 }

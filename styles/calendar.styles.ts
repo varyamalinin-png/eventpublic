@@ -194,6 +194,9 @@ export const calendarStyles = StyleSheet.create({
   },
   hourSlot: {
     flexDirection: 'row',
+    // Высота НЕ фиксирована — строка растёт под содержимое, иначе события
+    // в часе обрезаются. Прокрутка к нужному часу поэтому считается не по
+    // формуле, а по замеру самой строки (см. CalendarScreen).
     paddingVertical: 15,
     paddingHorizontal: 20,
     borderBottomWidth: 1,
@@ -225,7 +228,10 @@ export const calendarStyles = StyleSheet.create({
   previewEventItem: {
     borderWidth: 1,
     borderColor: '#FF8D32',
-    backgroundColor: '#1B1236',
+    // Раньше был фиолетовый фон (#1B1236), выбивавшийся из нейтральной
+    // тёмной палитры остального приложения — оставили только акцентную
+    // оранжевую рамку, фон как у обычной карточки события.
+    backgroundColor: '#16161a',
   },
   eventTitle: {
     color: '#f4f4f5',
@@ -335,10 +341,13 @@ export const calendarStyles = StyleSheet.create({
     bottom: -2,
     right: -2,
     backgroundColor: '#FF3B30',
-    borderRadius: 8,
+    borderRadius: 9,
+    // Явная height = minWidth даёт настоящий круг для "+1".."+9"; раньше
+    // высота определялась контентом с несимметричным паддингом (4/1),
+    // из-за чего бейдж был не кругом, а вытянутым овалом со смещённым текстом.
+    height: 18,
+    minWidth: 18,
     paddingHorizontal: 4,
-    paddingVertical: 1,
-    minWidth: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -346,6 +355,8 @@ export const calendarStyles = StyleSheet.create({
     color: '#f4f4f5',
     fontSize: 8,
     fontWeight: 'bold',
+    lineHeight: 10,
+    textAlign: 'center',
   },
   dayNumberCentered: {
     position: 'absolute',
@@ -370,6 +381,31 @@ export const calendarStyles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  // isToday() уже существовала в коде, но нигде не применялась — сегодняшний
+  // день никак не выделялся среди остальных.
+  // Сегодняшний день выделяем максимально сдержанно: без оранжевого кольца
+  // и без залитого кружка — просто белая, чуть более жирная цифра.
+  todayRing: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.55)',
+  },
+  emptyDayToday: {
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyDayTodayText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  // Сегодняшнее число в недельной полосе — чистый белый, без затемнения
+  todayNumberText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    opacity: 1,
+  },
   // Наложение для имитации ч/б на pending события в месячной раскладке
   pendingBWOverlay: {
     position: 'absolute',
@@ -379,15 +415,36 @@ export const calendarStyles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.35)'
   },
   // Статус ожидания как в инбоксе (оранжевый бейдж)
+  // Ожидание одобрения: без оранжевой заливки — нейтральный значок,
+  // как и остальные иконки в проекте. Под ним — «?» с подсказкой.
   inboxStatusBadgePending: {
-    backgroundColor: '#FF9500',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-    marginTop: 8,
+    width: 22,
+    height: 22,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  // Часы и «?» стоят в ряд, одного размера и по одной базовой линии
+  pendingStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginTop: 8,
+  },
+  pendingHintButton: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pendingHintButtonText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 14,
   },
   inboxStatusIcon: {
     color: '#f4f4f5',

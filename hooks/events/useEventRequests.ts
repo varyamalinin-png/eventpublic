@@ -37,6 +37,7 @@ export interface UseEventRequestsReturn {
   refreshPendingJoinRequests: (eventsSnapshot?: Event[]) => Promise<void>;
   sendEventRequest: (eventId: string, userId: string) => Promise<void>;
   sendEventInvite: (eventId: string, fromUserId: string, toUserId: string, eventParam?: Event) => Promise<void>;
+  sendEventInvites: (eventId: string, toUserIds: string[]) => Promise<{ sent: string[]; failed: string[] }>;
   acceptInvitation: (requestId: string) => Promise<void>;
   rejectInvitation: (requestId: string) => Promise<void>;
   respondToEventRequest: (requestId: string, accepted: boolean) => Promise<void>;
@@ -151,64 +152,51 @@ export const useEventRequests = ({
           return [];
         });
 
-        // Получаем события, где пользователь является организатором (для запросов на участие)
-        // Исключаем временные события (preview-event-temp и т.д.)
-        const organizedEvents = (eventsSnapshot ?? events).filter(event => 
-          event.organizerId === actualUserId && 
-          !event.id.includes('-temp') && 
-          !event.id.startsWith('preview-')
-        );
-        
-        // Получаем запросы на участие для событий, где пользователь является организатором
-        const organizerRequestsByEvent = await Promise.all(
-          organizedEvents.map(async event => {
-            try {
-              // Проверка на временные события перед запросом к серверу
-              if (event.id.includes('-temp') || event.id.startsWith('preview-')) {
-                return [];
+        /**
+         * Заявки на участие во всех моих событиях — ОДНИМ запросом.
+         *
+         * Здесь был цикл: на каждое организованное событие отдельный
+         * GET /events/:id/requests, все параллельно. На 36 событиях это 36
+         * одновременных запросов при каждой синхронизации и при каждом
+         * сообщении сокета. Часть упиралась в ограничитель частоты и молча
+         * падала в catch — заявка не доезжала до экрана уведомлений, и
+         * кнопок «принять/отклонить» не появлялось: показывать было нечего.
+         */
+        const organizerPending = await apiRequest(
+          `/events/requests/organizer`,
+          {},
+          actualToken,
+        ).catch(error => {
+          logger.warn('Failed to fetch organizer requests:', error);
+          return [];
+        });
+
+        const organizerRequestsByEvent = [
+          (Array.isArray(organizerPending) ? organizerPending : [])
+            .map((membership: any) => {
+              if (membership?.user) {
+                applyServerUserDataToState(membership.user);
               }
-              const pending = await apiRequest(`/events/${event.id}/requests`, {}, actualToken);
-              if (!Array.isArray(pending)) {
-                return [];
-              }
-              return pending
-              .map((membership: any) => {
-                if (membership?.user) {
-                  applyServerUserDataToState(membership.user);
-                }
-                const statusRaw = String(membership?.status ?? 'pending').toLowerCase();
-                const status: EventRequest['status'] =
-                  statusRaw === 'accepted' || statusRaw === 'rejected' ? statusRaw : 'pending';
-                
-                // Если есть invitedBy, это приглашение (invite), иначе это запрос на участие (join)
-                const isInvite = !!membership.invitedBy;
-                
-                // Для запросов организатора показываем только join-запросы (не приглашения)
-                if (isInvite) return null;
-                
-                const mappedRequest = {
-                  id: membership.id,
-                  type: 'join' as const,
-                  eventId: membership.eventId || membership.event?.id || '',
-                  fromUserId: membership.userId || '',
-                  toUserId: event.organizerId || '',
-                  status,
-                  createdAt: membership.createdAt ? new Date(membership.createdAt) : new Date(),
-                  userId: membership.userId,
-                };
-                
-                return mappedRequest;
-              })
-              .filter(Boolean);
-            } catch (error: any) {
-              if (error?.status === 403 || error?.status === 404) {
-                return [];
-              }
-              logger.warn(`Failed to fetch requests for event ${event.id}:`, error);
-              return [];
-            }
-          }),
-        );
+              const statusRaw = String(membership?.status ?? 'pending').toLowerCase();
+              const status: EventRequest['status'] =
+                statusRaw === 'accepted' || statusRaw === 'rejected' ? statusRaw : 'pending';
+
+              // invitedBy — это приглашение, а не заявка на участие.
+              if (membership.invitedBy) return null;
+
+              return {
+                id: membership.id,
+                type: 'join' as const,
+                eventId: membership.eventId || membership.event?.id || '',
+                fromUserId: membership.userId || '',
+                toUserId: membership.event?.organizerId || actualUserId || '',
+                status,
+                createdAt: membership.createdAt ? new Date(membership.createdAt) : new Date(),
+                userId: membership.userId,
+              };
+            })
+            .filter(Boolean),
+        ];
 
         // Маппим входящие приглашения с сервера
         const mappedIncomingInvitations: EventRequest[] = (Array.isArray(incomingInvitations) ? incomingInvitations : [])
@@ -943,6 +931,10 @@ export const useEventRequests = ({
               toUserId: event?.organizerId || '',
               userId: userId,
               status: 'rejected',
+              // Пометка «я вышел сам», а не «мне отказали»: без неё карточка
+              // события везде — в чужом профиле, в папке — теряла три точки
+              // и кнопку GO (см. комментарий в types/Request.ts).
+              selfCancelled: true,
               createdAt: new Date(),
             };
             return [...withoutAccepted, rejectedRequest];
@@ -962,36 +954,19 @@ export const useEventRequests = ({
       // КРИТИЧЕСКИ ВАЖНО: Событие НЕ удаляется у других участников
       // Только текущий пользователь удаляется из списка участников
       if (isPastEvent) {
-        // Проверяем количество участников ДО обновления
-        const currentProfile = eventProfiles.find(p => p.eventId === eventId);
-        const currentParticipantsCount = currentProfile?.participants.length || 0;
-        const willHaveZeroParticipants = currentParticipantsCount <= 1; // Если был 1 участник, после удаления будет 0
-        
-        // Если будет 0 участников, удаляем событие полностью
-        if (willHaveZeroParticipants) {
-          logger.info(`✅ Будет 0 участников после удаления - удаляем событие полностью`);
-          setEvents(prev => prev.filter(e => e.id !== eventId));
-          setEventProfiles(prev => prev.filter(p => p.eventId !== eventId));
-          setEventRequests(prev => prev.filter(req => req.eventId !== eventId));
-          setChats(prev => prev.filter(c => c.eventId !== eventId));
-          
-          // Синхронизируем с сервером после удаления
-          if (syncEventsFromServer) {
-            setTimeout(async () => {
-              try {
-                await syncEventsFromServer();
-                logger.info('✅ Синхронизация завершена после удаления события');
-              } catch (syncError) {
-                logger.warn(`Ошибка при синхронизации после удаления события:`, syncError);
-              }
-            }, 100);
-          }
-          
-          logger.info('✅ Событие полностью удалено из локального состояния (0 участников)');
-          return; // Прерываем выполнение, так как событие уже удалено
-        }
-        
-        // Если участников больше 0, просто обновляем список участников
+        /**
+         * Само событие тут не трогаем — только свой выход из него.
+         *
+         * Раньше здесь стояла догадка «участников осталось 0, значит событие
+         * можно снести локально», и считалась она по локальному профилю
+         * события. Профиль в локальном состоянии есть далеко не всегда: если
+         * его не подгрузили, participants.length == 0 — и условие срабатывало
+         * на событии, где на самом деле оставались другие участники. Событие
+         * пропадало из всего приложения разом, включая чужие профили: они
+         * рисуются из того же списка events. Прошедшее событие сервер не
+         * удаляет вовсе (см. cancelMyParticipation), а если удалит — скажет об
+         * этом полем eventDeleted, которое разобрано выше.
+         */
         setEventProfiles(prev => prev.map(profile => {
           if (profile.eventId === eventId) {
             // Удаляем только текущего пользователя из списка участников
@@ -1124,12 +1099,48 @@ export const useEventRequests = ({
     }
   }, [events, isUserEventMember, syncEventsFromServer, refreshPendingJoinRequests]);
 
+  /**
+   * Приглашения нескольким людям в уже созданное событие — одной пачкой.
+   *
+   * sendEventInvite после каждого приглашения перечитывает события и заявки
+   * целиком: на пятерых это десять лишних запросов. Здесь — запрос на
+   * человека и одна синхронизация в конце. Возвращает, кого пригласить не
+   * вышло: сервер может отказать (не подходит по полу, событие скрыто).
+   */
+  const sendEventInvites = useCallback(async (eventId: string, toUserIds: string[]) => {
+    const actualToken = currentAccessTokenRef.current;
+    const sent: string[] = [];
+    const failed: string[] = [];
+    if (!actualToken) return { sent, failed: [...toUserIds] };
+
+    for (const toUserId of toUserIds) {
+      try {
+        await apiRequest(
+          `/events/${eventId}/invite`,
+          { method: 'POST', body: JSON.stringify({ userId: toUserId }) },
+          actualToken,
+        );
+        sent.push(toUserId);
+      } catch (error) {
+        logger.warn('Не удалось отправить приглашение', { eventId, toUserId, error });
+        failed.push(toUserId);
+      }
+    }
+
+    if (sent.length > 0) {
+      await syncEventsFromServer().catch(() => undefined);
+      await refreshPendingJoinRequests().catch(() => undefined);
+    }
+    return { sent, failed };
+  }, [syncEventsFromServer, refreshPendingJoinRequests]);
+
   return {
     eventRequests,
     setEventRequests,
     refreshPendingJoinRequests,
     sendEventRequest,
     sendEventInvite,
+    sendEventInvites,
     acceptInvitation,
     rejectInvitation,
     respondToEventRequest,

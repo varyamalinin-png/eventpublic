@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState, useCall
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { apiRequest, ApiError } from '../services/api';
+import { isNetworkError } from '../utils/isNetworkError';
 
 /** На вебе при полной потере сессии редиректим на /login без перезагрузки страницы пользователем */
 function redirectToLoginIfWeb() {
@@ -21,8 +22,8 @@ const ACTIVE_ACCOUNT_KEY = 'auth.activeAccountId.v1';
 interface RegisterPayload {
   email: string;
   username: string;
-  // Обязателен при регистрации; проверки владения номером пока нет
-  phone: string;
+  // Необязателен (Apple 5.1.1(v)); проверки владения номером всё равно нет
+  phone?: string;
   password: string;
   name?: string;
   accountType?: 'personal' | 'business'; // Тип аккаунта: личный или бизнес
@@ -71,7 +72,7 @@ interface AuthContextShape {
   verifyEmail: (email: string, code: string) => Promise<{ accessToken?: string; refreshToken?: string; user?: AuthUser; message?: string } | void>;
   resendVerificationEmail: (email: string) => Promise<void>;
   requestPasswordReset: (email: string) => Promise<void>;
-  resetPassword: (token: string, password: string) => Promise<void>;
+  resetPassword: (email: string, code: string, password: string) => Promise<void>;
   logout: () => Promise<boolean>;
   switchAccount: (userId: string) => Promise<void>;
   removeAccount: (userId: string) => Promise<void>;
@@ -372,11 +373,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(normalized);
         await upsertAccount(normalized, { accessToken: tokenToUse, refreshToken: refreshToken ?? undefined });
       } catch (error: any) {
-        // Если получили 401 или 404 (пользователь не найден), пытаемся обновить токен или очищаем сессию
-        if ((error?.status === 401 || error?.status === 404) && refreshToken && refreshToken.trim() !== '') {
+        // Сетевые сбои НЕ трогают сессию: их отличает isNetworkError.
+        // Здесь важен только настоящий отказ авторизации.
+        if (error?.status !== 401 && error?.status !== 404) {
+          throw error;
+        }
+
+        /**
+         * Refresh-токен ищем не только в состоянии, но и в хранилище.
+         *
+         * На холодном старте fetchProfile успевает отработать раньше, чем
+         * состояние восстановится из storage. Раньше в этот момент условие
+         * «есть ли refreshToken» смотрело только на состояние, видело null и
+         * уходило прямиком в удаление аккаунта — при живом токене, спокойно
+         * лежащем в хранилище. Со стороны это тихий разлогин на ровном месте:
+         * в логах остаётся одна строка «User not found or unauthorized,
+         * removing account», а человек просто обнаруживает форму входа.
+         */
+        let usableRefreshToken = refreshToken && refreshToken.trim() !== '' ? refreshToken : null;
+        if (!usableRefreshToken) {
+          try {
+            const stored = await storageGet(REFRESH_TOKEN_KEY, secureStorageAvailable);
+            if (stored && stored.trim() !== '') {
+              usableRefreshToken = stored;
+            } else {
+              // Последняя попытка — токен, сохранённый рядом с самим аккаунтом.
+              const accountsRaw = await storageGet(ACCOUNTS_KEY, secureStorageAvailable);
+              const activeIdRaw = await storageGet(ACTIVE_ACCOUNT_KEY, secureStorageAvailable);
+              const storedAccounts = parseAccounts(accountsRaw);
+              const activeStored = storedAccounts.find(acc => acc.userId === (activeIdRaw || activeAccountId || user?.id));
+              if (activeStored?.refreshToken && activeStored.refreshToken.trim() !== '') {
+                usableRefreshToken = activeStored.refreshToken;
+              }
+            }
+          } catch (storageError) {
+            console.warn('[Auth] Не удалось прочитать refresh-токен из хранилища', storageError);
+          }
+        }
+
+        if (usableRefreshToken) {
           try {
             if (refreshSessionRef.current) {
-              await refreshSessionRef.current(refreshToken);
+              await refreshSessionRef.current(usableRefreshToken);
             }
             // refreshSession уже обновил токены и вызвал fetchProfile, ничего не делаем
             return;
@@ -390,8 +428,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             await clearSessionAndRemoveAccount(currentUserId);
             return;
           }
-        } else if (error?.status === 401 || error?.status === 404) {
-          // Если refresh token нет или refresh не удался, удаляем неактуальный аккаунт
+        } else {
+          // Refresh-токена нет ни в состоянии, ни в хранилище — восстановить
+          // сессию нечем, аккаунт действительно устарел.
           console.warn('[Auth] User not found or unauthorized, removing account');
           // КРИТИЧЕСКИ ВАЖНО: Получаем userId из storage напрямую, так как состояние может быть устаревшим
           const activeIdFromStorage = await storageGet(ACTIVE_ACCOUNT_KEY, secureStorageAvailable);
@@ -399,8 +438,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           authLog('[Auth] fetchProfile: удаление аккаунта', currentUserId, 'activeAccountId:', activeAccountId, 'activeIdFromStorage:', activeIdFromStorage, 'user?.id:', user?.id);
           await clearSessionAndRemoveAccount(currentUserId);
           return;
-        } else {
-          throw error; // Пробрасываем другие ошибки
         }
       }
     },
@@ -474,11 +511,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             // Если ошибка 401 и есть refresh token, пытаемся обновить
             // Но только если это не сетьевая ошибка
-            const isNetworkError = error?.message?.includes('Network request failed') ||
-                                   error?.message?.includes('Failed to fetch') ||
-                                   error?.message?.includes('No connection');
+            // Общая проверка: таймаут тоже сетевая ошибка (см. utils/isNetworkError)
+            const networkError = isNetworkError(error);
             
-            if (!isNetworkError && (error?.status === 401 || error?.status === 403) && fallbackAccount.refreshToken && fallbackAccount.refreshToken.trim() !== '') {
+            if (!networkError && (error?.status === 401 || error?.status === 403) && fallbackAccount.refreshToken && fallbackAccount.refreshToken.trim() !== '') {
               try {
                 if (refreshSessionRef.current) {
                   await refreshSessionRef.current(fallbackAccount.refreshToken);
@@ -546,14 +582,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
       
-      // Защита от повторных вызовов с тем же токеном
+      // Защита от повторных вызовов с тем же токеном.
+      // Раньше параллельный вызов просто выходил наружу. Для вызывающего это
+      // выглядело как «сессия обновлена», он повторял запрос со СТАРЫМ
+      // access-токеном, получал 401 и шёл обновляться старым же refresh-токеном,
+      // который к тому моменту сервер уже отозвал — и человека выкидывало на
+      // экран входа. Теперь опоздавшие дожидаются того обновления, которое уже
+      // идёт, и получают его результат.
       const refreshKey = `${refreshTokenToUse.substring(0, 20)}`;
-      if (refreshingTokens.current.has(refreshKey)) {
-        authLog('[Auth] Refresh already in progress for this token, skipping');
-        return;
+      const inFlight = refreshingTokens.current.get(refreshKey);
+      if (inFlight) {
+        authLog('[Auth] Refresh already in progress for this token, waiting for it');
+        return inFlight;
       }
-      
-      refreshingTokens.current.add(refreshKey);
+
+      let finishInFlight!: () => void;
+      refreshingTokens.current.set(
+        refreshKey,
+        new Promise<void>((resolve) => {
+          finishInFlight = resolve;
+        }),
+      );
       
       try {
         const data = await apiRequest(
@@ -586,13 +635,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           (error as any)?.name === 'AbortError' ||
           errMsg.includes('Aborted') ||
           errMsg.toLowerCase().includes('timed out') ||
-          errMsg === 'Network request timed out';
-        const isNetworkError =
-          isAbortOrTimeout ||
-          errMsg.toLowerCase().includes('network request failed') ||
-          errMsg.toLowerCase().includes('failed to fetch');
+          errMsg.toLowerCase().includes('timeout');
+        // Та же общая проверка, что и в остальных местах.
+        const networkError = isNetworkError(error);
 
-        if (isNetworkError) {
+        if (networkError) {
           refreshingTokens.current.delete(refreshKey);
           if (isAbortOrTimeout) {
             // Таймаут/прерывание — не выкидываем пользователя, сессия остаётся; повторный refresh попробуют при следующем запросе
@@ -622,6 +669,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await clearSession();
       } finally {
         refreshingTokens.current.delete(refreshKey);
+        finishInFlight();
       }
     },
     [
@@ -689,11 +737,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           await fetchProfile(targetAccount.accessToken);
         } catch (error: any) {
-          const isNetworkError = error?.message?.includes('Network request failed') ||
-                                 error?.message?.includes('Failed to fetch') ||
-                                 error?.message?.includes('No connection');
+          // Общая проверка: таймаут тоже сетевая ошибка (см. utils/isNetworkError)
+          const networkError = isNetworkError(error);
 
-          if (isNetworkError) {
+          if (networkError) {
             // При сетевой ошибке не пытаемся обновлять токен
             console.warn('[Auth] Network error during profile fetch, using cached user data');
             setUser({
@@ -734,11 +781,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           await fetchProfile(storedAccess);
         } catch (error: any) {
-          const isNetworkError = error?.message?.includes('Network request failed') ||
-                                 error?.message?.includes('Failed to fetch') ||
-                                 error?.message?.includes('No connection');
+          // Общая проверка: таймаут тоже сетевая ошибка (см. utils/isNetworkError)
+          const networkError = isNetworkError(error);
 
-          if (isNetworkError) {
+          if (networkError) {
             // При сетевой ошибке не пытаемся обновлять токен
             console.warn('[Auth] Offline mode: session restored without profile');
           } else if (error?.status === 401 && storedRefresh && storedRefresh.trim() !== '') {
@@ -770,7 +816,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [secureStorageAvailable, setSession, fetchProfile, refreshSession, clearSession, persistActiveAccount, handleAccountAuthFailure]);
 
   const hasBootstrapped = useRef(false);
-  const refreshingTokens = useRef<Set<string>>(new Set()); // Защита от повторных вызовов refreshSession
+  const refreshingTokens = useRef<Map<string, Promise<void>>>(new Map()); // Идущие обновления сессии: ключ токена -> промис
   const handlingAuthFailure = useRef<Set<string>>(new Set()); // Защита от рекурсивных вызовов handleAccountAuthFailure
   
   useEffect(() => {
@@ -1121,12 +1167,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   }, []);
 
-  const resetPassword = useCallback(async (token: string, password: string) => {
+  // Сброс пароля идёт по шестизначному коду из письма, как и подтверждение
+  // адреса: код проверяется только в паре со своей почтой, поэтому оба поля
+  // уходят вместе.
+  const resetPassword = useCallback(async (email: string, code: string, password: string) => {
     await apiRequest(
       '/auth/reset-password',
       {
         method: 'POST',
-        body: JSON.stringify({ token, password }),
+        body: JSON.stringify({ email, code, password }),
       },
       null,
     );
@@ -1226,11 +1275,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (accessToken) {
-      try {
-        await apiRequest('/auth/logout', { method: 'POST' }, accessToken);
-      } catch (error) {
+      /**
+       * Сервер уведомляем, но НЕ ждём его. Раньше здесь стоял await, и когда
+       * сервер недоступен (8 октября 2026 это был сгоревший дата-центр),
+       * кнопка «Выйти» на полминуты выглядела неработающей: запрос висел до
+       * таймаута, и только потом очищалась сессия. Выход из аккаунта это
+       * локальное действие, сеть для него не обязательна.
+       */
+      apiRequest('/auth/logout', { method: 'POST' }, accessToken).catch(error => {
         console.warn('[Auth] Logout request failed', error);
-      }
+      });
     }
 
     // ВАЖНО: Используем parsedAccounts из storage, а не prev из состояния
@@ -1287,7 +1341,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       activeAccountId,
       initializing,
       loading,
-      isAuthenticated: Boolean(accessToken && user),
+      // Достаточно токена: профиль подтягивается отдельным сетевым запросом,
+      // и раньше в промежутке между «токен восстановлен» и «профиль пришёл»
+      // пользователь считался гостем — из-за этого при каждом запуске на
+      // секунду показывался экран входа. Если токен окажется протухшим,
+      // ответ 401 всё равно очистит сессию и вернёт на логин.
+      isAuthenticated: Boolean(accessToken),
       refreshUser: () => fetchProfile(),
       login,
       loginWithGoogle,

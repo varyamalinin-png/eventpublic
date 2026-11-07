@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../context/LanguageContext';
-import { View, Text, StyleSheet, Image, TouchableOpacity, TextInput, Alert, Platform, Modal } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, TextInput, Alert, Platform, Modal, KeyboardAvoidingView } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { AppIcon } from './ui/AppIcon';
 import { Palette } from '../constants/DesignSystem';
@@ -41,7 +41,7 @@ export default function CreateFolderModal({ visible = true, onClose, onSubmit }:
 
       const hasPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (hasPermission.status !== 'granted') {
-        Alert.alert(t.common.error, 'Нет доступа к галерее');
+        Alert.alert(t.common.error, t.messages.noGalleryAccess);
         return;
       }
 
@@ -168,10 +168,15 @@ export default function CreateFolderModal({ visible = true, onClose, onSubmit }:
         onRequestClose={onClose}
         statusBarTranslucent
       >
-        <View style={styles.overlay}>
+        {/* Шторка снизу: без этого клавиатура (поле имени с autoFocus)
+            перекрывала описание и кнопки «Отмена/Создать». */}
+        <KeyboardAvoidingView
+          style={styles.overlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
           {inner}
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     );
   }

@@ -8,6 +8,8 @@ import {
   TextInput,
   ScrollView,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { apiRequest } from '../services/api';
 import { AppIcon } from './ui/AppIcon';
@@ -115,7 +117,12 @@ export default function ComplaintForm({
       animationType="slide"
       onRequestClose={handleClose}
     >
-      <View style={s.overlay}>
+      {/* Шторка прижата к низу экрана, поэтому без этого клавиатура
+          перекрывала поле «расскажите подробнее» целиком. */}
+      <KeyboardAvoidingView
+        style={s.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
         <View style={s.sheet}>
           <View style={s.handle} />
@@ -174,7 +181,7 @@ export default function ComplaintForm({
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

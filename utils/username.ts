@@ -75,3 +75,24 @@ export const normalizeUsername = (username: string | undefined): string => {
   return cleanUsername(username).toLowerCase();
 };
 
+
+/**
+ * «Имя, возраст» — запятая ставится ТОЛЬКО когда возраст реально показывается.
+ *
+ * Раньше в обоих профилях было `{name}, {age}` без условия, поэтому у
+ * пользователей без возраста (или скрывших его настройкой «показывать
+ * возраст») оставалась висячая запятая: «Varya,».
+ */
+export const formatNameAndAge = (
+  name: string | undefined,
+  age: string | number | undefined,
+  yearsSuffix?: string,
+): string => {
+  const safeName = (name ?? '').trim();
+  // Из значения берём только число: в старых записях (и в данных с сервера)
+  // суффикс мог быть вшит по-русски — «58 лет». Показываем его из локали.
+  const digits = String(age ?? '').match(/\d+/)?.[0] ?? '';
+  if (!digits || digits === '0') return safeName;
+  const shown = yearsSuffix ? `${digits} ${yearsSuffix}` : digits;
+  return `${safeName}, ${shown}`;
+};

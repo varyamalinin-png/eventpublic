@@ -155,6 +155,45 @@ export const settingsStyles = StyleSheet.create(
     marginRight: 12,
     backgroundColor: '#2E2E2E',
   },
+  // Заблокированные пользователи
+  blockedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  blockedEmpty: {
+    color: 'rgba(244,244,245,0.5)',
+    fontSize: 14.5,
+    textAlign: 'center',
+    paddingVertical: 24,
+  },
+  blockedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  blockedName: {
+    flex: 1,
+    color: '#f4f4f5',
+    fontSize: 15,
+    marginLeft: 12,
+  },
+  blockedUnblockButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,141,50,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,141,50,0.4)',
+  },
+  blockedUnblockText: {
+    color: '#FF8D32',
+    fontSize: 13.5,
+    fontWeight: '600',
+  },
   accountAvatarPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',

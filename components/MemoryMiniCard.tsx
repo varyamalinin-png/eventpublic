@@ -3,6 +3,7 @@ import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeRouter } from '../utils/safeRouter';
 import { EventProfilePost } from '../context/EventsContext';
 import { useEvents } from '../context/EventsContext';
+import { sizedImage } from '../utils/imageSize';
 
 interface MemoryMiniCardProps {
   post: EventProfilePost;
@@ -29,7 +30,7 @@ export default function MemoryMiniCard({ post, onPress }: MemoryMiniCardProps) {
       case 'photo':
         return (
           <Image 
-            source={{ uri: post.content }} 
+            source={{ uri: sizedImage(post.content, 180) }} 
             style={styles.mediaContent}
             resizeMode="cover"
           />
@@ -39,7 +40,7 @@ export default function MemoryMiniCard({ post, onPress }: MemoryMiniCardProps) {
         return (
           <View style={styles.videoContainer}>
             <Image 
-              source={{ uri: post.content }} 
+              source={{ uri: sizedImage(post.content, 180) }} 
               style={styles.mediaContent}
               resizeMode="cover"
             />
@@ -53,7 +54,7 @@ export default function MemoryMiniCard({ post, onPress }: MemoryMiniCardProps) {
         return (
           <View style={styles.musicContainer}>
             <Image 
-              source={{ uri: post.artwork_url || 'https://via.placeholder.com/150x150/333333/FFFFFF?text=♪' }} 
+              source={{ uri: sizedImage(post.artwork_url, 180) }} 
               style={styles.mediaContent}
               resizeMode="cover"
             />
@@ -89,7 +90,7 @@ export default function MemoryMiniCard({ post, onPress }: MemoryMiniCardProps) {
       {author && (
         <View style={styles.authorContainer}>
           <Image 
-            source={{ uri: author.avatar }} 
+            source={{ uri: sizedImage(author.avatar, 32) }} 
             style={styles.authorAvatar}
           />
         </View>

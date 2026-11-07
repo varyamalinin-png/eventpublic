@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Modal,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
   Alert,
   RefreshControl,
 } from 'react-native';
@@ -16,6 +18,7 @@ import { useAuth } from '../../context/AuthContext';
 import { AppIcon } from '../../components/ui/AppIcon';
 import { Palette } from '../../constants/DesignSystem';
 import { createLogger } from '../../utils/logger';
+import { useLanguage } from '../../context/LanguageContext';
 
 const logger = createLogger('AdminComplaintsDetailScreen');
 
@@ -64,6 +67,8 @@ const STATUS_LABELS: Record<ComplaintStatus, string> = {
 
 export default function AdminComplaintsScreen() {
   const router = useRouter();
+  // Экран показывал алерты только по-русски — теперь через локаль, как везде.
+  const { t } = useLanguage();
   const { accessToken: authToken } = useAuth();
   const accessToken = authToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('auth.accessToken') : null);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
@@ -92,7 +97,7 @@ export default function AdminComplaintsScreen() {
       setComplaints(data);
     } catch (error) {
       logger.error('Failed to fetch complaints:', error);
-      Alert.alert('Ошибка', 'Не удалось загрузить жалобы');
+      Alert.alert(t.common.error, t.messages.complaintsLoadFailed);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -122,13 +127,13 @@ export default function AdminComplaintsScreen() {
         accessToken,
       );
 
-      Alert.alert('Успешно', 'Статус жалобы обновлен');
+      Alert.alert(t.common.success, t.messages.complaintStatusUpdated);
       setShowStatusModal(false);
       setShowDetailModal(false);
       fetchComplaints();
     } catch (error) {
       logger.error('Failed to update status:', error);
-      Alert.alert('Ошибка', 'Не удалось обновить статус');
+      Alert.alert(t.common.error, t.messages.complaintStatusUpdateFailed);
     }
   };
 
@@ -343,7 +348,12 @@ export default function AdminComplaintsScreen() {
         animationType="slide"
         onRequestClose={() => setShowStatusModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        {/* Комментарий к статусу — в нижней части центрированной
+            модалки, клавиатура его перекрывала */}
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Изменить статус</Text>
@@ -380,7 +390,7 @@ export default function AdminComplaintsScreen() {
                 <Text style={styles.detailLabel}>Ответ администратора (необязательно)</Text>
                 <TextInput
                   style={styles.responseInput}
-                  placeholder="Введите ответ..."
+                  placeholder={t.messages.enterReplyPlaceholder}
                   placeholderTextColor="#999"
                   value={adminResponse}
                   onChangeText={setAdminResponse}
@@ -406,7 +416,7 @@ export default function AdminComplaintsScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

@@ -37,9 +37,14 @@ export function validateUsername(value: string): ValidationKey | null {
   return null;
 }
 
-/** `digits` — только национальный номер, без кода страны. */
+/**
+ * `digits` — только национальный номер, без кода страны.
+ *
+ * Пустое поле — норма: телефон необязателен (Apple 5.1.1(v), отказ по сборке 3).
+ * Ругаемся только на начатый, но слишком короткий номер.
+ */
 export function validatePhoneDigits(digits: string): ValidationKey | null {
-  if (!digits) return 'phoneRequired';
+  if (!digits) return null;
   if (digits.length < 5) return 'phoneTooShort';
   return null;
 }

@@ -117,12 +117,19 @@ export function useEventActions({
         // Если это HTTP URL на вебе - используем его
         // Если это data URL на вебе - пропускаем загрузку (она уже была в create.tsx)
         
+        // Загружаем обрезанное фото (mediaUrl) и оригинал (originalMediaUrl) параллельно —
+        // раньше они шли последовательно и каждый прогонял свой цикл сжатия+аплоада,
+        // из-за чего создание события с фото занимало ~вдвое дольше необходимого.
+        const mediaUploadPromise = (async () => {
         // Загружаем обрезанное фото (mediaUrl) для мобильного приложения
         if (input.mediaUrl && !isHttpUrl(input.mediaUrl) && Platform.OS !== 'web') {
           logger.info('📤 Начинаем загрузку локального медиа (mediaUrl)...');
+          // КРИТИЧЕСКИ ВАЖНО: объявлены до try, чтобы retry-ветка в catch тоже видела актуальные значения
+          let imageUri = input.mediaUrl;
+          let fileName = '';
+          let fileType = '';
           try {
-            let imageUri = input.mediaUrl;
-            
+
             // Сжимаем изображение перед загрузкой, если это изображение
             // КРИТИЧЕСКИ ВАЖНО: Проверяем доступность ImageManipulator и FileSystem перед использованием
             if (input.mediaType === 'image' && ImageManipulator && FileSystem && typeof ImageManipulator.manipulateAsync === 'function') {
@@ -224,9 +231,9 @@ export function useEventActions({
             }
 
             const formData = new FormData();
-            const fileName = imageUri.split('/').pop() || 'image.jpg';
-            const fileType = input.mediaType === 'video' ? 'video/mp4' : 'image/jpeg';
-            
+            fileName = imageUri.split('/').pop() || 'image.jpg';
+            fileType = input.mediaType === 'video' ? 'video/mp4' : 'image/jpeg';
+
             // КРИТИЧЕСКИ ВАЖНО: В React Native FormData принимает объект с uri, name, type
             // uri должен быть абсолютным путем к файлу (file://...)
             formData.append('file', {
@@ -235,7 +242,7 @@ export function useEventActions({
               type: fileType,
             } as any);
 
-            logger.debug('📤 Загрузка медиа события:', { 
+            logger.debug('📤 Загрузка медиа события:', {
               fileName, 
               fileType, 
               uri: imageUri,
@@ -336,15 +343,21 @@ export function useEventActions({
             }
           }
         }
+        return finalMediaUrl;
+        })();
 
+        const originalMediaUploadPromise = (async () => {
         // Загружаем оригинальное фото (originalMediaUrl)
         // КРИТИЧЕСКИ ВАЖНО: На вебе файл уже должен быть загружен в create.tsx
         // Если это data URL на вебе - пропускаем загрузку здесь (она уже была в create.tsx)
         if (input.originalMediaUrl && !isHttpUrl(input.originalMediaUrl) && Platform.OS !== 'web') {
           logger.info('📤 Начинаем загрузку локального медиа (originalMediaUrl)...');
+          // КРИТИЧЕСКИ ВАЖНО: объявлены до try, чтобы retry-ветка в catch тоже видела актуальные значения
+          let imageUri = input.originalMediaUrl;
+          let fileName = '';
+          let fileType = '';
           try {
-            let imageUri = input.originalMediaUrl;
-            
+
             // Сжимаем изображение перед загрузкой, если это изображение
             // КРИТИЧЕСКИ ВАЖНО: Проверяем доступность ImageManipulator и FileSystem перед использованием
             if (input.mediaType === 'image' && ImageManipulator && FileSystem && typeof ImageManipulator.manipulateAsync === 'function') {
@@ -465,9 +478,9 @@ export function useEventActions({
             }
 
             const formData = new FormData();
-            const fileName = imageUri.split('/').pop() || 'image.jpg';
-            const fileType = input.mediaType === 'video' ? 'video/mp4' : 'image/jpeg';
-            
+            fileName = imageUri.split('/').pop() || 'image.jpg';
+            fileType = input.mediaType === 'video' ? 'video/mp4' : 'image/jpeg';
+
             // КРИТИЧЕСКИ ВАЖНО: В React Native FormData принимает объект с uri, name, type
             // uri должен быть абсолютным путем к файлу (file://...)
             formData.append('file', {
@@ -476,7 +489,7 @@ export function useEventActions({
               type: fileType,
             } as any);
 
-            logger.debug('📤 Загрузка оригинального медиа события:', { 
+            logger.debug('📤 Загрузка оригинального медиа события:', {
               fileName, 
               fileType, 
               uri: imageUri, 
@@ -547,6 +560,10 @@ export function useEventActions({
             finalOriginalMediaUrl = undefined;
           }
         }
+        return finalOriginalMediaUrl;
+        })();
+
+        await Promise.all([mediaUploadPromise, originalMediaUploadPromise]);
 
         const sanitizedMediaUrl = isHttpUrl(finalMediaUrl) ? finalMediaUrl : undefined;
         const sanitizedOriginalMediaUrl = isHttpUrl(finalOriginalMediaUrl) ? finalOriginalMediaUrl : undefined;
@@ -913,6 +930,21 @@ export function useEventActions({
       if (updates.maxParticipants) updateData.maxParticipants = updates.maxParticipants;
       if (updates.mediaUrl) updateData.mediaUrl = updates.mediaUrl;
       if (updates.visibility) updateData.visibility = updates.visibility;
+      // Ниже — поля, которых в белом списке НЕ БЫЛО: они молча выбрасывались,
+      // и правки не доезжали до сервера (метки и ограничения на карточке
+      // оставались прежними, что бы ни выбрали в настройках).
+      // Проверка на undefined, а не на truthy: пустой массив меток — это
+      // осознанное «убрать все метки», его тоже нужно отправить.
+      // Именно customTags: на сервере ValidationPipe стоит с
+      // forbidNonWhitelisted, и поле `tags` не просто игнорировалось бы —
+      // весь PATCH отвалился бы с 400. В CreateEventDto поле называется
+      // customTags (autoTags сервер считает сам из ограничений ниже).
+      if (updates.tags !== undefined) updateData.customTags = updates.tags;
+      if ((updates as any).ageRestriction !== undefined) updateData.ageRestriction = (updates as any).ageRestriction;
+      if ((updates as any).genderRestriction !== undefined) updateData.genderRestriction = (updates as any).genderRestriction;
+      if ((updates as any).isMassEvent !== undefined) updateData.isMassEvent = (updates as any).isMassEvent;
+      if ((updates as any).isRecurring !== undefined) updateData.isRecurring = (updates as any).isRecurring;
+      if (updates.mediaType) updateData.mediaType = updates.mediaType;
       if (updates.date && updates.time) {
         // КРИТИЧЕСКИ ВАЖНО: Создаем дату в локальном часовом поясе, а не UTC
         const [year, month, day] = updates.date.split('-').map(Number);
@@ -981,6 +1013,18 @@ export function useEventActions({
   
   // ЕДИНЫЙ МЕХАНИЗМ УДАЛЕНИЯ для будущих и прошедших событий
   const deleteEvent = useCallback(async (id: string) => {
+    // Временные события (превью при создании) живут только локально.
+    // Раньше эта проверка стояла ниже, ВНУТРИ ветки «если есть токен», и
+    // делала голый return — то есть событие не удалялось даже из локального
+    // списка. Из-за этого «preview-event-temp» оставалось в events навсегда,
+    // попадало в ленты и в подсчёт событий в шапке профиля (счётчик рос
+    // после каждого захода на превью).
+    if (id.includes('-temp') || id.startsWith('preview-')) {
+      logger.debug('Temporary event, removing locally only:', id);
+      setEvents(prev => prev.filter(event => event.id !== id));
+      return;
+    }
+
     // Находим событие ДО удаления, чтобы проверить, прошедшее ли оно
     const eventToDelete = events.find(e => e.id === id);
     let isPastEvent = false;
@@ -1011,7 +1055,13 @@ export function useEventActions({
       try {
         // КРИТИЧЕСКИ ВАЖНО: Проверка на временные события - не делаем запрос к серверу
         if (id.includes('-temp') || id.startsWith('preview-')) {
-          logger.debug('Temporary event, skipping deletion on server:', id);
+          logger.debug('Temporary event, removing locally only:', id);
+          // Раньше здесь стоял голый return — событие не уходило и из
+          // ЛОКАЛЬНОГО списка. Из-за этого «preview-event-temp», которое
+          // добавляется при заходе на шаг «Превью», оставалось в events
+          // навсегда: оно попадало в ленты и в подсчёт событий в шапке
+          // профиля, и счётчик рос после каждого захода на превью.
+          setEvents(prev => prev.filter(event => event.id !== id));
           return;
         }
         
@@ -1433,29 +1483,33 @@ export function useEventActions({
       
       logger.info('✅ Роль организатора передана:', { eventId, newOrganizerId });
       
-      // МГНОВЕННОЕ ОБНОВЛЕНИЕ UI - обновляем состояние локально до синхронизации с сервером
-      setEvents(prev => {
-        // Удаляем событие из списка для старого организатора (actualUserId)
-        // Старый организатор больше не должен видеть это событие в своем профиле
-        const filtered = prev.filter(e => {
-          if (e.id === eventId && e.organizerId === actualUserId) {
-            // Удаляем событие для старого организатора
-            return false;
-          }
-          return true;
-        });
-        
-        // Обновляем organizerId события для нового организатора
-        return filtered.map(e => {
-          if (e.id === eventId) {
-            return {
-              ...e,
-              organizerId: newOrganizerId,
-            };
-          }
-          return e;
-        });
-      });
+      /**
+       * МГНОВЕННОЕ ОБНОВЛЕНИЕ UI: у события новый организатор, а я из него вышел.
+       *
+       * Раньше событие тут удалялось из локального списка целиком. Но профили
+       * ВСЕХ пользователей рисуются из этого же списка (сервер не отдаёт
+       * события конкретного человека отдельным запросом) — поэтому событие
+       * пропадало и из профиля того, кому роль только что передали. Возвращала
+       * его только следующая синхронизация, и то не сразу.
+       *
+       * Теперь просто переписываем организатора и вычёркиваем себя из
+       * участников. Останется событие видимым или нет — решит ближайший
+       * syncEventsFromServer по настройкам видимости: своего членства в нём
+       * у меня больше нет.
+       */
+      setEvents(prev => prev.map(e => {
+        if (e.id !== eventId) return e;
+        return {
+          ...e,
+          organizerId: newOrganizerId,
+          participantsList: e.participantsList?.filter(id => id !== actualUserId),
+          participantsData: e.participantsData?.filter(participant => {
+            const participantId = (participant as any).userId || (participant as any).id;
+            return participantId !== actualUserId;
+          }),
+          participants: Math.max(0, (e.participants ?? 1) - 1),
+        };
+      }));
       
       // Обновляем профиль события - удаляем старого организатора из участников
       setEventProfiles(prev => prev.map(profile => {

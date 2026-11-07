@@ -221,8 +221,14 @@ export default function AuthScreen() {
     // С этого момента незаполненные поля подсвечиваются
     setRegisterAttempted(true);
 
-    if (missing.email || missing.username || missing.phone) {
+    if (missing.email || missing.username) {
       setErrorMessage(t.auth.fillRequiredFields);
+      return;
+    }
+
+    // Номер необязателен, но начатый должен быть похож на номер.
+    if (missing.phone) {
+      setErrorMessage(t.validation.phoneTooShort);
       return;
     }
 
@@ -241,7 +247,9 @@ export default function AuthScreen() {
       await register({
         email: registerEmail.trim(),
         username: registerUsername.trim(),
-        phone: `${phoneCountry.dial} ${registerPhoneDigits}`,
+        // Пустой номер не отправляем вовсе: «+7 » сервер принял бы за номер
+        // и отклонил по длине.
+        phone: registerPhoneDigits ? `${phoneCountry.dial} ${registerPhoneDigits}` : undefined,
         password: registerPassword,
         name: registerName.trim() || undefined,
       });
@@ -260,7 +268,15 @@ export default function AuthScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView
+      // Фон обязателен именно здесь. При behavior="padding" этот контейнер
+      // добавляет снизу отступ под клавиатуру, а тёмный фон был только у
+      // содержимого ScrollView — в отступе просвечивал системный белый. У
+      // клавиатуры скруглены верхние углы, поэтому по бокам над ней он и
+      // выглядел как два белых треугольника.
+      style={{ flex: 1, backgroundColor: '#0a0a0c' }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>{t.auth.welcome}</Text>
         <Text style={styles.subtitle}>
@@ -340,6 +356,21 @@ export default function AuthScreen() {
               ) : (
                 <Text style={styles.primaryButtonText}>{t.auth.signInButton}</Text>
               )}
+            </TouchableOpacity>
+
+            {/* Восстановление пароля: код из письма, экран (auth)/reset-password */}
+            <TouchableOpacity
+              style={styles.forgotButton}
+              onPress={() =>
+                router.push(
+                  loginEmail.trim()
+                    ? `/(auth)/reset-password?email=${encodeURIComponent(loginEmail.trim())}`
+                    : '/(auth)/reset-password',
+                )
+              }
+              disabled={loading}
+            >
+              <Text style={styles.forgotText}>{t.auth.forgotPassword}</Text>
             </TouchableOpacity>
 
             {(SHOW_GOOGLE_AUTH || (SHOW_APPLE_AUTH && Platform.OS === 'ios')) && (
@@ -439,8 +470,10 @@ export default function AuthScreen() {
                 hasError={shows('phone') && missing.phone}
                 disabled={loading}
               />
-              {shows('phone') && phoneErrorKey && (
+              {shows('phone') && phoneErrorKey ? (
                 <Text style={styles.fieldErrorText}>{fieldError(phoneErrorKey)}</Text>
+              ) : (
+                <Text style={styles.fieldHintText}>{t.auth.phoneOptional}</Text>
               )}
             </View>
             <TextInput
@@ -595,6 +628,12 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginLeft: 4,
   },
+  fieldHintText: {
+    color: 'rgba(244,244,245,0.4)',
+    fontSize: 12.5,
+    marginTop: 6,
+    marginLeft: 4,
+  },
   pwRules: { gap: 4, marginTop: -4, marginBottom: 4, paddingHorizontal: 4 },
   pwRule: { color: 'rgba(244,244,245,0.45)', fontSize: 12.5 },
   pwRuleOk: { color: '#4ADE80' },
@@ -661,6 +700,15 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 8,
+  },
+  forgotButton: {
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
+  forgotText: {
+    color: 'rgba(244,244,245,0.6)',
+    fontSize: 14,
   },
   primaryButtonText: {
     color: '#0A0A0A',

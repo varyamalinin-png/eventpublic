@@ -21,6 +21,8 @@ import type {
 import type { ServerUser, ServerEvent, ServerChat } from '../types/api';
 import { formatDate, formatRecurringEventDate } from '../utils/dateHelpers';
 import { createLogger } from '../utils/logger';
+import { cacheKey, clearQueryCache, readQueryCache, writeQueryCache } from '../utils/queryCache';
+import { isNetworkError } from '../utils/isNetworkError';
 import { isUserEventParticipant, filterUserEvents, filterUpcomingUserEvents, filterPastUserEvents } from '../utils/eventFilters';
 import { useNotifications } from '../hooks/notifications/useNotifications';
 import { useFriends } from '../hooks/friends/useFriends';
@@ -32,6 +34,7 @@ import { useSavedEvents } from '../hooks/events/useSavedEvents';
 import { useSavedMemoryPosts } from '../hooks/events/useSavedMemoryPosts';
 import { useUserFolders } from '../hooks/folders/useUserFolders';
 import { useMessageFolders } from '../hooks/folders/useMessageFolders';
+import { useMemoryVisibility } from '../hooks/events/useMemoryVisibility';
 import { useEventFolders } from '../hooks/folders/useEventFolders';
 import type { EventFolder } from '../types/EventFolder';
 import type {
@@ -116,6 +119,10 @@ export function EventsProvider({ children }: EventsProviderProps) {
   // creatingProfiles теперь в useEventProfiles хуке
   // Ref для отслеживания актуального токена (для предотвращения использования старого токена после переключения аккаунта)
   const currentAccessTokenRef = useRef<string | null>(accessToken);
+  // Профили, которые уже догружали через fetchUserById (см. дедупликацию там)
+  const requestedUserIdsRef = useRef<Set<string>>(new Set());
+  // Сколько запросов профилей выполняется прямо сейчас (ограничение всплеска)
+  const inFlightUserFetchesRef = useRef(0);
   const currentUserIdRef = useRef<string | null>(currentUserId);
   
   // Обновляем ref при изменении токена или пользователя
@@ -198,40 +205,61 @@ export function EventsProvider({ children }: EventsProviderProps) {
         ? calculateAge(serverUser.dateOfBirth) 
         : undefined;
 
-      // КРИТИЧЕСКИ ВАЖНО: Если username или name отсутствуют, пытаемся извлечь их из email
-      // Это нужно для случаев, когда в базе данных данные неполные
-      let derivedUsername = serverUser.username;
-      let derivedName = serverUser.name;
-      
-      if (!derivedUsername || derivedUsername.trim() === '' || derivedUsername === 'user') {
-        if (serverUser.email) {
-          derivedUsername = serverUser.email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '_');
-        } else if (derivedName && derivedName.trim() !== '' && derivedName !== 'Пользователь') {
-          derivedUsername = derivedName.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9_]/g, '_');
-        }
-      }
-      
-      if (!derivedName || derivedName.trim() === '' || derivedName === 'Пользователь') {
-        if (derivedUsername && derivedUsername.trim() !== '' && derivedUsername !== 'user') {
-          derivedName = derivedUsername.charAt(0).toUpperCase() + derivedUsername.slice(1);
-        } else if (serverUser.email) {
-          const emailUsername = serverUser.email.split('@')[0];
-          derivedName = emailUsername.charAt(0).toUpperCase() + emailUsername.slice(1);
-        }
-      }
+      /**
+       * Имя и ник пишем в кэш, только если сервер их ПРИСЛАЛ.
+       *
+       * Раньше сюда попадали и «выведенные» значения. У участников событий и
+       * авторов постов сервер отдаёт одно имя без ника — и из «Белла QA»
+       * собирался ник «_____qa», который затирал в кэше настоящий: в списке
+       * приглашений и в профилях человек показывался как «@_____qa». Когда
+       * ника в кэше нет вовсе, показ достраивает getUserData.
+       */
+      const realUsername =
+        typeof serverUser.username === 'string' && serverUser.username.trim() !== '' && serverUser.username !== 'user'
+          ? serverUser.username
+          : undefined;
+      const realName =
+        typeof serverUser.name === 'string' && serverUser.name.trim() !== '' && serverUser.name !== 'Пользователь'
+          ? serverUser.name
+          : undefined;
 
-      setServerUserData(prev =>
-        mergeUserRecord(prev, serverUser.id, {
-          name: derivedName ?? undefined,
-          username: derivedUsername ?? undefined,
-          avatar: normalizeMediaUrl(serverUser.avatarUrl as string | null | undefined) ?? undefined,
-          age: computedAge ?? serverUser.age ?? undefined,
-          bio: serverUser.bio ?? undefined,
-          geoPosition: serverUser.geoPosition ?? undefined,
-          dateOfBirth: serverUser.dateOfBirth ?? undefined,
-          showAge: serverUser.showAge ?? undefined,
-        }),
-      );
+      /**
+       * Записываем ТОЛЬКО те поля, которые сервер действительно прислал.
+       *
+       * Пользователи прилетают сюда из очень разных мест, и половина из них —
+       * куски: в списках друзей, заявок и участников сервер отдаёт всего
+       * id/name/username/avatarUrl. Раньше отсутствующие поля превращались в
+       * undefined, а mergeUserRecord на undefined УДАЛЯЕТ ключ — то есть
+       * каждая синхронизация друзей стирала из кэша возраст, «о себе» и дату
+       * рождения. Полный профиль подгружается один раз за сессию и обратно их
+       * не возвращал, поэтому после нажатия «+» у человека на глазах пропадал
+       * возраст и менялось имя (пустое name подменялось на username).
+       *
+       * Явный null оставляем как есть — это «поле очистили», и его как раз
+       * нужно удалить.
+       */
+      const sent = (key: string) =>
+        Object.prototype.hasOwnProperty.call(serverUser, key);
+
+      const patch: Record<string, unknown> = {};
+      if (realName !== undefined) patch.name = realName;
+      if (realUsername !== undefined) patch.username = realUsername;
+      if (sent('avatarUrl')) {
+        patch.avatar =
+          normalizeMediaUrl(serverUser.avatarUrl as string | null | undefined) ?? null;
+      }
+      if (sent('dateOfBirth') || sent('age')) {
+        patch.age = computedAge ?? serverUser.age ?? null;
+      }
+      if (sent('bio')) patch.bio = serverUser.bio ?? null;
+      if (sent('geoPosition')) patch.geoPosition = serverUser.geoPosition ?? null;
+      if (sent('dateOfBirth')) patch.dateOfBirth = serverUser.dateOfBirth ?? null;
+      if (sent('showAge')) patch.showAge = serverUser.showAge ?? null;
+      // Пол — чтобы приглашения в событие «только для девушек/парней» не
+      // предлагали неподходящих. Раньше он до кэша не доходил вовсе.
+      if (sent('gender')) patch.gender = serverUser.gender ?? null;
+
+      setServerUserData(prev => mergeUserRecord(prev, serverUser.id, patch as any));
     },
     [],
   );
@@ -387,6 +415,109 @@ export function EventsProvider({ children }: EventsProviderProps) {
     return [];
   }, []);
 
+  // Догрузка ПОЛНОГО профиля пользователя по id.
+  // Списки друзей/участников/событий отдают пользователя урезанно —
+  // только { id, name, username, avatarUrl }. Из-за этого на чужом профиле
+  // не было ни возраста, ни «о себе»: в стейте этих полей просто не было.
+  // GET /users/:id возвращает bio/age/dateOfBirth/showAge — прогоняем ответ
+  // через applyServerUserDataToState, и данные попадают в общий стор.
+  const fetchUserById = useCallback(async (
+    userId: string,
+    options?: { force?: boolean },
+  ): Promise<any | null> => {
+    const token = currentAccessTokenRef.current;
+    if (!userId || !token) return null;
+    // Дедупликация: карточка организатора рендерится для КАЖДОГО события в
+    // ленте, а организаторы повторяются. Без этого один и тот же профиль
+    // запрашивался бы десятки раз при каждой прокрутке.
+    //
+    // force нужен экрану чужого профиля: он единственный, кому важны СВЕЖИЕ
+    // данные — статус дружбы и число друзей меняются прямо во время просмотра.
+    if (!options?.force && requestedUserIdsRef.current.has(userId)) return null;
+    requestedUserIdsRef.current.add(userId);
+
+    // Ограничиваем параллелизм. На первой загрузке ленты карточек организаторов
+    // сразу десятки, и без очереди все запросы уходят одним всплеском: сервер
+    // режет их лимитом (100/мин), а каждый ответ дёргает setServerUserData,
+    // то есть перерисовку всего дерева ленты.
+    while (inFlightUserFetchesRef.current >= 3) {
+      await new Promise(resolve => setTimeout(resolve, 120));
+    }
+    inFlightUserFetchesRef.current += 1;
+
+    try {
+      const data = await apiRequest(`/users/${userId}`, {}, token);
+      if (data?.id) {
+        applyServerUserDataToState(data);
+        return data;
+      }
+    } catch (error) {
+      // ВАЖНО: id намеренно НЕ убираем из списка запрошенных.
+      // Раньше здесь стоял delete «чтобы разовый сбой сети не оставил профиль
+      // без о-себе» — и это вешало приложение: карточки организаторов в ленте
+      // виртуализированы и постоянно перемонтируются при прокрутке, каждый
+      // монтаж дёргал запрос заново, сервер отвечал 429 (лимит 100 запросов
+      // в минуту), delete снимал защиту — и запросы шли лавиной по кругу.
+      logger.warn('Failed to fetch full user profile', error);
+    } finally {
+      inFlightUserFetchesRef.current = Math.max(0, inFlightUserFetchesRef.current - 1);
+    }
+    return null;
+  }, [applyServerUserDataToState]);
+
+  /**
+   * Разложить по кэшу пачку пользователей, пришедших вместе с другими данными.
+   *
+   * Лента меморис приходит одним запросом вместе с авторами постов — отдельно
+   * дозапрашивать каждого не нужно и вредно (это был бы N+1 на каждый экран).
+   */
+  const cacheServerUsers = useCallback((users: any[]) => {
+    (users || []).forEach(user => {
+      if (user?.id) applyServerUserDataToState(user);
+    });
+  }, [applyServerUserDataToState]);
+
+  /**
+   * Друзья с сервера — единый источник для всего, что спрашивает «а мы друзья?».
+   *
+   * До этого таких источников было два: массив `friends` и карта
+   * `userFriendsMap`, оба наполнялись фоновой синхронизацией. Стоило ей не
+   * успеть или тихо упасть — и наружу это вылезало сразу в трёх местах:
+   * лента FRIENDS пустела (события друзей есть, но «друг организатора» не
+   * срабатывало), а в создании события списки «пригласить друзей» и
+   * «исключения» оказывались пустыми.
+   *
+   * Берём тот же список, что и экраны списка друзей, из того же кэша: при
+   * запуске он есть сразу, до всякой синхронизации.
+   */
+  const [serverFriendUsers, setServerFriendUsers] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!currentUserId || !accessToken) {
+      setServerFriendUsers([]);
+      return;
+    }
+    const key = cacheKey(currentUserId, 'friends', currentUserId);
+    const cached = readQueryCache<any[]>(key);
+    if (Array.isArray(cached) && cached.length) setServerFriendUsers(cached);
+
+    apiRequest(`/friends/user/${currentUserId}`, {}, accessToken)
+      .then(list => {
+        if (!Array.isArray(list)) return;
+        writeQueryCache(key, list);
+        setServerFriendUsers(list);
+        list.forEach(friend => {
+          if (friend?.id) applyServerUserDataToState(friend);
+        });
+      })
+      .catch(() => undefined);
+  }, [currentUserId, accessToken, applyServerUserDataToState]);
+
+  const serverFriendIds = useMemo(
+    () => serverFriendUsers.map(friend => friend?.id).filter(Boolean) as string[],
+    [serverFriendUsers],
+  );
+
   // getUserData должен быть определен ПЕРЕД вызовом useEventRequests
   const getUserData = useCallback((userId: string): UserProfile => {
     const resolvedId = resolveUserId(userId);
@@ -481,6 +612,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
       bio: localPatch.bio ?? baseBio ?? '',
       geoPosition: localPatch.geoPosition ?? baseGeo ?? '',
       accountType,
+      gender: localPatch.gender ?? serverPatch.gender,
     };
   }, [authUser, serverUserData, userDataUpdates, events, resolveUserId]);
 
@@ -491,6 +623,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     refreshPendingJoinRequests,
     sendEventRequest,
     sendEventInvite,
+    sendEventInvites,
     acceptInvitation,
     rejectInvitation,
     respondToEventRequest,
@@ -851,7 +984,11 @@ export function EventsProvider({ children }: EventsProviderProps) {
     if (!currentUserId) {
       return [];
     }
-    const friendIds = userFriendsMap[currentUserId] ?? friends;
+    // Серверный список первым: из него берут данные и «пригласить друзей», и
+    // «исключения» при создании события — раньше там было пусто.
+    const friendIds = serverFriendIds.length
+      ? serverFriendIds
+      : (userFriendsMap[currentUserId] ?? friends);
     return friendIds.map(friendId => {
       const userData = getUserData(friendId);
       return {
@@ -859,7 +996,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
         ...userData,
       };
     });
-  }, [currentUserId, friends, getUserData, userFriendsMap]);
+  }, [currentUserId, friends, getUserData, userFriendsMap, serverFriendIds]);
 
   // Получить реальный список друзей для любого пользователя
   // Использует единый источник истины - userFriendsMap
@@ -878,8 +1015,9 @@ export function EventsProvider({ children }: EventsProviderProps) {
   }, [getUserData, resolveUserId, userFriendsMap]);
 
   const isFriend = useCallback((userId: string): boolean => {
-    return friends.includes(userId);
-  }, [friends]);
+    // Серверный список главнее: он есть уже при запуске, из кэша.
+    return serverFriendIds.includes(userId) || friends.includes(userId);
+  }, [friends, serverFriendIds]);
 
   // Обновленная логика FRIENDS согласно новой системе
 
@@ -895,6 +1033,21 @@ export function EventsProvider({ children }: EventsProviderProps) {
         logger.debug('Sending event to chat:', chatId, 'eventId:', eventId);
         return sendChatMessage(chatId, '', eventId);
       }),
+    );
+  }, [sendChatMessage]);
+
+  /**
+   * Отправить в чаты профиль пользователя.
+   *
+   * Схема сообщений не знает про ссылки на пользователей (там есть eventId и
+   * postId, но не userId), а менять её ради этого — ALTER TABLE на живой базе
+   * без истории миграций. Поэтому шлём языконезависимый маркер, как уже
+   * сделано для системных сообщений (см. utils/systemMessage.ts): клиент
+   * распознаёт его и рисует мини-карточку профиля.
+   */
+  const sendProfileToChats = useCallback(async (userId: string, chatIds: string[]) => {
+    await Promise.all(
+      chatIds.map(chatId => sendChatMessage(chatId, `[[profile:${userId}]]`)),
     );
   }, [sendChatMessage]);
 
@@ -919,6 +1072,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     setEventProfiles,
     getEventProfile,
     fetchEventProfile,
+    fetchEventProfiles,
     createEventProfile,
     addEventProfilePost,
     updateEventProfile,
@@ -1178,6 +1332,13 @@ export function EventsProvider({ children }: EventsProviderProps) {
       applyServerUserDataToState,
       handleUnauthorizedError,
   });
+
+  // Личная видимость прошедших событий (значки «только я» / «друзьям»)
+  const {
+    memoryVisibility,
+    refreshMemoryVisibility,
+    setMemoryVisibility,
+  } = useMemoryVisibility({ accessToken, currentUserId });
 
   // Хук для работы с папками событий
   const {
@@ -1466,10 +1627,17 @@ export function EventsProvider({ children }: EventsProviderProps) {
     }
     
     // ПРИОРИТЕТ 5: Отклонен (rejected)
+    //
+    // Только НАСТОЯЩИЙ отказ организатора. Отмена собственного участия тоже
+    // ставит локальную заявку 'rejected' (чтобы событие не вернулось в мою
+    // ленту), но помечает её selfCancelled — по такой заявке человек остаётся
+    // обычным «не участником»: карточка сохраняет три точки (поделиться,
+    // сохранить, пожаловаться) и кнопку GO, чтобы вступить заново.
     const rejectedRequest = eventRequests.find(req => 
       req.eventId === event.id && 
       requestBelongsToUser(req, resolvedUserId) &&
-      req.status === 'rejected'
+      req.status === 'rejected' &&
+      !req.selfCancelled
     );
     if (rejectedRequest) {
       return 'rejected';
@@ -1495,13 +1663,13 @@ export function EventsProvider({ children }: EventsProviderProps) {
 
     // Если событие прошло
     if (isPast && event.personalPhotos) {
-      // Приоритет 1: Для третьих лиц - персональное фото участника, через профиль которого смотрят
-      if (viewerUserId && event.personalPhotos[viewerUserId]) {
-        return event.personalPhotos[viewerUserId];
-      }
-      
-      // Приоритет 2: Для самого участника - его персональное фото (если есть)
-      if (event.personalPhotos[userId]) {
+      // Смотрим через чей-то профиль — показываем только его фото. Своим
+      // подменять нельзя: в чужом профиле висела бы моя картинка (см.
+      // utils/personalEventPhoto).
+      if (viewerUserId) {
+        const ownersPhoto = event.personalPhotos[viewerUserId];
+        if (ownersPhoto) return ownersPhoto;
+      } else if (event.personalPhotos[userId]) {
         return event.personalPhotos[userId];
       }
     }
@@ -1590,9 +1758,14 @@ export function EventsProvider({ children }: EventsProviderProps) {
   const isFriendOfOrganizer = useCallback((event: Event, userId: string | null): boolean => {
     if (!userId) return false;
     const resolvedUserId = resolveUserId(userId);
+    // Для себя — серверный список: именно из-за его отсутствия лента FRIENDS
+    // оказывалась пустой, хотя события друзей исправно висели в GLOB.
+    if (resolvedUserId === currentUserId && serverFriendIds.includes(event.organizerId)) {
+      return true;
+    }
     const friendIds = userFriendsMap[resolvedUserId] ?? [];
     return friendIds.includes(event.organizerId);
-  }, [resolveUserId, userFriendsMap]);
+  }, [resolveUserId, userFriendsMap, currentUserId, serverFriendIds]);
 
   const getFriendsForEvents = useCallback((): Event[] => {
     if (!currentUserId) {
@@ -1608,6 +1781,13 @@ export function EventsProvider({ children }: EventsProviderProps) {
         return false;
       }
       
+      // «Только я» — событие живёт только в профиле автора, в ленту не идёт.
+      //
+      // Прячем именно здесь, а не на сервере: клиент складывает ответ
+      // GET /events в один общий список, из которого живут и лента, и
+      // профиль, и входящие заявки. Фильтр на сервере убирал такие события
+      // у автора отовсюду разом — вместе с заявками на участие в них.
+      if ((event as any)?.visibility?.type === 'only_me') return false;
       // предстоящее
       if (!isEventUpcoming(event)) return false;
       // не_набрано
@@ -1644,54 +1824,73 @@ export function EventsProvider({ children }: EventsProviderProps) {
     return isUserEventMember(event, userId);
   }, [isUserEventMember]);
 
+  /**
+   * Состав участников события.
+   *
+   * Источник ровно два, и оба серверные: членства события (participantsData,
+   * туда попадают только ACCEPTED) и список участников профиля события —
+   * он же решает состав прошедшего события, из него сервер уже вычел тех,
+   * кто вышел.
+   *
+   * Раньше это было объединение ЧЕТЫРЁХ источников, из которых два —
+   * догадки, и убрать из них никого было нельзя:
+   *  - принятые заявки из eventRequests: локальные строки заявок при
+   *    синхронизации никогда не удалялись (см. слияние в
+   *    refreshPendingJoinRequests), поэтому вышедший из события оставался в
+   *    списке участников навсегда — ровно та жалоба, что «я отменила
+   *    участие, а в чужом профиле всё ещё в списке»;
+   *  - participantsList: это АДРЕСА АВАТАРОК, и по ним подбирался первый
+   *    пользователь с таким же адресом. У всех, кто без фото, адрес
+   *    одинаковый — в участники мог попасть посторонний.
+   */
   const getEventParticipants = useCallback((eventId: string): string[] => {
     const event = events.find(e => e.id === eventId);
     if (!event) return [];
-    
-    // Всегда начинаем с организатора
-    const participants = new Set<string>([event.organizerId]);
-    
-    // Добавляем участников из eventProfile
+
     const profile = eventProfiles.find(p => p.eventId === eventId);
-    if (profile) {
+    const participants = new Set<string>();
+
+    if (isEventPast(event) && profile && profile.participants.length > 0) {
+      // Прошедшее событие: профиль — полный состав, включая организатора.
       profile.participants.forEach(id => participants.add(id));
+    } else {
+      participants.add(event.organizerId);
+      (event.participantsData ?? []).forEach(p => {
+        if (p.userId) participants.add(p.userId);
+      });
+      profile?.participants.forEach(id => participants.add(id));
     }
-    
-    // Добавляем участников из accepted requests
-    const acceptedRequests = eventRequests.filter(
-      req => req.eventId === eventId && req.status === 'accepted'
-    );
-    acceptedRequests.forEach(req => {
-      const participantId = resolveRequestUserId(req);
-      if (participantId) {
-        participants.add(participantId);
-      }
+
+    // Вышедших не показываем нигде: у них отдельный раздел в модалке
+    // участников, и виден он только своим.
+    (profile?.formerParticipants ?? []).forEach(id => participants.delete(id));
+
+    /**
+     * Порядок обязан быть устойчивым.
+     *
+     * Источники приезжают разными запросами, и Set сохранял порядок
+     * ДОБАВЛЕНИЯ — при каждом открытии список перетасовывался, «то один
+     * человек выше, то другой».
+     *
+     * Организатор остаётся первым (это осмысленно), остальные — по имени.
+     * Идентификатор как второй ключ, чтобы у одинаковых имён и у тех, чьё имя
+     * ещё не загрузилось, порядок тоже был определённым.
+     */
+    const organizerId = participants.has(event.organizerId) ? event.organizerId : '';
+    const rest = Array.from(participants).filter(id => id !== organizerId);
+    rest.sort((a, b) => {
+      const dataA = getUserData(a);
+      const dataB = getUserData(b);
+      const nameA = (dataA?.name || dataA?.username || '').toLocaleLowerCase();
+      const nameB = (dataB?.name || dataB?.username || '').toLocaleLowerCase();
+      if (nameA && nameB && nameA !== nameB) return nameA.localeCompare(nameB);
+      if (nameA && !nameB) return -1;
+      if (!nameA && nameB) return 1;
+      return a.localeCompare(b);
     });
-    
-    // Добавляем участников из participantsData
-    if (event.participantsData) {
-      event.participantsData.forEach(p => {
-        if (p.userId) {
-          participants.add(p.userId);
-        }
-      });
-    }
-    
-    // Добавляем участников из participantsList (через avatar -> userId)
-    if (event.participantsList) {
-      event.participantsList.forEach(avatar => {
-        for (const uid of knownUserIds) {
-          const user = getUserData(uid);
-          if (user.avatar === avatar) {
-            participants.add(uid);
-            break;
-          }
-        }
-      });
-    }
-    
-    return Array.from(participants);
-  }, [eventProfiles, eventRequests, events, getUserData, knownUserIds, resolveRequestUserId]);
+
+    return organizerId ? [organizerId, ...rest] : rest;
+  }, [eventProfiles, events, getUserData]);
 
   // canEditEventProfile теперь находится в useEventProfiles хуке
 
@@ -1785,14 +1984,37 @@ export function EventsProvider({ children }: EventsProviderProps) {
       if (event.id === 'preview-event-temp' || event.id.includes('-temp') || event.id.startsWith('preview-')) {
         return false;
       }
+      // «Только я» — событие живёт только в профиле автора, в ленту не идёт.
+      //
+      // Прячем именно здесь, а не на сервере: клиент складывает ответ
+      // GET /events в один общий список, из которого живут и лента, и
+      // профиль, и входящие заявки. Фильтр на сервере убирал такие события
+      // у автора отовсюду разом — вместе с заявками на участие в них.
+      if ((event as any)?.visibility?.type === 'only_me') return false;
       // предстоящее
       if (!isEventUpcoming(event)) return false;
       // не_набрано
       if (isEventFull(event)) return false;
       const relationship = getUserRelationship(event, currentUserId);
-      if (relationship === 'rejected') return false;
-      // События, где я организатор: показываем все предстоящие (уже отфильтровано по isEventUpcoming выше)
+      // Свои предстоящие события организатор видит всегда — и до проверок
+      // ниже. Проверка «я вышел» смотрит на отклонённые заявки, где я
+      // отправитель, а приглашение, которое отправил сам организатор и
+      // которое отклонили, выглядит так же: стоило кому-то отказаться от
+      // приглашения, и событие пропадало из ленты у самого организатора.
       if (relationship === 'organizer') return true;
+      if (relationship === 'rejected') return false;
+      // Своя отмена участия больше не даёт relationship 'rejected' (иначе
+      // карточка везде теряет меню и кнопку GO), поэтому событие, из которого
+      // я вышел, убираем из ленты отдельной проверкой — как в общей ленте.
+      const leftThisEvent = currentUserId
+        ? eventRequests.some(
+            r =>
+              r.eventId === event.id &&
+              r.status === 'rejected' &&
+              (r.fromUserId === currentUserId || r.userId === currentUserId),
+          )
+        : false;
+      if (leftThisEvent) return false;
       if (relationship === 'accepted') return false;
       if (currentUserId && isFriendOfOrganizer(event, currentUserId)) return false;
       if (relationship === 'invited') return true;
@@ -1807,7 +2029,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
       if (!aIsMyOrganizer && bIsMyOrganizer) return 1;
       return 0;
     });
-  }, [currentUserId, events, getUserRelationship, isEventFull, isFriendOfOrganizer, isUserOrganizer]);
+  }, [currentUserId, eventRequests, events, getUserRelationship, isEventFull, isFriendOfOrganizer, isUserOrganizer]);
 
 // mapServerFriendRequest теперь в hooks/friends/useFriends.ts
 
@@ -2142,6 +2364,21 @@ export function EventsProvider({ children }: EventsProviderProps) {
   }, [authUser, applyServerUserDataToState]);
 
   // Track last sync to prevent infinite loops
+  // Идёт ли ПЕРВАЯ синхронизация после входа. Нужен, чтобы ленты показывали
+  // скелетон вместо «Событий нет»: раньше при запуске на секунду появлялось
+  // пустое состояние, пока данные ещё не пришли с сервера.
+  // Стартовое значение — true: на холодном старте эффект синхронизации
+  // отрабатывает уже ПОСЛЕ первого кадра, и при false этот кадр успевал
+  // показать пустую ленту. Ниже флаг снимается, если синхронизировать нечего.
+  const [initialSyncing, setInitialSyncing] = useState(true);
+  // Первая синхронизация не удалась из-за сети. Нужен, чтобы ленты говорили
+  // «не удалось загрузить», а не «событий нет»: телефон может быть подключён
+  // (и баннер офлайна молчит), а запросы при этом рваться — например через
+  // VPN, когда TLS-рукопожатие обрывают. Пустое состояние в таком случае врёт:
+  // события есть, их просто не получили.
+  const [initialSyncFailed, setInitialSyncFailed] = useState(false);
+  const syncInFlightRef = useRef(false);
+
   const lastSyncRef = useRef<{ userId: string | null; accessToken: string | null }>({
     userId: null,
     accessToken: null,
@@ -2183,6 +2420,8 @@ export function EventsProvider({ children }: EventsProviderProps) {
 
     if (shouldSync) {
       lastSyncRef.current = { userId: currentUserId, accessToken };
+      syncInFlightRef.current = true;
+      setInitialSyncing(true);
       
       // Синхронизируем параллельно
       // Используем Promise.allSettled, чтобы ошибка в одной синхронизации не прерывала остальные
@@ -2203,9 +2442,22 @@ export function EventsProvider({ children }: EventsProviderProps) {
             logger.warn(`Sync ${syncNames[index]} failed:`, result.reason);
           }
         });
+        // Если ВСЁ отвалилось по сети — это не «пусто», а «не загрузилось».
+        const rejected = results.filter(r => r.status === 'rejected');
+        const allFailedByNetwork =
+          rejected.length === results.length &&
+          rejected.every(r => isNetworkError((r as PromiseRejectedResult).reason));
+        setInitialSyncFailed(allFailedByNetwork);
       }).catch((error) => {
         logger.error('Error during sync after account switch:', error);
+      }).finally(() => {
+        syncInFlightRef.current = false;
+        setInitialSyncing(false);
       });
+    } else if (!authInitializing && !syncInFlightRef.current) {
+      // Синхронизировать нечего (гость либо синхронизация уже прошла) —
+      // иначе скелетон висел бы вечно.
+      setInitialSyncing(false);
     }
 
     if (!currentUserId && userChanged) {
@@ -2225,6 +2477,9 @@ export function EventsProvider({ children }: EventsProviderProps) {
       setSavedMemoryPosts([]);
       // loadedChatMessages теперь в useChats хуке, очистка происходит через setChatMessages([])
       lastSyncRef.current = { userId: null, accessToken: null };
+      // Кэш ответов тоже: ключи привязаны к аккаунту, но держать их на диске
+      // после выхода незачем.
+      clearQueryCache();
       // Отключаем WebSocket при выходе
       disconnectSocket();
     }
@@ -2539,10 +2794,18 @@ export function EventsProvider({ children }: EventsProviderProps) {
       ]).catch(error => {
         logger.error('Failed to sync friends after WebSocket friend:request:status:', error);
       });
+
+      // Заявку отозвали: её уведомление сервер уже удалил — убираем из ленты,
+      // иначе висело бы «хочет добавить вас в друзья» на заявку, которой нет.
+      if (requestData?.status === 'CANCELLED') {
+        refreshNotifications().catch(() => undefined);
+      }
     });
 
-    // Подписка на новое уведомление
-    socket.on('notification:new', (notificationData: any) => {
+    // Подписка на новое уведомление. Новые типы (лайки, комментарии и т.д.)
+    // сервер шлёт отдельным событием notification:created — чтобы их не
+    // получала сборка 3, которая не умеет их рисовать. Обрабатываем одинаково.
+    const onNotificationCreated = (notificationData: any) => {
       logger.debug('🔔 Получено новое уведомление через WebSocket:', notificationData);
       // Добавляем уведомление в состояние
       setNotifications(prev => {
@@ -2567,7 +2830,9 @@ export function EventsProvider({ children }: EventsProviderProps) {
       refreshNotifications().catch(error => {
         logger.error('Failed to refresh notifications after WebSocket notification:new:', error);
       });
-    });
+    };
+    socket.on('notification:new', onNotificationCreated);
+    socket.on('notification:created', onNotificationCreated);
 
     // Подключение к комнатам всех чатов пользователя
     const joinChatRooms = () => {
@@ -2627,6 +2892,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
       socket.off('friend:request:new');
       socket.off('friend:request:status');
       socket.off('notification:new');
+      socket.off('notification:created');
       socket.off('connect');
       // НЕ отключаем сокет полностью, так как он может использоваться после смены токена
       // Отключение произойдет только при отсутствии токена или смене пользователя
@@ -2694,7 +2960,10 @@ export function EventsProvider({ children }: EventsProviderProps) {
     createEvent,
     updateEvent,
     deleteEvent,
+    initialSyncing,
+    initialSyncFailed,
     getUserData,
+    fetchUserById,
     updateUserData,
     getOrganizerStats,
     friends,
@@ -2722,6 +2991,9 @@ export function EventsProvider({ children }: EventsProviderProps) {
     refreshEventFolders,
     messageFolders,
     refreshMessageFolders: syncMessageFolders,
+    memoryVisibility,
+    refreshMemoryVisibility,
+    setMemoryVisibility,
     createMessageFolder,
     addChatsToMessageFolder,
     removeChatFromMessageFolder,
@@ -2732,6 +3004,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     createPersonalChat,
     sendChatMessage,
     deleteChat,
+    sendProfileToChats,
     sendEventToChats,
     sendMemoryPostToChats,
     getChatMessages,
@@ -2744,6 +3017,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     eventProfiles,
     sendEventRequest,
     sendEventInvite,
+    sendEventInvites,
     acceptInvitation,
     rejectInvitation,
     respondToEventRequest,
@@ -2756,6 +3030,10 @@ export function EventsProvider({ children }: EventsProviderProps) {
     removeParticipantFromEvent,
     getEventProfile,
     fetchEventProfile,
+    cacheServerUsers,
+    syncFriendsFromServer,
+    syncFriendRequestsFromServer,
+    fetchEventProfiles,
     createEventProfile,
     addEventProfilePost,
     updateEventProfile,
@@ -2822,7 +3100,7 @@ export function EventsProvider({ children }: EventsProviderProps) {
     createEventChat, createEventChatWithParticipants, createPersonalChat, sendChatMessage,
     deleteChat, getChatMessages, getChat, getChatsForUser, fetchMessagesForChat,
     markChatAsRead, addParticipantToChat,
-    sendEventRequest, sendEventInvite, acceptInvitation, rejectInvitation,
+    sendEventRequest, sendEventInvite, sendEventInvites, acceptInvitation, rejectInvitation,
     respondToEventRequest, cancelEventRequest, removeEventRequestById, cancelEventParticipation,
     getEventProfile, fetchEventProfile, createEventProfile, addEventProfilePost,
     updateEventProfile, updateEventProfilePost, addPostComment, canEditEventProfile,

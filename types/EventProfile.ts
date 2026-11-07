@@ -22,6 +22,10 @@ export interface EventProfilePost {
   createdAt: Date;
   showInProfile?: boolean; // Флаг для отображения в профиле пользователя
   comments?: PostComment[]; // Комментарии к посту
+  /** id пользователей, поставивших лайк. Сервер их отдаёт и хранит, но в
+   *  клиентской модели поля не было — из-за этого лайки не переживали
+   *  перезапуск приложения. */
+  likes?: string[];
 }
 
 export interface EventProfile {
@@ -33,6 +37,12 @@ export interface EventProfile {
   time: string; // HH:MM - время события
   location: string;
   participants: string[]; // ID участников
+  /**
+   * Те, кто вышел из события. Сервер отдаёт их ТОЛЬКО участникам события и
+   * организатору — для всех остальных список пустой. Отсюда и пометка «вышел
+   * из события» в списке участников, которую видят лишь свои.
+   */
+  formerParticipants?: string[];
   organizerId: string;
   isCompleted: boolean;
   posts: EventProfilePost[];

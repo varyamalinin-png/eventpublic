@@ -1,28 +1,69 @@
 import { View, Text, Image, StyleSheet, TouchableOpacity, Modal, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router';
 import { useEvents } from '../context/EventsContext';
+import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { formatUsername } from '../utils/username';
 import { AppIcon } from './ui/AppIcon';
 import { Palette, Radius } from '../constants/DesignSystem';
+import { openUserProfile } from '../utils/openUserProfile';
+import { sizedImage } from '../utils/imageSize';
 
 type ParticipantsModalProps = {
   visible: boolean;
   onClose: () => void;
-  eventId: string;
+  /** Событие, из которого берутся участники. Не нужен, если передан
+   *  participantIds или sections. */
+  eventId?: string;
+  /**
+   * Явный список участников — для случаев, где события нет: например папка,
+   * у которой участники это объединение по всем её событиям. Раньше модалка
+   * умела только eventId, поэтому в папке аватарки были некликабельны.
+   */
+  participantIds?: string[];
+  /**
+   * Несколько подписанных разделов вместо одного списка. Нужно в чате
+   * события: в шапке показано число участников ЧАТА, а модалка показывала
+   * участников СОБЫТИЯ — числа не сходились и было непонятно, что к чему.
+   */
+  sections?: Array<{ title: string; ids: string[] }>;
 };
 
-export default function ParticipantsModal({ visible, onClose, eventId }: ParticipantsModalProps) {
-  const router = useRouter();
+export default function ParticipantsModal({
+  visible,
+  onClose,
+  eventId,
+  participantIds: explicitIds,
+  sections,
+}: ParticipantsModalProps) {
   const { t } = useLanguage();
-  const { getEventParticipants, getUserData, events, isUserOrganizer } = useEvents();
+  const { user: authUser } = useAuth();
+  const currentUserId = authUser?.id ?? null;
+  const { getEventParticipants, getUserData, events, isUserOrganizer, eventProfiles } = useEvents();
 
-  const participantIds = getEventParticipants(eventId);
-  const event = events.find(e => e.id === eventId);
+  const participantIds = explicitIds ?? (eventId ? getEventParticipants(eventId) : []);
+  /**
+   * Те, кто вышел из события.
+   *
+   * Сервер кладёт их в профиль ТОЛЬКО для своих — участников события и
+   * организатора (EventProfilesService.getProfile). Поэтому здесь ничего
+   * дополнительно не проверяем: пустой список означает «этому зрителю не
+   * положено», и раздел просто не рисуется.
+   */
+  const formerIds = (() => {
+    if (explicitIds || sections || !eventId) return [];
+    const profile = eventProfiles.find(p => p.eventId === eventId);
+    const left = profile?.formerParticipants ?? [];
+    // На всякий случай: тот, кто вернулся, не должен оказаться в обоих списках.
+    return left.filter(id => !participantIds.includes(id));
+  })();
+  const event = eventId ? events.find(e => e.id === eventId) : undefined;
+  const totalCount = sections
+    ? sections.reduce((sum, section) => sum + section.ids.length, 0)
+    : participantIds.length;
 
   const handleParticipantPress = (userId: string) => {
     onClose();
-    router.push(`/profile/${userId}`);
+    openUserProfile(userId, currentUserId);
   };
 
   const getUserRole = (userId: string): string => {
@@ -36,6 +77,40 @@ export default function ParticipantsModal({ visible, onClose, eventId }: Partici
     return !!(event && isUserOrganizer(event, userId));
   };
 
+  const renderEmpty = (key?: string) => (
+    <View key={key} style={styles.empty}>
+      <Text style={styles.emptyText}>{t.participantsModal.noParticipants}</Text>
+    </View>
+  );
+
+  const renderRow = (participantId: string, index: number, total: number, hasLeft = false) => {
+    const userData = getUserData(participantId);
+    const role = hasLeft ? t.participantsModal.leftEvent : getUserRole(participantId);
+    const organizer = !hasLeft && isOrganizer(participantId);
+    const isLast = index === total - 1;
+
+    return (
+      <TouchableOpacity
+        key={participantId}
+        style={[styles.row, !isLast && styles.rowBorder, hasLeft && styles.rowLeft]}
+        onPress={() => handleParticipantPress(participantId)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.avatarWrapper}>
+          <Image source={{ uri: sizedImage(userData.avatar, 44) }} style={styles.avatar} />
+          {organizer && <View style={styles.organizerDot} />}
+        </View>
+        <View style={styles.info}>
+          <Text style={styles.name} numberOfLines={1}>{userData.name}</Text>
+          <Text style={styles.username} numberOfLines={1}>{formatUsername(userData.username)}</Text>
+        </View>
+        <View style={[styles.roleBadge, organizer && styles.roleBadgeOrganizer]}>
+          <Text style={[styles.roleText, organizer && styles.roleTextOrganizer]}>{role}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <Modal
       visible={visible}
@@ -45,20 +120,14 @@ export default function ParticipantsModal({ visible, onClose, eventId }: Partici
       statusBarTranslucent
     >
       <View style={styles.overlay}>
-        <TouchableOpacity
-          style={StyleSheet.absoluteFill}
-          activeOpacity={1}
-          onPress={onClose}
-        />
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
         <View style={styles.sheet}>
-          {/* Handle */}
           <View style={styles.handle} />
 
-          {/* Header */}
           <View style={styles.header}>
             <Text style={styles.headerTitle}>{t.participantsModal.title}</Text>
             <View style={styles.countBadge}>
-              <Text style={styles.countBadgeText}>{participantIds.length}</Text>
+              <Text style={styles.countBadgeText}>{totalCount}</Text>
             </View>
             <TouchableOpacity
               style={styles.closeBtn}
@@ -69,45 +138,24 @@ export default function ParticipantsModal({ visible, onClose, eventId }: Partici
             </TouchableOpacity>
           </View>
 
-          <ScrollView
-            style={styles.list}
-            showsVerticalScrollIndicator={false}
-            bounces={false}
-          >
-            {participantIds.length > 0 ? (
-              participantIds.map((participantId, index) => {
-                const userData = getUserData(participantId);
-                const role = getUserRole(participantId);
-                const organizer = isOrganizer(participantId);
-                const isLast = index === participantIds.length - 1;
+          <ScrollView style={styles.list} showsVerticalScrollIndicator={false} bounces={false}>
+            {sections
+              ? sections.map(section => (
+                  <View key={section.title}>
+                    <Text style={styles.sectionTitle}>{section.title}</Text>
+                    {section.ids.length > 0
+                      ? section.ids.map((id, i) => renderRow(id, i, section.ids.length))
+                      : renderEmpty(`${section.title}-empty`)}
+                  </View>
+                ))
+              : participantIds.length > 0
+                ? participantIds.map((id, i) => renderRow(id, i, participantIds.length))
+                : renderEmpty()}
 
-                return (
-                  <TouchableOpacity
-                    key={participantId}
-                    style={[styles.row, !isLast && styles.rowBorder]}
-                    onPress={() => handleParticipantPress(participantId)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.avatarWrapper}>
-                      <Image
-                        source={{ uri: userData.avatar }}
-                        style={styles.avatar}
-                      />
-                      {organizer && <View style={styles.organizerDot} />}
-                    </View>
-                    <View style={styles.info}>
-                      <Text style={styles.name} numberOfLines={1}>{userData.name}</Text>
-                      <Text style={styles.username} numberOfLines={1}>{formatUsername(userData.username)}</Text>
-                    </View>
-                    <View style={[styles.roleBadge, organizer && styles.roleBadgeOrganizer]}>
-                      <Text style={[styles.roleText, organizer && styles.roleTextOrganizer]}>{role}</Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })
-            ) : (
-              <View style={styles.empty}>
-                <Text style={styles.emptyText}>{t.participantsModal.noParticipants}</Text>
+            {formerIds.length > 0 && (
+              <View>
+                <Text style={styles.sectionTitle}>{t.participantsModal.leftSection}</Text>
+                {formerIds.map((id, i) => renderRow(id, i, formerIds.length, true))}
               </View>
             )}
           </ScrollView>
@@ -118,6 +166,20 @@ export default function ParticipantsModal({ visible, onClose, eventId }: Partici
 }
 
 const styles = StyleSheet.create({
+  // Вышедшие из события — тем же списком, но приглушённо.
+  rowLeft: {
+    opacity: 0.55,
+  },
+  sectionTitle: {
+    color: 'rgba(244,244,245,0.45)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 6,
+  },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.65)',

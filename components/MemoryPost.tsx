@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Modal, Alert, ScrollView, TextInput, Platform, ActivityIndicator, Image } from 'react-native';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Modal, Alert, ScrollView, TextInput, Platform, ActivityIndicator, Image, Keyboard, Animated, PanResponder } from 'react-native';
 import * as Haptics from 'expo-haptics';
 // Не используем useRouter напрямую - передаем через props
 import { EventProfilePost } from '../context/EventsContext';
@@ -12,6 +12,7 @@ import { createLogger } from '../utils/logger';
 import { AppIcon } from './ui/AppIcon';
 import { LazyImage } from './ui/LazyImage';
 import { Palette } from '../constants/DesignSystem';
+import { sizedImage } from '../utils/imageSize';
 
 const logger = createLogger('MemoryPost');
 
@@ -19,6 +20,13 @@ interface MemoryPostProps {
   post: EventProfilePost;
   showOptions?: boolean; // Показывать ли кнопку с тремя точками (deprecated - теперь всегда показывается)
   onNavigate?: (path: string) => void; // Опциональная функция навигации
+  /**
+   * Держать место под подпись, даже если её нет.
+   *
+   * Нужно только в горизонтальной карусели: там карточки стоят рядом и обязаны
+   * совпадать по высоте. В обычной ленте пустой блок под фото не рисуем.
+   */
+  reserveCaptionSpace?: boolean;
 }
 
 // Для веб-версии используем ограниченную ширину контейнера (500px), для мобильных - полную ширину экрана
@@ -38,6 +46,21 @@ const getScreenWidth = () => {
   // Дефолтное значение для SSR или если Dimensions недоступен
   return Platform.OS === 'web' ? 500 : 393; // 393 - стандартная ширина iPhone
 };
+
+// Куда «улетает» фото при закрытии свайпом. Считаем так же безопасно, как
+// ширину: компонент рендерится и на вебе при серверной сборке.
+const getScreenHeight = () => {
+  try {
+    if (typeof Dimensions !== 'undefined' && Dimensions.get) {
+      return Dimensions.get('window').height;
+    }
+  } catch (error) {
+    // Dimensions недоступен (SSR)
+  }
+  return 852; // высота экрана iPhone по умолчанию
+};
+
+const SCREEN_HEIGHT = getScreenHeight();
 const screenWidth = getScreenWidth();
 
 // Error Boundary компонент для MemoryPost
@@ -89,11 +112,34 @@ class MemoryPostErrorBoundary extends React.Component<
 
 // Безопасная обертка для MemoryPost, которая ловит ошибки инициализации контекстов
 // ОБЯЗАТЕЛЬНО: оборачиваем в дополнительный try-catch для перехвата ошибок router
-function MemoryPostWrapper({ post, showOptions = false, onNavigate }: MemoryPostProps) {
+
+/**
+ * Строка целиком — адрес медиафайла (без пробелов, с расширением картинки
+ * или из нашего хранилища). Такое в подписи означает не подпись, а остаток
+ * старого формата хранения.
+ */
+export function memoryPostCaption(post: any): string {
+  const raw = post?.caption || (post?.photoUrl || (post?.photoUrls?.length ?? 0) > 0 ? post?.content || '' : '');
+  return isMediaUrlOnly(raw) ? '' : raw;
+}
+
+function isMediaUrlOnly(value: string): boolean {
+  const text = (value || '').trim();
+  if (!text || /\s/.test(text)) return false;
+  if (!/^(https?:\/\/|file:|data:)/i.test(text)) return false;
+  return /\/storage\//i.test(text) || /\.(webp|jpe?g|png|gif|heic|heif|mp4|mov|m4v)(\?|$)/i.test(text);
+}
+
+function MemoryPostWrapper({ post, showOptions = false, onNavigate, reserveCaptionSpace = false }: MemoryPostProps) {
   try {
   return (
     <MemoryPostErrorBoundary post={post} showOptions={showOptions}>
-      <MemoryPostContent post={post} showOptions={showOptions} onNavigate={onNavigate} />
+      <MemoryPostContent
+        post={post}
+        showOptions={showOptions}
+        onNavigate={onNavigate}
+        reserveCaptionSpace={reserveCaptionSpace}
+      />
     </MemoryPostErrorBoundary>
   );
   } catch (routerError: any) {
@@ -129,7 +175,7 @@ function MemoryPostWrapper({ post, showOptions = false, onNavigate }: MemoryPost
 const MemoryPost = React.memo(MemoryPostWrapper);
 export default MemoryPost;
 
-function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPostProps) {
+function MemoryPostContent({ post, showOptions = false, onNavigate, reserveCaptionSpace = false }: MemoryPostProps) {
   // КРИТИЧЕСКИ ВАЖНО: Проверяем доступность контекстов перед использованием
   // Если контексты не готовы, возвращаем заглушку
   let languageContext: ReturnType<typeof useLanguage> | null = null;
@@ -188,7 +234,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
     id: post.authorId,
     username: 'Unknown',
     name: 'Unknown User',
-    avatar: 'https://via.placeholder.com/150/333333/FFFFFF?text=U'
+    avatar: ''
   };
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -197,6 +243,30 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
   // Соотношение сторон теперь фиксированное 3:4 для всех постов, размеры изображения не нужны
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [showComments, setShowComments] = useState(false);
+
+  // Поле комментария лежит в обычном потоке внутри поста, а сам пост — в
+  // горизонтальной ленте фиксированной ширины. KeyboardAvoidingView здесь
+  // работает криво, поэтому поднимаем блок комментариев на реальную высоту
+  // клавиатуры вручную (тот же приём, что в чате).
+  const [commentsKeyboardHeight, setCommentsKeyboardHeight] = useState(0);
+  useEffect(() => {
+    // Подписываемся только когда комментарии реально открыты — иначе на
+    // каждый пост в ленте висело бы по паре слушателей.
+    if (!showComments) {
+      setCommentsKeyboardHeight(0);
+      return;
+    }
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e: any) =>
+      setCommentsKeyboardHeight(e?.endCoordinates?.height ?? 0),
+    );
+    const hideSub = Keyboard.addListener(hideEvent, () => setCommentsKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [showComments]);
   const [commentText, setCommentText] = useState('');
   // Список лайкнувших держим локально, чтобы кнопка отвечала мгновенно
   const [likedBy, setLikedBy] = useState<string[]>(((post as any).likes ?? []) as string[]);
@@ -209,6 +279,73 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
   }, [post]);
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [showPhotoModal, setShowPhotoModal] = useState(false);
+
+  /**
+   * Закрытие полноэкранного просмотра свайпом вниз и тапом по фону.
+   *
+   * Раньше выйти можно было только крестиком в углу — до него надо тянуться
+   * пальцем через весь экран, и это единственный способ.
+   *
+   * Жест вертикальный, а карусель фото прокручивается по горизонтали, поэтому
+   * PanResponder берёт жест только когда движение по вертикали заметно
+   * преобладает: иначе он перехватывал бы листание фото. Ставим его БЕЗ
+   * capture — горизонтальную прокрутку ScrollView забирает себе сам.
+   */
+  const photoDragY = useRef(new Animated.Value(0)).current;
+
+  const closePhotoModal = useCallback(() => {
+    setShowPhotoModal(false);
+    photoDragY.setValue(0);
+  }, [photoDragY]);
+
+  const photoPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        // Именно Capture: жест надо перехватить у карусели и у тапалки на
+        // фото. Условие «вертикаль заметно преобладает» оставляет им
+        // горизонтальное листание и обычные нажатия.
+        onMoveShouldSetPanResponderCapture: (_evt, gesture) =>
+          Math.abs(gesture.dy) > 12 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.5,
+        onPanResponderMove: (_evt, gesture) => {
+          // Вверх тянем с сопротивлением: закрываем только вниз, но пусть
+          // картинка всё же следует за пальцем, иначе жест кажется мёртвым.
+          photoDragY.setValue(gesture.dy > 0 ? gesture.dy : gesture.dy / 3);
+        },
+        onPanResponderRelease: (_evt, gesture) => {
+          const shouldClose = gesture.dy > 120 || gesture.vy > 0.8;
+          if (shouldClose) {
+            Animated.timing(photoDragY, {
+              toValue: SCREEN_HEIGHT,
+              duration: 160,
+              useNativeDriver: true,
+            }).start(() => closePhotoModal());
+            return;
+          }
+          Animated.spring(photoDragY, {
+            toValue: 0,
+            useNativeDriver: true,
+            speed: 20,
+            bounciness: 0,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(photoDragY, {
+            toValue: 0,
+            useNativeDriver: true,
+            speed: 20,
+            bounciness: 0,
+          }).start();
+        },
+      }),
+    [photoDragY, closePhotoModal],
+  );
+
+  // Фон гаснет по мере утягивания вниз — видно, что жест закрывает, а не листает.
+  const photoBackdropOpacity = photoDragY.interpolate({
+    inputRange: [0, 300],
+    outputRange: [1, 0.25],
+    extrapolate: 'clamp',
+  });
   const [modalPhotoIndex, setModalPhotoIndex] = useState(0);
   const modalScrollViewRef = useRef<ScrollView>(null);
   const isMyPost = authUser?.id === post.authorId;
@@ -221,6 +358,34 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
   // Фото для карусели
   const photos = post.photoUrls && post.photoUrls.length > 0 ? post.photoUrls : (post.photoUrl ? [post.photoUrl] : []);
   const hasCarousel = photos.length > 1;
+
+  /**
+   * Общая подпись поста.
+   *
+   * Сервер хранит её в `content` (см. event-profiles.service.ts, postData.content),
+   * а компонент читал `post.caption` — поле из старого клиентского типа, которое
+   * с сервера не приходит вообще. Поэтому подпись не показывалась НИКОГДА, а у
+   * карусели её вдобавок прятало условие `!hasCarousel`. Со стороны это
+   * выглядело как «подпись не добавляется».
+   *
+   * У текстового поста `content` — это само тело поста, оно уже отрисовано выше,
+   * второй раз показывать не надо.
+   */
+  const [captionExpanded, setCaptionExpanded] = useState(false);
+  const hasPhotos = Boolean(post.photoUrl || (post.photoUrls && post.photoUrls.length > 0));
+  const rawCaption = post.caption || (hasPhotos ? post.content || '' : '');
+  /**
+   * Старые посты: если подпись была пустой, сервер записывал в `content` адрес
+   * самой картинки — «для обратной совместимости» (event-profiles.controller.ts,
+   * убрано). Пока подпись нигде не показывалась, этого никто не видел; теперь
+   * она видна, и под фото появлялась ссылка на файл, которую никто не писал.
+   * Свою подпись это не тронет: прячем только строку, которая целиком является
+   * адресом медиафайла.
+   */
+  const postCaption = isMediaUrlOnly(rawCaption) ? '' : rawCaption;
+  // Порог тот же, что у описания на карточке события (EventCard): длиннее —
+  // показываем «ещё» вместо второй строки.
+  const needsCaptionToggle = postCaption.length > 80;
 
   // Определяем тип контента на лету (на старых данных поле type может отсутствовать)
   const effectiveType: 'photo' | 'video' | 'music' | 'text' = (() => {
@@ -413,7 +578,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
                         />
                       ) : (
                       <LazyImage
-                        source={{ uri: photoUri }}
+                        source={{ uri: sizedImage(photoUri, 400) }}
                         style={styles.mediaContent}
                         resizeMode="contain"
                         onError={(error) => {
@@ -422,16 +587,20 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
                       />
                       )}
                     </TouchableOpacity>
-                    {/* Индикатор номера фото в карусели */}
-                    <View style={styles.carouselIndicator}>
-                      <Text style={styles.carouselIndicatorText}>{index + 1} / {photos.length}</Text>
-                    </View>
-                    {/* Описание для текущего фото, если есть */}
-                    {!!post.captions?.[index] && (
-                      <View style={styles.carouselCaption}>
-                        <Text style={styles.carouselCaptionText}>{post.captions[index]}</Text>
+                    {/* Счётчик кадров и подпись к кадру — одним нижним слоем.
+                        Счётчик стоит справа НАД подписью: порознь они
+                        накладывались бы друг на друга, потому что подпись
+                        занимает всю ширину, а высота у неё непредсказуемая. */}
+                    <View style={styles.carouselBottomOverlay} pointerEvents="none">
+                      <View style={styles.carouselIndicator}>
+                        <Text style={styles.carouselIndicatorText}>{index + 1} / {photos.length}</Text>
                       </View>
-                    )}
+                      {!!post.captions?.[index] && (
+                        <View style={styles.carouselCaption}>
+                          <Text style={styles.carouselCaptionText}>{post.captions[index]}</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
                 ))}
               </ScrollView>
@@ -472,7 +641,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
             activeOpacity={0.9}
           >
             <LazyImage
-              source={{ uri: photoUri }}
+              source={{ uri: sizedImage(photoUri, 400) }}
               style={styles.mediaContent}
               resizeMode="contain"
               onError={(error) => {
@@ -490,7 +659,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
           >
             <View style={styles.videoContainer}>
               <Image 
-                source={{ uri: post.photoUrl || post.content }} 
+                source={{ uri: sizedImage(post.photoUrl || post.content, 400) }} 
                 style={styles.mediaContent}
                 resizeMode="contain"
               />
@@ -509,7 +678,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
           >
             <View style={styles.musicContainer}>
               <Image 
-                source={{ uri: post.artwork_url || post.photoUrl || post.content }} 
+                source={{ uri: sizedImage(post.artwork_url || post.photoUrl || post.content, 400) }} 
                 style={styles.musicArtwork}
                 resizeMode="cover"
               />
@@ -557,7 +726,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
             style={styles.eventTitleOverlay}
             activeOpacity={0.7}
           >
-            <Text style={styles.eventTitle}>{event.title}</Text>
+            <Text style={styles.eventTitle} numberOfLines={2} ellipsizeMode="tail">{event.title}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -577,25 +746,54 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
         </View>
       )}
       
-      {/* Аватарка автора в верхнем правом углу - поверх всего поста */}
-      <TouchableOpacity onPress={handleAuthorPress} style={styles.authorAvatarOverlay}>
-        <Image 
-          source={{ uri: safeAuthor.avatar }} 
+      {/* Автор — слева сверху, плашкой «аватар + имя», один в один как
+          на карточке события (exploreOrganizerContainer). Раньше здесь была
+          одна крупная аватарка справа, без имени. */}
+      <TouchableOpacity onPress={handleAuthorPress} style={styles.authorAvatarOverlay} activeOpacity={0.8}>
+        <Image
+          source={{ uri: sizedImage(safeAuthor.avatar, 40) }}
           style={styles.authorAvatar}
           resizeMode="cover"
         />
+        <Text style={styles.authorOverlayName} numberOfLines={1}>
+          {safeAuthor.name || formatUsername(safeAuthor.username)}
+        </Text>
       </TouchableOpacity>
 
-      {/* Описание/подпись (для одиночного фото или общее описание) */}
-      {!!post.caption && !hasCarousel && (
-        <View style={styles.captionContainer}>
-          <Text style={styles.caption}>{post.caption}</Text>
-        </View>
+      {/* Описание/подпись — и у одиночного фото, и у карусели.
+          Блок с ФИКСИРОВАННОЙ высотой нужен только там, где карточки стоят
+          рядом и обязаны совпадать по высоте, — в карусели одной группы; туда
+          приходит reserveCaptionSpace. У поста без подписи блок иначе висел
+          пустой серой полосой под фото, и это было заметнее, чем разнобой
+          высот. Высота подобрана так, что одинакова во всех случаях: либо две
+          строки текста, либо одна строка плюс «ещё». */}
+      {(!!postCaption || needsCaptionToggle || reserveCaptionSpace) && (
+      <View style={[styles.captionContainer, !captionExpanded && styles.captionContainerCollapsed]}>
+        {!!postCaption && (
+          <Text
+            style={styles.caption}
+            numberOfLines={captionExpanded ? undefined : (needsCaptionToggle ? 1 : 2)}
+          >
+            {postCaption}
+          </Text>
+        )}
+        {needsCaptionToggle && (
+          <TouchableOpacity
+            onPress={() => setCaptionExpanded(prev => !prev)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            <Text style={styles.captionMore}>
+              {captionExpanded ? t.common.showLess : t.events.more}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
       )}
 
       {/* Комментарии */}
       {showComments && (
-        <View style={styles.commentsContainer}>
+        <View style={[styles.commentsContainer, commentsKeyboardHeight > 0 && { marginBottom: commentsKeyboardHeight }]}>
           <ScrollView style={styles.commentsList} nestedScrollEnabled={true}>
             {comments.length === 0 ? (
               <Text style={styles.noCommentsText}>{t.events.noComments}</Text>
@@ -607,12 +805,12 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
                   id: comment.authorId,
                   username: 'Unknown',
                   name: 'Unknown User',
-                  avatar: 'https://via.placeholder.com/32'
+                  avatar: ''
                 };
                 return (
                   <View key={comment.id} style={styles.commentItem}>
                     <Image 
-                      source={{ uri: safeCommentAuthor.avatar || 'https://via.placeholder.com/32' }} 
+                      source={{ uri: sizedImage(safeCommentAuthor.avatar, 32) }} 
                       style={styles.commentAvatar}
                       resizeMode="cover"
                     />
@@ -658,7 +856,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
                     setCommentText('');
                   } catch (error) {
                     logger.error('Failed to add comment:', error);
-                    Alert.alert('Ошибка', 'Не удалось добавить комментарий. Попробуйте еще раз.');
+                    Alert.alert(t.common.error, t.messages.addCommentFailed);
                   } finally {
                     setIsPostingComment(false);
                   }
@@ -672,14 +870,12 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
         </View>
       )}
 
-      {/* Информация об авторе и дата в нижней рамке */}
+      {/* Дата и действия в нижней рамке.
+          Юзернейм отсюда убран: автор теперь показан плашкой сверху слева
+          (как на карточке события), и подпись под фото его дублировала. */}
       <View style={styles.authorContainer}>
-        <TouchableOpacity onPress={handleAuthorPress} style={styles.authorInfo}>
-            <Text style={styles.authorUsername}>{formatUsername(safeAuthor.username)}</Text>
-        </TouchableOpacity>
-        
         <View style={styles.dateAndOptionsContainer}>
-          <Text style={styles.eventDate}>
+          <Text style={[styles.eventDate, styles.eventDateSpacer]}>
             {post.createdAt.toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit', year: '2-digit' })}
           </Text>
           
@@ -743,15 +939,28 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
         visible={showPhotoModal}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => setShowPhotoModal(false)}
+        onRequestClose={closePhotoModal}
       >
-        <View style={styles.photoModalContainer}>
+        <Animated.View style={[styles.photoModalContainer, { opacity: photoBackdropOpacity }]}>
+          {/* Фон закрывает просмотр по тапу. Лежит ПОД содержимым и растянут
+              на весь экран, поэтому ловит нажатия мимо фотографии. */}
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={closePhotoModal}
+          />
+
           <TouchableOpacity 
             style={styles.photoModalCloseButton}
-            onPress={() => setShowPhotoModal(false)}
+            onPress={closePhotoModal}
           >
             <AppIcon name="close" size={22} color="#fff" />
           </TouchableOpacity>
+          
+          <Animated.View
+            style={[styles.photoModalContent, { transform: [{ translateY: photoDragY }] }]}
+            {...photoPanResponder.panHandlers}
+          >
           
           {hasCarousel ? (
             // Карусель в модальном окне
@@ -769,9 +978,14 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
               }}
             >
               {photos.map((photoUri, index) => (
-                <View key={index} style={styles.photoModalItem}>
+                <TouchableOpacity
+                  key={index}
+                  style={styles.photoModalItem}
+                  activeOpacity={1}
+                  onPress={closePhotoModal}
+                >
                   <Image 
-                    source={{ uri: photoUri }} 
+                    source={{ uri: sizedImage(photoUri, 400) }} 
                     style={styles.photoModalImage}
                     resizeMode="contain"
                   />
@@ -785,14 +999,18 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
                       <Text style={styles.photoModalCaptionText}>{post.captions[index]}</Text>
                     </View>
                   )}
-                </View>
+                </TouchableOpacity>
               ))}
             </ScrollView>
           ) : (
             // Одиночное фото в модальном окне
-            <View style={styles.photoModalItem}>
+            <TouchableOpacity
+              style={styles.photoModalItem}
+              activeOpacity={1}
+              onPress={closePhotoModal}
+            >
               <Image 
-                source={{ uri: photos[0] }} 
+                source={{ uri: sizedImage(photos[0], 400) }} 
                 style={styles.photoModalImage}
                 resizeMode="contain"
               />
@@ -802,9 +1020,10 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
                   <Text style={styles.photoModalCaptionText}>{post.caption}</Text>
                 </View>
               )}
-            </View>
+            </TouchableOpacity>
           )}
-        </View>
+          </Animated.View>
+        </Animated.View>
       </Modal>
 
       {/* Модальное окно с опциями */}
@@ -991,7 +1210,7 @@ function MemoryPostContent({ post, showOptions = false, onNavigate }: MemoryPost
                       }}
                     >
                       <Image
-                        source={{ uri: friend.avatar }}
+                        source={{ uri: sizedImage(friend.avatar, 44) }}
                         style={styles.shareModalAvatar}
                         resizeMode="cover"
                       />
@@ -1062,41 +1281,64 @@ const styles = StyleSheet.create({
   },
   eventTitleOverlay: {
     position: 'absolute',
-    top: 14,
-    left: 14,
+    // Метка события переехала налево→направо: слева теперь плашка автора,
+    // как на карточке события.
+    top: 10,
+    right: 10,
+    // Плашки автора и события стояли впритык и налезали друг на друга.
+    // Сужаем метку и уменьшаем её внутренние отступы (см. ниже),
+    // оставляя автору больше места.
+    maxWidth: '34%',
     zIndex: 10,
     backgroundColor: 'rgba(10, 10, 12, 0.5)',
     borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
-    paddingHorizontal: 13,
-    paddingVertical: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
     ...(({ backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' } as unknown) as object),
   },
   eventTitle: {
-    fontSize: 14,
+    // Было 14 — вместе с крупными отступами метка занимала полширины
+    // и упиралась в имя автора.
+    fontSize: 11.5,
     fontWeight: '700',
     letterSpacing: -0.2,
     color: '#f4f4f5',
   },
+  // Плашка автора — те же размеры и положение, что у организатора
+  // на карточке события (см. exploreOrganizerContainer/Avatar/Name).
   authorAvatarOverlay: {
     position: 'absolute',
-    top: -14,
-    right: -10,
+    top: 10,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 20,
+    paddingRight: 10,
+    paddingVertical: 3,
+    paddingLeft: 3,
+    maxWidth: '58%',
     zIndex: 999, // Верхний слой - поверх всего контента поста
   },
   authorAvatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 22,
-    borderWidth: 2.5,
-    borderColor: '#16161a',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.3)',
     backgroundColor: '#3a3a3f',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 10,
+  },
+  authorOverlayName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+    marginLeft: 6,
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+    flexShrink: 1,
   },
   eventDate: {
     fontSize: 12,
@@ -1170,14 +1412,27 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   captionContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     backgroundColor: '#141417',
+  },
+  // Свёрнутый блок: 2 строки по 19 плюс отступы 8+8. Ровно столько же
+  // занимает вариант «одна строка + „ещё“», поэтому высота поста не зависит
+  // от того, есть ли подпись и какой она длины.
+  captionContainerCollapsed: {
+    height: 54,
+    overflow: 'hidden',
   },
   caption: {
     fontSize: 14,
-    lineHeight: 20,
+    lineHeight: 19,
     color: '#CCCCCC',
+  },
+  captionMore: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FF8D32',
+    marginTop: 3,
   },
   authorContainer: {
     flexDirection: 'row',
@@ -1199,6 +1454,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    // Ряд занимает всю ширину: дата слева, действия и троеточие прижаты
+    // к правому краю поста (раньше блок был по центру, потому что после
+    // удаления юзернейма слева ничего не осталось).
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  // Дата остаётся у левого края
+  eventDateSpacer: {
+    flex: 1,
   },
   authorUsername: {
     fontSize: 14,
@@ -1359,10 +1623,19 @@ const styles = StyleSheet.create({
   carouselItemTouchable: {
     width: '100%',
   },
-  carouselIndicator: {
+  // Нижний слой фотографии: сначала счётчик справа, под ним — подпись кадра
+  // во всю ширину. Верх фотографии занят плашками автора и события, поэтому
+  // счётчик живёт снизу.
+  carouselBottomOverlay: {
     position: 'absolute',
-    top: 10,
-    right: 10,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'flex-end',
+  },
+  carouselIndicator: {
+    marginRight: 10,
+    marginBottom: 8,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -1374,10 +1647,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   carouselCaption: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    width: '100%',
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     padding: 10,
   },
@@ -1503,6 +1773,15 @@ const styles = StyleSheet.create({
   photoModalContainer: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Содержимое просмотра лежит отдельным слоем поверх фона-«закрывашки»:
+  // фон должен ловить тапы мимо фотографии, а тянуть пальцем надо саму
+  // фотографию.
+  photoModalContent: {
+    flex: 1,
+    width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
   },

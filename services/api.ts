@@ -90,6 +90,11 @@ export async function apiRequest(
       const response = await fetch(`${API_BASE_URL}${path}`, {
         ...options,
         headers,
+        // iOS/RN can revalidate a cached GET by sending If-None-Match. The API
+        // then correctly returns 304, but fetch exposes that as a non-ok
+        // response with no body, so callers see a failed sync and an empty
+        // feed. API reads should always receive a fresh JSON response.
+        cache: 'reload',
         signal: controller.signal,
       });
       clearTimeout(timeoutId);

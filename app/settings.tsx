@@ -13,22 +13,26 @@ import {
   Platform,
   Linking,
   Animated,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSafeRouter } from '../utils/safeRouter';
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import Constants from 'expo-constants';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useEvents } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { API_BASE_URL, apiRequest, ApiError } from '../services/api';
 import { createLogger } from '../utils/logger';
+import { validateUsername } from '../utils/username';
 import { AppIcon, AppIconName } from '../components/ui/AppIcon';
 import { Palette } from '../constants/DesignSystem';
-import { useTheme } from '../context/ThemeContext';
 import { settingsStyles as styles } from "../styles/settings.styles";
+import { showInDevelopmentHint } from '../utils/showInDevelopmentHint';
+import { SHOW_MULTI_ACCOUNT, SHOW_IN_DEVELOPMENT_ITEMS } from '../constants/featureFlags';
 
 const logger = createLogger('Settings');
 
@@ -114,7 +118,6 @@ export default function SettingsScreen() {
   );
   
   // Состояния для настроек
-  const [twoFactorAuth, setTwoFactorAuth] = useState(false);
   const [showAge, setShowAge] = useState(true);
   
   // Обновляем showAge при загрузке профиля
@@ -126,14 +129,14 @@ export default function SettingsScreen() {
   const [smartSuggestions, setSmartSuggestions] = useState(true);
   const [autoAddEvents, setAutoAddEvents] = useState(true);
   const [confirmFriendRequests, setConfirmFriendRequests] = useState(true);
-  const { mode: theme, setMode: setTheme } = useTheme();
-  
+
   // Модальные окна
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showReminderModal, setShowReminderModal] = useState(false);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [showNameModal, setShowNameModal] = useState(false);
+  const [showUsernameModal, setShowUsernameModal] = useState(false);
   const [showGenderModal, setShowGenderModal] = useState(false);
   const [showDateOfBirthModal, setShowDateOfBirthModal] = useState(false);
   const [showCityModal, setShowCityModal] = useState(false);
@@ -159,6 +162,7 @@ export default function SettingsScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [reminderHours, setReminderHours] = useState('24');
   const [editName, setEditName] = useState('');
+  const [editUsername, setEditUsername] = useState('');
   const [editGender, setEditGender] = useState('');
   const [editDateOfBirth, setEditDateOfBirth] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -166,6 +170,41 @@ export default function SettingsScreen() {
   const [editBio, setEditBio] = useState('');
   const [updating, setUpdating] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+
+  /**
+   * Заблокированные пользователи.
+   *
+   * Снять блокировку может только тот, кто её поставил, поэтому список —
+   * это ровно «кого заблокировал я» (GET /users/me/blocked).
+   */
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
+  const [blockedUsers, setBlockedUsers] = useState<Array<{ id: string; name?: string; username?: string; avatarUrl?: string }>>([]);
+  const [blockedLoading, setBlockedLoading] = useState(false);
+
+  const loadBlockedUsers = useCallback(async () => {
+    if (!accessToken) return;
+    setBlockedLoading(true);
+    try {
+      const response = await apiRequest('/users/me/blocked', {}, accessToken);
+      setBlockedUsers(Array.isArray(response) ? response : []);
+    } catch (error) {
+      logger.error('Не удалось загрузить список заблокированных', error);
+    } finally {
+      setBlockedLoading(false);
+    }
+  }, [accessToken]);
+
+  const handleUnblock = useCallback(async (blockedId: string) => {
+    if (!accessToken) return;
+    try {
+      await apiRequest(`/users/${blockedId}/block`, { method: 'DELETE' }, accessToken);
+      setBlockedUsers(prev => prev.filter(user => user.id !== blockedId));
+    } catch (error) {
+      logger.error('Не удалось снять блокировку', error);
+      Alert.alert(t.common.error, t.profile.blockFailed);
+    }
+  }, [accessToken, t]);
 
   // useMemo хуки также должны быть перед условным return
   const activeStoredAccount = useMemo(
@@ -334,33 +373,57 @@ const removeAvatarFromServer = async () => {
   }
   };
   
+  /**
+   * Удаление аккаунта — ИЗ приложения, а не письмом в поддержку.
+   *
+   * Раньше кнопка открывала почтовый клиент с просьбой написать на
+   * support@iwent.ru и ждать 30 дней. App Store такое отклоняет: правило
+   * 5.1.1(v) требует, чтобы аккаунт удалялся внутри приложения.
+   *
+   * Подтверждений два: действие необратимо и уносит с собой события
+   * пользователя, его публикации и переписки.
+   */
+  const runDeleteAccount = async () => {
+    if (!currentUserId || deletingAccount) return;
+    setDeletingAccount(true);
+    try {
+      await apiRequest('/users/me', { method: 'DELETE' }, accessToken);
+      // Локальные данные аккаунта убираем только ПОСЛЕ успеха на сервере,
+      // иначе при ошибке пользователь остался бы без входа с живым аккаунтом.
+      await removeAccount(currentUserId);
+      router.replace('/(auth)' as any);
+    } catch (error: any) {
+      logger.error('Account deletion failed', error);
+      Alert.alert(t.common.error, error?.message || t.messages.deleteAccountFailed);
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
   const handleDeleteAccount = () => {
     Alert.alert(
       t.messages.deleteAccountTitle,
       t.messages.deleteAccountBody,
       [
-        { text: t.messages.contactSupport, onPress: () => Linking.openURL('mailto:support@iwent.ru?subject=Запрос на удаление аккаунта') },
         { text: t.common.cancel, style: 'cancel' },
+        {
+          text: t.messages.deleteAccountAction,
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              t.messages.deleteAccountConfirmTitle,
+              t.messages.deleteAccountConfirmBody,
+              [
+                { text: t.common.cancel, style: 'cancel' },
+                { text: t.messages.deleteAccountAction, style: 'destructive', onPress: runDeleteAccount },
+              ]
+            );
+          },
+        },
       ]
     );
   };
   
-  const handleDeactivateAccount = () => {
-    Alert.alert(
-      t.messages.deactivateTitle,
-      t.settings.account.deactivateConfirm,
-      [
-        { text: t.common.cancel, style: 'cancel' },
-        { 
-          text: t.messages.deactivateAction, 
-          onPress: () => {
-            // Логика деактивации
-            Alert.alert(t.messages.accountDeactivated);
-          }
-        }
-      ]
-    );
-  };
   
   const handleLogout = () => {
     Alert.alert(
@@ -373,10 +436,24 @@ const removeAvatarFromServer = async () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              const hasAnotherAccount = await logout();
-              if (!hasAnotherAccount) {
-                router.replace('/(auth)');
+              let hasAnotherAccount = await logout();
+              // Мультиаккаунт заморожен в MVP (SHOW_MULTI_ACCOUNT), но у людей,
+              // которые успели завести второй аккаунт раньше, он остался в
+              // хранилище. logout() в таком случае просто переключается на него
+              // и возвращает true — со стороны это выглядит как «кнопка выхода
+              // не работает». Пока флаг выключен, выходим до конца.
+              if (!SHOW_MULTI_ACCOUNT) {
+                let guard = accounts.length + 1;
+                while (hasAnotherAccount && guard > 0) {
+                  guard -= 1;
+                  hasAnotherAccount = await logout();
+                }
               }
+              // Навигацией отсюда не занимаемся намеренно: RouterGate в
+              // app/_layout.tsx сам уводит на /(auth)/login, как только сессия
+              // очищена. Пока здесь стоял свой router.replace('/(auth)'),
+              // переходов было два — сначала от RouterGate, потом отсюда, — и
+              // экран входа заметно моргал дважды.
             } catch (error) {
               logger.warn('Logout failed', error);
             }
@@ -512,7 +589,12 @@ const removeAvatarFromServer = async () => {
       // Если обновляется dateOfBirth, вычисляем возраст и обновляем его тоже
       const updates: any = { [field]: value };
       if (field === 'dateOfBirth' && value) {
-        const birthDate = typeof value === 'string' ? new Date(value) : value;
+        // «YYYY-MM-DD» собираем как местную дату: new Date('1999-12-31') — это
+        // полночь по UTC, и западнее Гринвича она превращалась в 30-е число.
+        const dayOnly = typeof value === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+        const birthDate = dayOnly
+          ? new Date(Number(dayOnly[1]), Number(dayOnly[2]) - 1, Number(dayOnly[3]))
+          : typeof value === 'string' ? new Date(value) : value;
         if (!isNaN(birthDate.getTime())) {
           const today = new Date();
           let age = today.getFullYear() - birthDate.getFullYear();
@@ -521,7 +603,7 @@ const removeAvatarFromServer = async () => {
             age--;
           }
           if (age > 0) {
-            updates.age = `${age} лет`;
+            updates.age = String(age); // без суффикса — он из локали при отрисовке
           }
         }
       }
@@ -547,6 +629,17 @@ const removeAvatarFromServer = async () => {
     setEditName('');
   };
 
+  const handleUpdateUsername = async () => {
+    const validation = validateUsername(editUsername);
+    if (!validation.isValid) {
+      Alert.alert(t.common.error, validation.errorMessage || t.messages.saveChangesFailed);
+      return;
+    }
+    await updateProfileField('username', editUsername.trim());
+    setShowUsernameModal(false);
+    setEditUsername('');
+  };
+
   const handleUpdateGender = async () => {
     await updateProfileField('gender', editGender);
     setShowGenderModal(false);
@@ -558,9 +651,13 @@ const removeAvatarFromServer = async () => {
       Alert.alert(t.common.error, t.messages.selectBirthDate);
       return;
     }
-    // Форматируем дату в ISO строку для отправки на сервер
-    const isoDate = editDateOfBirth.toISOString();
-    await updateProfileField('dateOfBirth', isoDate);
+    // Отправляем календарный день «YYYY-MM-DD» из МЕСТНЫХ компонентов даты.
+    // toISOString() переводил локальную полночь в UTC и отдавал уже другой
+    // день; сервер теперь сам кладёт дату на полдень по UTC.
+    const y = editDateOfBirth.getFullYear();
+    const m = String(editDateOfBirth.getMonth() + 1).padStart(2, '0');
+    const d = String(editDateOfBirth.getDate()).padStart(2, '0');
+    await updateProfileField('dateOfBirth', `${y}-${m}-${d}`);
     setShowDateOfBirthModal(false);
     setEditDateOfBirth(null);
     setShowDatePicker(false);
@@ -738,16 +835,41 @@ const removeAvatarFromServer = async () => {
     </TouchableOpacity>
   );
   
-  const renderSwitchItem = (label: string, value: boolean, onValueChange: (value: boolean) => void) => (
-    <View style={styles.settingItem}>
+  /**
+   * inDevelopment — переключатель, за которым пока нет логики: его значение
+   * нигде не читается и никуда не сохраняется. Раньше такие тумблеры молча
+   * щёлкались и создавали впечатление рабочей настройки. Теперь рядом стоит
+   * подпись «В разработке», сам тумблер не переключается, а по нажатию
+   * показывается пояснение — как у пункта «Изменить видимость» в карточке.
+   */
+  const renderSwitchItem = (
+    label: string,
+    value: boolean,
+    onValueChange: (value: boolean) => void,
+    inDevelopment = false,
+  ) => (
+    <TouchableOpacity
+      style={styles.settingItem}
+      activeOpacity={inDevelopment ? 0.6 : 1}
+      disabled={!inDevelopment}
+      onPress={() => showInDevelopmentHint(t.events.inDevelopment, t.events.inDevelopmentMsg)}
+    >
       <Text style={styles.settingLabel}>{label}</Text>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        trackColor={{ false: 'rgba(255,255,255,0.08)', true: '#FF8D32' }}
-        thumbColor={value ? '#f4f4f5' : 'rgba(244,244,245,0.5)'}
-      />
-    </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        {inDevelopment && (
+          <Text style={{ fontSize: 11, fontWeight: '600', color: 'rgba(244,244,245,0.4)' }}>
+            {t.events.inDevelopment}
+          </Text>
+        )}
+        <Switch
+          value={inDevelopment ? false : value}
+          onValueChange={inDevelopment ? undefined : onValueChange}
+          disabled={inDevelopment}
+          trackColor={{ false: 'rgba(255,255,255,0.08)', true: '#FF8D32' }}
+          thumbColor={value && !inDevelopment ? '#f4f4f5' : 'rgba(244,244,245,0.5)'}
+        />
+      </View>
+    </TouchableOpacity>
   );
   
   return (
@@ -821,7 +943,7 @@ const removeAvatarFromServer = async () => {
               </View>
             </View>
 
-            {otherAccounts.length > 0 && (
+            {SHOW_MULTI_ACCOUNT && otherAccounts.length > 0 && (
               <>
                 <Text style={[styles.subsectionTitle, { marginTop: 20 }]}>{t.settings.accounts.savedAccounts}</Text>
                 {otherAccounts.map(account => (
@@ -860,13 +982,18 @@ const removeAvatarFromServer = async () => {
               </>
             )}
 
-            <TouchableOpacity style={styles.accountAddButton} onPress={() => handleAddAccount('login')}>
-              <Ionicons name="add-circle-outline" size={20} color="#FF8D32" style={{ marginRight: 8 }} />
-              <Text style={styles.accountAddButtonText}>{t.settings.accounts.addAccount}</Text>
-            </TouchableOpacity>
-            <Text style={styles.accountHint}>
-              {t.settings.accounts.hint}
-            </Text>
+            {/* Второй аккаунт заморожен до после MVP — constants/featureFlags.ts */}
+            {SHOW_MULTI_ACCOUNT && (
+              <>
+                <TouchableOpacity style={styles.accountAddButton} onPress={() => handleAddAccount('login')}>
+                  <Ionicons name="add-circle-outline" size={20} color="#FF8D32" style={{ marginRight: 8 }} />
+                  <Text style={styles.accountAddButtonText}>{t.settings.accounts.addAccount}</Text>
+                </TouchableOpacity>
+                <Text style={styles.accountHint}>
+                  {t.settings.accounts.hint}
+                </Text>
+              </>
+            )}
           </View>
         ))}
 
@@ -875,7 +1002,6 @@ const removeAvatarFromServer = async () => {
           <>
             {renderSettingItem(t.settings.accountSecurity.email, authUser?.email ?? '—', () => setShowEmailModal(true))}
             {renderSettingItem(t.settings.accountSecurity.password, '••••••••', () => setShowPasswordModal(true))}
-            {renderSwitchItem(t.settings.accountSecurity.twoFactorAuth, twoFactorAuth, setTwoFactorAuth)}
           </>
         ))}
         
@@ -886,6 +1012,10 @@ const removeAvatarFromServer = async () => {
             {renderSettingItem(t.settings.profileVisibility.name, userProfile?.name || userData.name || t.settings.profileVisibility.notSpecified, () => {
               setEditName(userProfile?.name || userData.name || '');
               setShowNameModal(true);
+            })}
+            {renderSettingItem(t.settings.profileVisibility.username, userProfile?.username ? `@${userProfile.username}` : (authUser?.username ? `@${authUser.username}` : t.settings.profileVisibility.notSpecified), () => {
+              setEditUsername(userProfile?.username || authUser?.username || '');
+              setShowUsernameModal(true);
             })}
             {renderSettingItem(t.settings.profileVisibility.gender, 
               userProfile?.gender === 'male' ? t.settings.profileVisibility.male : 
@@ -923,7 +1053,7 @@ const removeAvatarFromServer = async () => {
         {renderSection('calendar', t.settings.events.title, (
           <>
             {renderSwitchItem(t.settings.events.smartSuggestions, smartSuggestions, setSmartSuggestions)}
-            {renderSwitchItem(t.settings.events.autoAddAccepted, autoAddEvents, setAutoAddEvents)}
+            {SHOW_IN_DEVELOPMENT_ITEMS && renderSwitchItem(t.settings.events.autoAddAccepted, autoAddEvents, setAutoAddEvents, true)}
             {renderSettingItem(t.settings.events.reminders, `${reminderHours} ${t.settings.events.reminderHours}`, () => setShowReminderModal(true))}
           </>
         ))}
@@ -936,11 +1066,9 @@ const removeAvatarFromServer = async () => {
               getSavedEvents().length > 0 ? `${getSavedEvents().length} ${t.settings.saved.eventsCount}` : t.settings.saved.noSaved,
               () => router.push('/(tabs)/saved')
             )}
-            {renderSettingItem(
-              t.settings.saved.savedMemories || t.messages.savedMemoriesTitle,
-              getSavedMemoryPosts(eventProfiles).length > 0 ? `${getSavedMemoryPosts(eventProfiles).length} ${(t.settings.saved as any).memoriesCount || t.messages.postsWord}` : t.settings.saved.noSaved,
-              () => router.push('/(tabs)/saved')
-            )}
+            {/* Строка «Сохранённые меморис» убрана: она вела на тот же
+                экран /saved, где раздел меморис уже есть, — то есть дублировала
+                строку выше и никуда больше не приводила. */}
           </>
         ))}
         
@@ -959,30 +1087,37 @@ const removeAvatarFromServer = async () => {
         {renderSection('users', t.settings.friendsCommunity.title, (
           <>
             {renderSettingItem(t.settings.friendsCommunity.friends, undefined, () => router.push('/friends-list'))}
-            <Text style={styles.subsectionTitle}>{t.settings.friendsCommunity.friendshipSettings}</Text>
-            {renderSwitchItem(t.settings.friendsCommunity.confirmRequests, confirmFriendRequests, setConfirmFriendRequests)}
-          </>
-        ))}
-        
-        {/* 6. ВНЕШНИЙ ВИД */}
-        {renderSection('image', t.settings.appearance.title, (
-          <>
-            {renderSettingItem(t.settings.appearance.theme, theme === 'dark' ? t.settings.appearance.dark : theme === 'light' ? t.settings.appearance.light : t.settings.appearance.auto, () => {
-              const themes: ('light' | 'dark' | 'auto')[] = ['light', 'dark', 'auto'];
-              const currentIndex = themes.indexOf(theme);
-              setTheme(themes[(currentIndex + 1) % themes.length]);
+            {renderSettingItem(t.profile.blockedUsers, undefined, () => {
+              setShowBlockedModal(true);
+              void loadBlockedUsers();
             })}
+            {/* Подзаголовок без содержимого не рисуем: единственная настройка
+                под ним — заглушка, скрытая до после MVP. */}
+            {SHOW_IN_DEVELOPMENT_ITEMS && (
+              <>
+                <Text style={styles.subsectionTitle}>{t.settings.friendsCommunity.friendshipSettings}</Text>
+                {renderSwitchItem(t.settings.friendsCommunity.confirmRequests, confirmFriendRequests, setConfirmFriendRequests, true)}
+              </>
+            )}
           </>
         ))}
         
-        {/* 7. ПРИЛОЖЕНИЕ */}
+        {/* 6. ПРИЛОЖЕНИЕ */}
         {renderSection('smartphone', t.settings.app.title, (
           <>
-            {renderSettingItem(t.settings.app.about, t.settings.app.version)}
+            {/* Версия — из самой сборки (app.json → expoConfig), а не из
+                локали: там было вписано «1.0.0», и оно не менялось бы
+                с обновлениями. */}
+            {renderSettingItem(
+              t.settings.app.about,
+              Constants.expoConfig?.version
+                ? t.settings.app.version.replace('{version}', Constants.expoConfig.version)
+                : '',
+            )}
           </>
         ))}
         
-        {/* 8. ПОДДЕРЖКА */}
+        {/* 7. ПОДДЕРЖКА */}
         {renderSection('help', t.settings.support.title, (
           <>
             {renderSettingItem(t.settings.support.help, undefined, () => {
@@ -1023,10 +1158,14 @@ const removeAvatarFromServer = async () => {
           </>
         ))}
         
-        {/* 9. АККАУНТ */}
+        {/* 8. АККАУНТ */}
         {renderSection('logout', t.settings.account.title, (
           <>
-            {renderSettingItem(t.settings.account.deactivate, undefined, handleDeactivateAccount)}
+            {/* «Деактивировать аккаунт» убран: обработчик ничего не делал,
+                показывал «аккаунт деактивирован» и на этом всё. Неработающая
+                функция на виду — риск отказа по правилу App Store 2.1
+                (полнота приложения) и просто обман пользователя. Вернём,
+                когда за кнопкой появится настоящая логика. */}
             <TouchableOpacity style={styles.dangerItem} onPress={handleDeleteAccount}>
               <Text style={styles.dangerText}>{t.settings.account.delete}</Text>
             </TouchableOpacity>
@@ -1038,6 +1177,54 @@ const removeAvatarFromServer = async () => {
       </ScrollView>
       
 
+      {/* Заблокированные пользователи */}
+      <Modal
+        visible={showBlockedModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowBlockedModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.blockedHeader}>
+              <Text style={styles.modalTitle}>{t.profile.blockedUsers}</Text>
+              <TouchableOpacity onPress={() => setShowBlockedModal(false)}>
+                <Ionicons name="close" size={22} color="#BBBBCC" />
+              </TouchableOpacity>
+            </View>
+
+            {blockedLoading ? (
+              <ActivityIndicator color="#FF8D32" style={{ marginVertical: 24 }} />
+            ) : blockedUsers.length === 0 ? (
+              <Text style={styles.blockedEmpty}>{t.profile.blockedUsersEmpty}</Text>
+            ) : (
+              <ScrollView style={{ maxHeight: 360 }}>
+                {blockedUsers.map(user => (
+                  <View key={user.id} style={styles.blockedRow}>
+                    {user.avatarUrl ? (
+                      <Image source={{ uri: user.avatarUrl }} style={styles.accountAvatar} />
+                    ) : (
+                      <View style={[styles.accountAvatar, styles.accountAvatarPlaceholder]}>
+                        <Ionicons name="person-outline" size={20} color="#BBBBCC" />
+                      </View>
+                    )}
+                    <Text style={styles.blockedName} numberOfLines={1}>
+                      {user.name || user.username || user.id}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.blockedUnblockButton}
+                      onPress={() => handleUnblock(user.id)}
+                    >
+                      <Text style={styles.blockedUnblockText}>{t.profile.unblock}</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       {/* Модальное окно изменения email */}
       <Modal
         visible={showEmailModal}
@@ -1045,7 +1232,7 @@ const removeAvatarFromServer = async () => {
         animationType="slide"
         onRequestClose={() => setShowEmailModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t.settings.changeEmailTitle}</Text>
             <TextInput
@@ -1085,7 +1272,7 @@ const removeAvatarFromServer = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
       
       {/* Модальное окно смены пароля */}
@@ -1095,7 +1282,7 @@ const removeAvatarFromServer = async () => {
         animationType="slide"
         onRequestClose={() => setShowPasswordModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t.settings.changePasswordTitle}</Text>
             <TextInput
@@ -1143,7 +1330,7 @@ const removeAvatarFromServer = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Модальное окно редактирования имени */}
@@ -1153,7 +1340,7 @@ const removeAvatarFromServer = async () => {
         animationType="slide"
         onRequestClose={() => setShowNameModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t.settings.changeNameTitle}</Text>
             <TextInput
@@ -1182,7 +1369,48 @@ const removeAvatarFromServer = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Модальное окно редактирования юзернейма */}
+      <Modal
+        visible={showUsernameModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowUsernameModal(false)}
+      >
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{t.settings.changeUsernameTitle}</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder={t.settings.profileVisibility.username}
+              placeholderTextColor="#999"
+              value={editUsername}
+              onChangeText={setEditUsername}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => {
+                  setShowUsernameModal(false);
+                  setEditUsername('');
+                }}
+              >
+                <Text style={styles.modalButtonText}>{t.common.cancel}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonConfirm, updating && styles.modalButtonDisabled]}
+                onPress={handleUpdateUsername}
+                disabled={updating}
+              >
+                {updating ? <ActivityIndicator color="#f4f4f5" /> : <Text style={styles.modalButtonText}>{t.common.save}</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Модальное окно редактирования пола */}
@@ -1192,7 +1420,7 @@ const removeAvatarFromServer = async () => {
         animationType="slide"
         onRequestClose={() => setShowGenderModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t.settings.selectGenderTitle}</Text>
             {['male', 'female', 'other', 'prefer_not_to_say'].map((gender) => (
@@ -1225,7 +1453,7 @@ const removeAvatarFromServer = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Модальное окно редактирования даты рождения */}
@@ -1239,7 +1467,7 @@ const removeAvatarFromServer = async () => {
           setShowDatePicker(false);
         }}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t.settings.birthDateTitle}</Text>
             
@@ -1275,7 +1503,7 @@ const removeAvatarFromServer = async () => {
                   }
                 }}
                 textColor="#FFF"
-                style={{ backgroundColor: '#141417' }}
+                style={{ backgroundColor: '#141417', width: '100%', alignSelf: 'stretch' }}
               />
             ) : (
               <>
@@ -1325,7 +1553,7 @@ const removeAvatarFromServer = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Модальное окно редактирования города */}
@@ -1335,7 +1563,7 @@ const removeAvatarFromServer = async () => {
         animationType="slide"
         onRequestClose={() => setShowCityModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t.settings.changeCityTitle}</Text>
             <TextInput
@@ -1364,7 +1592,7 @@ const removeAvatarFromServer = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Модальное окно редактирования {t.settings.aboutMeTitle} */}
@@ -1374,7 +1602,7 @@ const removeAvatarFromServer = async () => {
         animationType="slide"
         onRequestClose={() => setShowBioModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t.settings.aboutMeTitle}</Text>
             <TextInput
@@ -1405,7 +1633,7 @@ const removeAvatarFromServer = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
       
       {/* Модальное окно настройки напоминаний */}
@@ -1415,7 +1643,7 @@ const removeAvatarFromServer = async () => {
         animationType="slide"
         onRequestClose={() => setShowReminderModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t.settings.remindersTitle}</Text>
             <Text style={styles.modalSubtitle}>{t.settings.remindersQuestion}</Text>
@@ -1445,7 +1673,7 @@ const removeAvatarFromServer = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Модальное окно выбора языка */}
@@ -1455,7 +1683,7 @@ const removeAvatarFromServer = async () => {
         animationType="slide"
         onRequestClose={() => setShowLanguageModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t.settings.languageRegion.appLanguage}</Text>
             {(['en', 'ru'] as const).map((lang) => (
@@ -1481,7 +1709,7 @@ const removeAvatarFromServer = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
       
       {/* Модальное окно изменения фото профиля */}
@@ -1491,7 +1719,7 @@ const removeAvatarFromServer = async () => {
         animationType="slide"
         onRequestClose={() => setShowAvatarModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t.settings.profileVisibility.profilePhoto}</Text>
             
@@ -1527,7 +1755,7 @@ const removeAvatarFromServer = async () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

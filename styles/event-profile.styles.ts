@@ -480,6 +480,24 @@ export const eventProfileStyles = StyleSheet.create({
     letterSpacing: -0.2,
     flex: 1,
   },
+  // Стрелка «шаг назад» слева от заголовка модалки. Появляется только после
+  // выбора типа контента: крестик закрывает окно целиком, а вернуться к
+  // выбору «фото/текст» без неё было невозможно — шаг с пустым списком фото
+  // не рендерит ничего, и окно выглядело пустым.
+  modalBackButton: {
+    width: 30,
+    height: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    marginRight: 12,
+  },
+  modalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
   closeButton: {
     width: 30,
     height: 30,
@@ -515,6 +533,26 @@ export const eventProfileStyles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 10,
     marginTop: 4,
+  },
+  // Основная кнопка ВНУТРИ ряда действий модалки.
+  // Здесь раньше переиспользовался styles.saveButton, а он
+  // position: 'absolute' (плавающая кнопка в шапке события). Пока рядом стоял
+  // cancelButton с flex: 1, он задавал ряду высоту и абсолютная кнопка была
+  // видна. Когда «Назад» убрали, в ряду остался ОДИН абсолютный элемент —
+  // высота ряда схлопнулась в 0, и кнопка исчезла вместе с ним: окно
+  // выглядело полностью пустым.
+  modalPrimaryButton: {
+    flex: 1,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 15,
+    backgroundColor: '#FF8D32',
+  },
+  modalPrimaryButtonText: {
+    color: '#f4f4f5',
+    fontSize: 15,
+    fontWeight: '700',
   },
   cancelButton: {
     flex: 1,

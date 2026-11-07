@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, Text, Image, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import type { EventFolder } from '../types/EventFolder';
+import { useLanguage } from '../context/LanguageContext';
+import { sizedImage } from '../utils/imageSize';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -12,6 +14,7 @@ interface FolderCardProps {
 }
 
 function FolderCard({ folder, onPress, onSwipeDelete, variant = 'profile' }: FolderCardProps) {
+  const { t } = useLanguage();
   // Для профиля: ширина должна задаваться родительским компонентом
   // Не рассчитываем ширину здесь, чтобы родитель мог контролировать размер
 
@@ -43,30 +46,29 @@ function FolderCard({ folder, onPress, onSwipeDelete, variant = 'profile' }: Fol
         activeOpacity={0.9}
       >
         <Image
-          source={{ uri: folder.coverPhotoUrl || 'https://via.placeholder.com/400x225' }}
+          source={{ uri: sizedImage(folder.coverPhotoUrl, 200) }}
           style={[styles.feedImage, { height: imageHeight }]}
           resizeMode="cover"
         />
         <View style={styles.feedOverlay}>
-          <View style={styles.feedTitleWithCountContainer}>
-            <Text style={styles.feedFolderName} numberOfLines={1}>{folder.name}</Text>
-            <Text style={styles.feedEventCount}>
-              {folder.eventCount || folder.events?.length || 0} {folder.eventCount === 1 || folder.events?.length === 1 ? 'event' : 'events'}
-            </Text>
-          </View>
-          {folder.description && (
-            <Text style={styles.feedDescription} numberOfLines={2}>
-              {folder.description}
-            </Text>
-          )}
+          {/* Название папки и участники стоят В ОДНОЙ строке: раньше участники
+              висели отдельным блоком ниже и правее, из-за чего блок выглядел
+              съехавшим. */}
+          <View style={styles.feedHeaderRow}>
+            <View style={styles.feedTitleWithCountContainer}>
+              <Text style={styles.feedFolderName} numberOfLines={1}>{folder.name}</Text>
+              <Text style={styles.feedEventCount}>
+                {folder.eventCount || folder.events?.length || 0} {folder.eventCount === 1 || folder.events?.length === 1 ? t.events.eventWord : t.profile.eventsWordPlural}
+              </Text>
+            </View>
           {folder.participants && folder.participants.length > 0 && (
             <View style={styles.feedParticipantsOverlay}>
               {folder.participants.slice(0, 5).map((participant: any, index) => {
-                const avatarUrl = participant.avatarUrl || participant.avatar || 'https://via.placeholder.com/40';
+                const avatarUrl = participant.avatarUrl || participant.avatar;
                 return (
                   <Image
                     key={participant.id || index}
-                    source={{ uri: avatarUrl }}
+                    source={{ uri: sizedImage(avatarUrl, 32) }}
                     style={[
                       styles.feedParticipantAvatar,
                       { marginLeft: index > 0 ? -8 : 0, zIndex: 10 - index }
@@ -81,6 +83,7 @@ function FolderCard({ folder, onPress, onSwipeDelete, variant = 'profile' }: Fol
               )}
             </View>
           )}
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -93,7 +96,7 @@ function FolderCard({ folder, onPress, onSwipeDelete, variant = 'profile' }: Fol
       activeOpacity={0.9}
     >
       <Image
-        source={{ uri: folder.coverPhotoUrl || folder.events?.[0]?.mediaUrl || 'https://via.placeholder.com/200x150' }}
+        source={{ uri: sizedImage(folder.coverPhotoUrl || folder.events?.[0]?.mediaUrl, 200) }}
         style={styles.profileImage}
         resizeMode="cover"
       />
@@ -101,17 +104,17 @@ function FolderCard({ folder, onPress, onSwipeDelete, variant = 'profile' }: Fol
         <View style={styles.profileTitleWithCountContainer}>
           <Text style={styles.profileFolderName} numberOfLines={2}>{folder.name}</Text>
           <Text style={styles.profileEventCount}>
-            {folder.eventCount || folder.events?.length || 0} {folder.eventCount === 1 || folder.events?.length === 1 ? 'event' : 'events'}
+            {folder.eventCount || folder.events?.length || 0} {folder.eventCount === 1 || folder.events?.length === 1 ? t.events.eventWord : t.profile.eventsWordPlural}
           </Text>
         </View>
         {folder.participants && folder.participants.length > 0 && (
           <View style={styles.profileParticipantsOverlay}>
             {folder.participants.slice(0, 3).map((participant: any, index) => {
-              const avatarUrl = participant.avatarUrl || participant.avatar || 'https://via.placeholder.com/40';
+              const avatarUrl = participant.avatarUrl || participant.avatar;
               return (
                 <Image
                   key={participant.id || index}
-                  source={{ uri: avatarUrl }}
+                  source={{ uri: sizedImage(avatarUrl, 32) }}
                   style={[
                     styles.profileParticipantAvatar,
                     { marginLeft: index > 0 ? -6 : 0, zIndex: 10 - index }
@@ -151,14 +154,21 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 16,
-    paddingBottom: 20,
+    // Опускаем блок ниже — раньше он висел заметно выше нижнего края
+    paddingBottom: 12,
+  },
+  feedHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
   },
   feedTitleWithCountContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    alignSelf: 'flex-start',
-    marginBottom: 8,
+    flexShrink: 1,
+    minWidth: 0,
   },
   feedFolderName: {
     fontSize: 18,
@@ -189,8 +199,8 @@ const styles = StyleSheet.create({
   feedParticipantsOverlay: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
     justifyContent: 'flex-end',
+    flexShrink: 0,
   },
   feedParticipantAvatar: {
     width: 24,

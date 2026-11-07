@@ -54,7 +54,9 @@ export default function TopBar({
           onChangeText={onSearchChange}
         />
         {onFilterPress && (
-          <TouchableOpacity style={styles.iconPill} onPress={onFilterPress} hitSlop={8}>
+          // См. TopBar.tsx: 38×38 внутри строки поиска раздувал её до 62px
+          // против 41px там, где фильтра нет.
+          <TouchableOpacity style={styles.filterPill} onPress={onFilterPress} hitSlop={8}>
             <AppIcon name="filter" size={16} color={Palette.textDim} />
             {activeFiltersCount > 0 && (
               <View style={styles.filterBadge}>
@@ -106,6 +108,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Palette.text,
     letterSpacing: 0.1,
+  },
+  // Кнопка фильтра внутри строки поиска — вровень с иконкой поиска,
+  // чтобы не задавать высоту строки.
+  filterPill: {
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
   },
   iconPill: {
     width: 38,

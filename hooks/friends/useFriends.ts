@@ -64,6 +64,7 @@ export function useFriends({
   
   const currentAccessTokenRef = useRef<string | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
+  const pendingSendRequestsRef = useRef<Set<string>>(new Set());
 
   // Обновляем refs при изменении токена или userId через useEffect
   useEffect(() => {
@@ -231,6 +232,15 @@ export function useFriends({
         return;
       }
 
+      // Защита от повторного нажатия/двойного onPress до перерисовки кнопки:
+      // без этого второй вызов может словить BadRequestException с сервера
+      // и его собственный sync способен откатить состояние раньше, чем
+      // успеет закоммититься первый запрос
+      if (pendingSendRequestsRef.current.has(toUserId)) {
+        return;
+      }
+      pendingSendRequestsRef.current.add(toUserId);
+
       const optimisticRequest: FriendRequest = {
         id: `pending-${Date.now()}`,
         fromUserId: actualUserId,
@@ -246,13 +256,31 @@ export function useFriends({
 
       if (actualToken) {
         try {
-          await apiRequest(`/friends/${toUserId}`, { method: 'POST' }, actualToken);
+          const result = await apiRequest(`/friends/${toUserId}`, { method: 'POST' }, actualToken);
+          // Сервер может молча вернуть УЖЕ существующую дружбу вместо создания
+          // новой (уже приняты в друзья ранее, или запрос уже был отправлен) —
+          // ждать, пока это подтвердит фоновый ресинк, ненадёжно (именно так
+          // кнопка откатывалась обратно на "+"), поэтому применяем ответ сразу
+          if (result?.status === 'ACCEPTED') {
+            setFriendRequests(prev => prev.filter(req => req.id !== optimisticRequest.id));
+            addLocalFriend(toUserId);
+          } else {
+            const mapped = mapServerFriendRequest(result);
+            setFriendRequests(prev => {
+              const filtered = prev.filter(req => req.id !== optimisticRequest.id && req.id !== mapped?.id);
+              return mapped ? [...filtered, mapped] : filtered;
+            });
+          }
           await Promise.all([syncFriendRequestsFromServer(), syncFriendsFromServer()]);
         } catch (error) {
           logger.error('Failed to add friend', error);
           setFriendRequests(prev => prev.filter(req => req.id !== optimisticRequest.id));
           await syncFriendRequestsFromServer();
+        } finally {
+          pendingSendRequestsRef.current.delete(toUserId);
         }
+      } else {
+        pendingSendRequestsRef.current.delete(toUserId);
       }
     },
     [addLocalFriend, syncFriendsFromServer, syncFriendRequestsFromServer],

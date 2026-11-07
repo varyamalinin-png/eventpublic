@@ -21,11 +21,25 @@ import { PhoneField } from '../components/auth/PhoneField';
 import { Country, DEFAULT_COUNTRY } from '../constants/countries';
 import { LegalDocumentModal, LegalDocKind, openLegalDoc } from '../components/auth/LegalDocumentModal';
 
+import { SHOW_MULTI_ACCOUNT } from '../constants/featureFlags';
+
 const logger = createLogger('AddAccount');
 
 type Mode = 'login' | 'register';
 
 export default function AddAccountScreen() {
+  /**
+   * Второй аккаунт заморожен до после MVP (constants/featureFlags.ts).
+   * Из настроек сюда больше не попасть, но экран остаётся зарегистрированным
+   * маршрутом — по прямой ссылке просто уводим назад.
+   */
+  const guardRouter = useRouter();
+  useEffect(() => {
+    if (!SHOW_MULTI_ACCOUNT) {
+      guardRouter.back();
+    }
+  }, [guardRouter]);
+
   const router = useRouter();
   const { t } = useLanguage();
   const params = useLocalSearchParams<{ mode?: string }>();
@@ -200,7 +214,9 @@ export default function AddAccountScreen() {
       const result = await register({
         email: registerEmail.trim(),
         username: registerUsername.trim(),
-        phone: `${phoneCountry.dial} ${registerPhoneDigits}`,
+        // Пустой номер не отправляем вовсе: «+7 » сервер принял бы за номер
+        // и отклонил по длине.
+        phone: registerPhoneDigits ? `${phoneCountry.dial} ${registerPhoneDigits}` : undefined,
         password: registerPassword,
         name: registerName.trim() || undefined,
       });
@@ -223,7 +239,15 @@ export default function AddAccountScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView
+      // Фон обязателен именно здесь. При behavior="padding" этот контейнер
+      // добавляет снизу отступ под клавиатуру, а тёмный фон был только у
+      // содержимого ScrollView — в отступе просвечивал системный белый. У
+      // клавиатуры скруглены верхние углы, поэтому по бокам над ней он и
+      // выглядел как два белых треугольника.
+      style={{ flex: 1, backgroundColor: '#0a0a0c' }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         {/* Кнопка {t.common.back} */}
         <TouchableOpacity
@@ -362,8 +386,10 @@ export default function AddAccountScreen() {
                 hasError={shows('phone') && missing.phone}
                 disabled={loading}
               />
-              {shows('phone') && phoneErrorKey && (
+              {shows('phone') && phoneErrorKey ? (
                 <Text style={styles.fieldErrorText}>{fieldError(phoneErrorKey)}</Text>
+              ) : (
+                <Text style={styles.fieldHintText}>{t.auth.phoneOptional}</Text>
               )}
             </View>
             <TextInput
@@ -439,6 +465,12 @@ const styles = StyleSheet.create({
   inputError: { borderColor: '#FF3B30' },
   fieldErrorText: {
     color: '#FF6B6B',
+    fontSize: 12.5,
+    marginTop: 6,
+    marginLeft: 4,
+  },
+  fieldHintText: {
+    color: 'rgba(244,244,245,0.4)',
     fontSize: 12.5,
     marginTop: 6,
     marginLeft: 4,

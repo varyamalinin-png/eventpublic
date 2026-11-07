@@ -14,6 +14,7 @@ interface TopBarProps {
   exploreTab?: 'GLOB' | 'FRIENDS'; // Тип ленты explore для передачи в карту
   onFilterPress?: () => void; // Функция для открытия/закрытия фильтров
   activeFiltersCount?: number; // Количество активных фильтров
+  onSettingsPress?: () => void; // Показывает кнопку настроек в том же ряду, тем же стилем, что calendar/map
 }
 
 export default function TopBar({
@@ -26,6 +27,7 @@ export default function TopBar({
   exploreTab,
   onFilterPress,
   activeFiltersCount = 0,
+  onSettingsPress,
 }: TopBarProps) {
   const router = useRouter();
 
@@ -54,7 +56,11 @@ export default function TopBar({
           onChangeText={onSearchChange}
         />
         {onFilterPress && (
-          <TouchableOpacity style={styles.iconPill} onPress={onFilterPress} hitSlop={8}>
+          // Отдельный компактный стиль, а не iconPill: 38×38 внутри строки
+          // поиска (у неё paddingVertical: 11) раздувал её до ~62px, из-за
+          // чего на Explore верхняя панель была заметно выше, чем в профиле
+          // и в Memories, где фильтра нет.
+          <TouchableOpacity style={styles.filterPill} onPress={onFilterPress} hitSlop={8}>
             <AppIcon name="filter" size={16} color={Palette.textDim} />
             {activeFiltersCount > 0 && (
               <View style={styles.filterBadge}>
@@ -74,6 +80,12 @@ export default function TopBar({
       {showMap && (
         <TouchableOpacity style={styles.iconPill} onPress={handleMapPress} hitSlop={6}>
           <AppIcon name="map" size={18} color={Palette.text} />
+        </TouchableOpacity>
+      )}
+
+      {onSettingsPress && (
+        <TouchableOpacity style={styles.iconPill} onPress={onSettingsPress} hitSlop={6}>
+          <AppIcon name="settings" size={18} color={Palette.text} />
         </TouchableOpacity>
       )}
     </View>
@@ -106,6 +118,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Palette.text,
     letterSpacing: 0.1,
+  },
+  // Кнопка фильтра ВНУТРИ строки поиска. Высоту строки задаёт самый высокий
+  // ребёнок, поэтому она держится вровень с иконкой поиска (17px) — иначе
+  // строка распухала до 62px против 41px в профиле и Memories.
+  filterPill: {
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
   },
   iconPill: {
     width: 38,

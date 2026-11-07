@@ -4,6 +4,7 @@ import { apiRequest, ApiError } from '../../services/api';
 import type { Chat, ChatMessage, Event, EventRequest, EventProfile } from '../../types';
 import type { ServerUser, ServerChat, ServerChatMessage } from '../../types/api';
 import { createLogger } from '../../utils/logger';
+import { USER_NAME_FALLBACK } from '../../context/EventsContext.helpers';
 
 const logger = createLogger('Chats');
 
@@ -129,8 +130,17 @@ export function useChats({
             const otherUserId = chat.participants.find(p => p !== currentUserIdValue);
             if (otherUserId) {
               const otherUserData = getUserData(otherUserId);
-              if (otherUserData) {
-                chat.name = otherUserData.name || otherUserData.username || t.chat.chatFallback;
+              // Служебную заглушку сюда не пишем. applyServerUserDataToState
+              // выше — это setState, он ещё не применён в этом тике, поэтому
+              // профиль собеседника может быть неизвестен, и раньше в chat.name
+              // ЗАМОРАЖИВАЛОСЬ «Пользователь» до следующей синхронизации.
+              // Имя всё равно считается на рендере (utils/chatDisplayName).
+              const resolvedName =
+                otherUserData?.name && otherUserData.name !== USER_NAME_FALLBACK
+                  ? otherUserData.name
+                  : otherUserData?.username;
+              if (resolvedName) {
+                chat.name = resolvedName;
               }
             }
           }
@@ -419,8 +429,12 @@ export function useChats({
     try {
       const payload: any = { content: text };
       if (eventId) payload.eventId = eventId;
-      // postId не отправляем на сервер (сервер не принимает это поле)
-      // но сохраним его в локальном состоянии сообщения
+      // КРИТИЧЕСКИ ВАЖНО: раньше postId нарочно не отправлялся (сервер его не
+      // принимал) — из-за этого получатель видел просто событие вместо
+      // конкретного мемориз-поста, которым с ним поделились: сервер теперь
+      // хранит и отдаёт postId (Message.postId в schema.prisma), так что
+      // отправляем его как обычное поле.
+      if (postId) payload.postId = postId;
 
       const response = await apiRequest(
         `/chats/${chatId}/messages`,

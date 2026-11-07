@@ -21,6 +21,7 @@ export interface ServerUser {
   accountType?: 'personal' | 'business';
   dateOfBirth?: string;
   showAge?: boolean;
+  gender?: string | null;
   [key: string]: unknown; // Для дополнительных полей
 }
 
