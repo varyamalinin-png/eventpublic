@@ -4,9 +4,12 @@ import { ChatsService } from './chats.service';
 import { ChatsController } from './chats.controller';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
+    // ApnsService и FcmService — для пушей о новых сообщениях (iOS и Android).
+    NotificationsModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: async (config: ConfigService) => ({

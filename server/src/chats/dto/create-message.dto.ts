@@ -9,4 +9,8 @@ export class CreateMessageDto {
   @IsOptional()
   @IsUUID()
   eventId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  postId?: string;
 }

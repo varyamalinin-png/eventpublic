@@ -5,6 +5,8 @@ import {
   PutObjectCommand,
   HeadBucketCommand,
   CreateBucketCommand,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -72,6 +74,52 @@ export class StorageService {
 
   getMaxFileSizeBytes() {
     return this.maxFileSizeBytes;
+  }
+
+  /**
+   * Remove media uploaded by an account before its database rows are deleted.
+   * Upload keys are scoped to the uploader under users/<id>/ and
+   * events/<id>/; listing these two exact prefixes also catches variants and
+   * temporary uploads whose URL is no longer present in the database.
+   */
+  async deleteUserMedia(userId: string) {
+    const prefixes = [`users/${userId}/`, `events/${userId}/`];
+
+    for (const Prefix of prefixes) {
+      let ContinuationToken: string | undefined;
+      do {
+        const page = await this.s3.send(
+          new ListObjectsV2Command({
+            Bucket: this.bucket,
+            Prefix,
+            ContinuationToken,
+          }),
+        );
+        const keys = (page.Contents ?? [])
+          .map((object) => object.Key)
+          .filter((key): key is string => Boolean(key));
+
+        for (let offset = 0; offset < keys.length; offset += 1000) {
+          const result = await this.s3.send(
+            new DeleteObjectsCommand({
+              Bucket: this.bucket,
+              Delete: {
+                Objects: keys.slice(offset, offset + 1000).map((Key) => ({ Key })),
+                Quiet: true,
+              },
+            }),
+          );
+          if (result.Errors?.length) {
+            this.logger.error(
+              `Failed to delete ${result.Errors.length} media object(s) for an account deletion`,
+            );
+            throw new Error('Could not delete all account media');
+          }
+        }
+
+        ContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+      } while (ContinuationToken);
+    }
   }
 
   async uploadUserAvatar(userId: string, { buffer, mimetype, originalName }: UploadParams) {

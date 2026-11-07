@@ -44,6 +44,12 @@ enum NotificationType {
   EVENT_ORGANIZER_TRANSFERRED
   EVENT_JOIN_REQUEST
   EVENT_REQUEST_ACCEPTED
+  // Добавлены 2026-09-11. Сборки до 1.0.0 (4) их не знают — см.
+  // EXTENDED_NOTIFICATION_TYPES в notifications.service.ts.
+  FRIEND_REQUEST_ACCEPTED
+  EVENT_INVITE_DECLINED
+  EVENT_POST_LIKED
+  EVENT_POST_COMMENTED
 }
 
 enum ComplaintType {
@@ -87,9 +93,12 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  organizedEvents Event[]              @relation("OrganizerEvents")
-  memberships     EventMembership[]
-  personalPhotos  EventPersonalPhoto[]
+  organizedEvents  Event[]                 @relation("OrganizerEvents")
+  memberships      EventMembership[]
+  personalPhotos   EventPersonalPhoto[]
+  memoryVisibility EventMemoryVisibility[] @relation("EventMemoryVisibility")
+  blocksMade       UserBlock[]             @relation("UserBlockBlocker")
+  blocksReceived   UserBlock[]             @relation("UserBlockBlocked")
 
   chatParticipants ChatParticipant[]
   messages         Message[]         @relation("UserMessages")
@@ -104,6 +113,7 @@ model User {
   eventProfilePosts        EventProfilePost[]        @relation("EventProfilePostAuthor")
   eventProfileParticipants EventProfileParticipant[] @relation("EventProfileParticipant")
   eventParticipations      UserEventParticipation[]  @relation("UserEventParticipation")
+  pushTokens               PushToken[]
   postComments             PostComment[]             @relation("PostCommentAuthor")
   notifications            Notification[]
   refreshTokens            RefreshToken[]
@@ -149,15 +159,17 @@ model Event {
   createdAt            DateTime   @default(now())
   updatedAt            DateTime   @updatedAt
 
-  organizer      User                     @relation("OrganizerEvents", fields: [organizerId], references: [id])
-  memberships    EventMembership[]
-  personalPhotos EventPersonalPhoto[]
-  profile        EventProfile?
-  chat           Chat?                    @relation("EventChat")
-  messages       Message[]
-  complaints     Complaint[]
-  participations UserEventParticipation[]
-  eventFolders   EventFolderEvent[]
+  organizer          User                     @relation("OrganizerEvents", fields: [organizerId], references: [id])
+  memberships        EventMembership[]
+  personalPhotos     EventPersonalPhoto[]
+  profile            EventProfile?
+  chat               Chat?                    @relation("EventChat")
+  messages           Message[]
+  complaints         Complaint[]
+  participations     UserEventParticipation[]
+  eventFolders       EventFolderEvent[]
+  organizerTransfers OrganizerTransfer[]
+  memoryVisibility   EventMemoryVisibility[]
 
   @@index([organizerId])
   @@index([startTime])
@@ -231,6 +243,7 @@ model EventProfilePost {
   profile  EventProfile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
   author   User          @relation("EventProfilePostAuthor", fields: [authorId], references: [id])
   comments PostComment[]
+  messages Message[]
 }
 
 model PostComment {
@@ -248,15 +261,38 @@ model PostComment {
 }
 
 model EventProfileParticipant {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   profileId String
   userId    String
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
+  // Вышел из события. Строку не удаляем: участники прошедшего события должны
+  // видеть в списке и тех, кто вышел, с пометкой. Для всех остальных такие
+  // строки отфильтровываются (см. EventProfilesService.getProfile).
+  leftAt    DateTime?
 
   profile EventProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
   user    User         @relation("EventProfileParticipant", fields: [userId], references: [id])
 
   @@unique([profileId, userId])
+}
+
+// Видимость ПРОШЕДШЕГО события в профиле конкретного человека.
+//
+// Настройка личная: она решает, кто увидит это событие в «меморис» именно
+// этого пользователя. У других участников того же события своя строка (или
+// её нет вовсе, и тогда событие у них видно всем).
+model EventMemoryVisibility {
+  id         String   @id @default(uuid())
+  eventId    String
+  userId     String
+  visibility String // 'friends' | 'only_me' ('all' — строки просто нет)
+  updatedAt  DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation("EventMemoryVisibility", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@index([userId])
 }
 
 model UserEventParticipation {
@@ -276,6 +312,26 @@ model UserEventParticipation {
   @@index([eventId])
   // Убран индекс на participationDates, так как массив может быть слишком большим для ежедневных событий
   @@index([status])
+}
+
+// Блокировка одного пользователя другим.
+//
+// Строка односторонняя: A заблокировал B. Но действует она в обе стороны —
+// друг друга они не видят ни в лентах, ни в поиске, ни в заявках, и написать
+// тоже не могут. Так требует и App Store (Guideline 1.2), и здравый смысл:
+// иначе заблокированный продолжал бы видеть того, кто от него закрылся.
+model UserBlock {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("UserBlockBlocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("UserBlockBlocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
 }
 
 model UserFolder {
@@ -334,12 +390,14 @@ model Message {
   senderId  String
   content   String?
   eventId   String?
+  postId    String?
   readBy    String[] @default([])
   createdAt DateTime @default(now())
 
   chat      Chat              @relation(fields: [chatId], references: [id])
   sender    User              @relation("UserMessages", fields: [senderId], references: [id])
   event     Event?            @relation(fields: [eventId], references: [id])
+  post      EventProfilePost? @relation(fields: [postId], references: [id])
   chatLast  Chat?             @relation("ChatLastMessage")
   reactions MessageReaction[]
 
@@ -446,8 +504,8 @@ model RefreshToken {
 }
 
 model EmailVerificationToken {
-  id     String @id @default(uuid())
-  userId String
+  id        String   @id @default(uuid())
+  userId    String
   // Шестизначный код. Уникальность намеренно не глобальная: код действителен
   // только вместе со своим пользователем, иначе им можно было бы подтвердить
   // чужой аккаунт, да и миллиона вариантов на всю таблицу не хватит.
@@ -466,7 +524,12 @@ model EmailVerificationToken {
 model PasswordResetToken {
   id        String   @id @default(uuid())
   userId    String
-  token     String   @unique
+  // Шестизначный код, как и у подтверждения адреса. Уникальность намеренно
+  // не глобальная: код действителен только в паре со своим пользователем.
+  // Раньше здесь лежала 64-символьная hex-строка, которую можно было прислать
+  // только ссылкой из письма — а ссылок в письмах больше нет.
+  token     String
+  attempts  Int      @default(0)
   expiresAt DateTime
   createdAt DateTime @default(now())
 
@@ -474,6 +537,7 @@ model PasswordResetToken {
 
   @@index([userId])
   @@index([expiresAt])
+  @@index([userId, token])
 }
 
 model PersonalChatKey {
@@ -485,6 +549,48 @@ model PersonalChatKey {
 
   @@unique([userAId, userBId])
   @@index([userAId, userBId])
+}
+
+// Передача роли организатора — с подтверждением.
+//
+// Раньше роль переходила мгновенно: событие просто оказывалось у другого
+// человека, и отказаться было нельзя. Теперь это заявка, которую адресат
+// принимает или отклоняет, и до принятия организатор не меняется.
+model OrganizerTransfer {
+  id         String   @id @default(uuid())
+  eventId    String
+  fromUserId String
+  toUserId   String
+  status     String   @default("PENDING") // PENDING | ACCEPTED | REJECTED
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([toUserId, status])
+  @@index([eventId])
+}
+
+// Токен устройства для пуш-уведомлений.
+//
+// Токен APNs привязан к паре «приложение + устройство», а не к пользователю:
+// на одном телефоне можно переключать аккаунты, и один аккаунт может быть на
+// нескольких устройствах. Поэтому уникален сам токен, а userId просто
+// переписывается на текущего владельца.
+model PushToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  String // 'ios' | 'android'
+  // Язык интерфейса устройства: сервер не знает про AsyncStorage клиента,
+  // а текст пуша надо на чём-то писать. Приходит вместе с токеном.
+  language  String   @default("en")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model EventFolder {

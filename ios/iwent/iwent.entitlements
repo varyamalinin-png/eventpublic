@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-  <dict/>
+  <dict>
+    <!-- Universal links: без этого приложение не заявляет, что обслуживает
+         ссылки iwent.ru, и https://iwent.ru/... открывается в браузере.
+         Парная настройка — ios.associatedDomains в корневом app.json (нужна
+         для expo prebuild/EAS, нативный проект здесь уже готов). -->
+    <!-- Пуш-уведомления. Значение development соответствует тому, чем
+         подписываются локальные сборки (профиль разработки).
+         ВАЖНО: для сборки в App Store здесь должно быть production —
+         дистрибутивный профиль другого значения не разрешает. -->
+    <key>aps-environment</key>
+    <string>development</string>
+
+    <key>com.apple.developer.associated-domains</key>
+    <array>
+      <string>applinks:iwent.ru</string>
+      <string>applinks:www.iwent.ru</string>
+    </array>
+  </dict>
 </plist>

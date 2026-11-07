@@ -39,6 +39,17 @@ export class TagsService {
       autoTags.push('women_only');
     }
 
+    // Men only — зеркально. Этой метки не было вовсе, поэтому «men only» не
+    // находилось ни в фильтрах поиска, ни на карточке, хотя выбор в форме был.
+    const isMenOnly =
+      Array.isArray(event.genderRestriction) &&
+      event.genderRestriction.length === 1 &&
+      event.genderRestriction[0] === 'male';
+
+    if (isMenOnly) {
+      autoTags.push('men_only');
+    }
+
     // 18+
     if (event.ageRestriction && typeof event.ageRestriction === 'object') {
       const ageRestriction = event.ageRestriction as { min?: number; max?: number };

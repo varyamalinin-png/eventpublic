@@ -64,7 +64,11 @@ export class ImageOptimizerService {
       // пиксели и убирает тег — иначе телефонные фото (особенно снятые в портрете)
       // остаются "лежащими на боку" при конвертации в WebP, чья поддержка EXIF-
       // ориентации у разных декодеров непоследовательна.
-      let image = sharp(buffer).rotate();
+      // .toColourspace('srgb') прижимает картинку к 8 битам на канал.
+      // 16-битный PNG (48 bpp) sharp сохранил бы 16-битным, а ImageIO на iOS
+      // такие декодирует по медленному пути и сыпет в лог
+      // "kCGImageBlockFormatBGRx8 is called for 48-bpp (16-bpc) image".
+      let image = sharp(buffer).rotate().toColourspace('srgb');
 
       // Изменяем размер, если нужно
       if (metadata.width && metadata.height) {
@@ -85,7 +89,14 @@ export class ImageOptimizerService {
       if (outputFormat === 'webp') {
         buffer = await image.webp({ quality }).toBuffer();
       } else if (outputFormat === 'png') {
-        buffer = await image.png({ compressionLevel: 9, quality }).toBuffer();
+        // ВАЖНО: quality у sharp.png() включает palette: true, то есть отдаёт
+        // PNG с палитрой (indexed color). На iOS декодер таких PNG битый —
+        // SDWebImage ловит это ("Detected the current OS's ImageIO PNG Decoder
+        // is buggy on indexed color PNG") и декодирует обходным путём, заметно
+        // медленнее. Поэтому палитру выключаем явно и quality не передаём.
+        buffer = await image
+          .png({ compressionLevel: 9, palette: false })
+          .toBuffer();
       } else {
         buffer = await image.jpeg({ quality, mozjpeg: true }).toBuffer();
       }

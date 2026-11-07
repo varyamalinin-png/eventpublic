@@ -3,14 +3,14 @@
     "name": "iwent",
     "scheme": "iwent",
     "slug": "iwent",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/splash-symbol.png",
       "resizeMode": "contain",
       "backgroundColor": "#0a0a0c"
     },
@@ -20,9 +20,13 @@
       "web"
     ],
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.varyamalinina.iwent",
-      "buildNumber": "1",
+      "associatedDomains": [
+        "applinks:iwent.ru",
+        "applinks:www.iwent.ru"
+      ],
+      "buildNumber": "6",
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false,
@@ -37,13 +41,18 @@
             }
           }
         },
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Приложение использует ваше местоположение, чтобы показывать события на карте рядом с вами. В фоновом режиме местоположение не используется."
+      },
+      "entitlements": {
+        "aps-environment": "development"
       }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FFA500"
+        "foregroundImage": "./assets/branding/android-adaptive-foreground.png",
+        "backgroundImage": "./assets/branding/android-adaptive-background.png",
+        "monochromeImage": "./assets/branding/android-adaptive-foreground.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -53,7 +62,14 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
-      "package": "com.varyamalinina.iwent"
+      "package": "com.varyamalinina.iwent",
+      "versionCode": 1,
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAqUq4AA5LhTHf0M_-z5GG3BOixuPszrd8"
+        }
+      },
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -65,24 +81,25 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Приложение использует доступ к фотографиям для добавления изображений к событиям.",
-          "cameraPermission": "Приложение использует доступ к камере для добавления фотографий к событиям."
+          "photosPermission": "iWent needs access to your photos so you can add images to your events.",
+          "cameraPermission": "iWent uses the camera so you can take photos for your events."
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Приложение использует ваше местоположение для отображения событий на карте рядом с вами."
+          "locationWhenInUsePermission": "iWent uses your location to show events on the map near you."
         }
       ],
       [
         "expo-av",
         {
-          "microphonePermission": "Приложение использует доступ к микрофону для записи аудио.",
-          "cameraPermission": "Приложение использует доступ к камере для записи видео."
+          "microphonePermission": false,
+          "cameraPermission": "iWent uses the camera so you can take photos for your events."
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-notifications"
     ],
     "extra": {
       "router": {

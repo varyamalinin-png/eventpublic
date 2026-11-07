@@ -1,25 +1,15 @@
-'use client';
+// Старый адрес события. Приложение делится ссылками вида /event-profile/<id>
+// (см. client/components/EventShareModal), а эта страница осталась с прежних
+// времён и рисовала тот же экран вторым, ничего при этом не зная о входе.
+// Чтобы у события был один адрес, просто переводим сюда пришедших по старой
+// ссылке.
+import { redirect } from 'next/navigation';
 
-import dynamic from 'next/dynamic';
-import { PageLoading } from '@/web/components/PageLoading';
-
-const EventScreen = dynamic(
-  () => import('@/client/app/event-profile/[id]').then(mod => ({ default: mod.default })),
-  { ssr: false, loading: () => <PageLoading /> }
-);
-
-export default function EventPage() {
-  return (
-    <>
-      {/* Десктопный layout - показывается через CSS media queries на экранах >= 768px */}
-      
-      {/* Мобильный layout - показывается по умолчанию, скрывается через CSS на десктопе */}
-      <div className="mobile-layout">
-      <div style={{ width: '100%', height: '100vh' }}>
-        <EventScreen />
-        </div>
-      </div>
-    </>
-  );
+export default async function LegacyEventPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  redirect(`/event-profile/${id}`);
 }
-

@@ -1,7 +1,11 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { MembershipStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { isBlockedBetween } from '../shared/blocks';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { WebSocketService } from '../ws/websocket.service';
+import { ApnsService } from '../notifications/apns.service';
+import { FcmService } from '../notifications/fcm.service';
 
 @Injectable()
 export class ChatsService {
@@ -10,6 +14,8 @@ export class ChatsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly websocketService: WebSocketService,
+    private readonly apnsService: ApnsService,
+    private readonly fcmService: FcmService,
   ) {}
 
   async listChatsForUser(userId: string) {
@@ -51,10 +57,19 @@ export class ChatsService {
       select: { id: true },
     });
     
-    // Затем находим события, где пользователь является участником (через EventMembership)
+    /**
+     * Затем — события, где пользователь ПРИНЯТЫЙ участник.
+     *
+     * Статус здесь обязателен. Заявка на участие создаёт ту же строку
+     * EventMembership со статусом PENDING, поэтому без фильтра чат события
+     * появлялся в списке сообщений сразу после нажатия «GO» — до того, как
+     * организатор вообще увидел заявку. И оставался там после отказа
+     * (REJECTED) и после выхода из события (CANCELLED).
+     */
     const participatedEvents = await this.prisma.eventMembership.findMany({
       where: {
         userId,
+        status: MembershipStatus.ACCEPTED,
       },
       select: { eventId: true },
     });
@@ -176,7 +191,9 @@ export class ChatsService {
           event: {
             include: {
               memberships: {
-                where: { userId },
+                // Только принятые: по заявке в статусе PENDING переписку
+                // события читать нельзя.
+                where: { userId, status: MembershipStatus.ACCEPTED },
               },
             },
           },
@@ -215,12 +232,64 @@ export class ChatsService {
   }
 
   async createMessage(userId: string, chatId: string, dto: CreateMessageDto) {
+    /**
+     * В личный чат с заблокированным писать нельзя — ни ему мне, ни мне ему.
+     * Событийные чаты не трогаем: там люди вместе на событии, и блокировка
+     * решается выходом из события, а не тишиной в общем чате.
+     */
+    const chatForBlockCheck = await this.prisma.chat.findUnique({
+      where: { id: chatId },
+      select: {
+        type: true,
+        participants: { select: { userId: true } },
+        event: {
+          select: {
+            organizerId: true,
+            memberships: {
+              where: { userId, status: MembershipStatus.ACCEPTED },
+              select: { id: true },
+            },
+          },
+        },
+      },
+    });
+
+    /**
+     * Писать может только тот, кто в чате состоит, — а для событийного чата
+     * ещё и организатор или принятый участник, даже если из самого чата он
+     * вышел. Проверки здесь не было вовсе: зная id чата, отправить сообщение
+     * мог кто угодно, включая человека с неподтверждённой заявкой.
+     */
+    if (!chatForBlockCheck) {
+      throw new ForbiddenException('Chat not found');
+    }
+    const isChatParticipant = chatForBlockCheck.participants.some(
+      participant => participant.userId === userId,
+    );
+    const isEventMember =
+      chatForBlockCheck.event != null &&
+      (chatForBlockCheck.event.organizerId === userId ||
+        chatForBlockCheck.event.memberships.length > 0);
+    if (!isChatParticipant && !isEventMember) {
+      throw new ForbiddenException('You are not a participant of this chat');
+    }
+
+    if (chatForBlockCheck.type === 'PERSONAL') {
+      const other = chatForBlockCheck.participants
+        .map(participant => participant.userId)
+        .find(id => id !== userId);
+      if (other && (await isBlockedBetween(this.prisma, userId, other))) {
+        throw new ForbiddenException('Messaging is not available for this user');
+      }
+    }
+
     const message = await this.prisma.message.create({
       data: {
         chatId,
         senderId: userId,
         content: dto.content,
         eventId: dto.eventId,
+        postId: dto.postId,
       },
       include: {
         sender: { select: { id: true, name: true, username: true, avatarUrl: true } },
@@ -245,15 +314,73 @@ export class ChatsService {
         participants: {
           select: { userId: true },
         },
+        event: { select: { title: true } },
       },
     });
     
     if (chat) {
       const participantIds = chat.participants.map(p => p.userId);
       this.websocketService.emitToUsers(participantIds, 'chats:update', {});
+      // Пуш не ждём: он не должен задерживать ответ отправителю.
+      void this.pushNewMessage(chat, message, participantIds, userId);
     }
 
     return message;
+  }
+
+  /**
+   * Пуш о новом сообщении — всем участникам чата, кроме автора.
+   *
+   * Сообщения не создают запись в ленте уведомлений (там их было бы слишком
+   * много), поэтому общая воронка NotificationsService.createNotification их
+   * не видит — и пушей о сообщениях не было вовсе. Отправляем напрямую.
+   */
+  private async pushNewMessage(
+    chat: { id: string; type: string; name?: string | null; event?: { title: string } | null },
+    message: {
+      content: string | null;
+      eventId?: string | null;
+      postId?: string | null;
+      sender?: { name?: string | null; username?: string | null } | null;
+    },
+    participantIds: string[],
+    senderId: string,
+  ) {
+    const recipients = participantIds.filter(id => id !== senderId);
+    if (recipients.length === 0) return;
+
+    const who = message.sender?.name || message.sender?.username || '';
+    const raw = (message.content || '').trim();
+    const preview = raw.length > 140 ? `${raw.slice(0, 137)}…` : raw;
+    const isEventChat = chat.type === 'EVENT';
+
+    const buildMessageText = (language: string) => {
+      const en = language === 'en';
+      const fallback = en ? 'New message' : 'Новое сообщение';
+      const body =
+        preview ||
+        (message.postId
+          ? en ? 'Shared a post' : 'Поделился(ась) публикацией'
+          : message.eventId
+            ? en ? 'Shared an event' : 'Поделился(ась) событием'
+            : fallback);
+      if (isEventChat) {
+        return {
+          title: chat.event?.title || chat.name || 'iwent',
+          body: who ? `${who}: ${body}` : body,
+        };
+      }
+      return { title: who || fallback, body };
+    };
+    const messageData = { type: 'MESSAGE', chatId: chat.id };
+
+    // iOS и Android: каждый сервис берёт только свои токены по platform.
+    await Promise.all(
+      recipients.flatMap(recipientId => [
+        this.apnsService.sendToUser(recipientId, buildMessageText, messageData),
+        this.fcmService.sendToUser(recipientId, buildMessageText, messageData),
+      ]),
+    ).catch(error => this.logger.warn(`Пуш о сообщении не отправлен: ${(error as Error).message}`));
   }
 
   async markMessagesAsRead(userId: string, chatId: string) {
@@ -465,7 +592,7 @@ export class ChatsService {
           where: { id: chat.eventId },
           include: {
             memberships: {
-              where: { userId },
+              where: { userId, status: MembershipStatus.ACCEPTED },
             },
           },
         });
@@ -500,7 +627,13 @@ export class ChatsService {
       data: {
         chatId: chat.id,
         senderId: userId,
-        content: `${userName} покинул(а) чат`,
+        // Языконезависимый маркер, а не готовый текст: клиент подставляет
+        // формулировку из своей локали. Раньше здесь лежала русская фраза,
+        // и в английском интерфейсе она такой и оставалась — текст сообщения
+        // хранится в базе, поменять его постфактум нельзя.
+        // Формат: [[sys:<событие>]]<данные>. Старые записи клиент
+        // распознаёт по прежнему русскому тексту (см. utils/systemMessage.ts).
+        content: `[[sys:left_chat]]${userName}`,
       },
       include: { sender: { select: { id: true, name: true, username: true, avatarUrl: true } } },
     });
@@ -539,7 +672,7 @@ export class ChatsService {
         where: { id: chat.eventId },
         include: {
           memberships: {
-            where: { userId },
+            where: { userId, status: MembershipStatus.ACCEPTED },
           },
         },
       });

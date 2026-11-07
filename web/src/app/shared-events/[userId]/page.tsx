@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import { PageLoading } from '@/web/components/PageLoading';
 
 const SharedEventsScreen = dynamic(
-  () => import('@/client/app/shared-events/[userId]').then(mod => ({ default: mod.default })),
+  () => import('@/client/screens/SharedEventsScreen').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

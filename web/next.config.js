@@ -23,13 +23,17 @@ const nextConfig = {
       'expo-haptics': path.resolve(__dirname, 'src/lib/expo-haptics-stub.js'),
       'expo-image-manipulator': path.resolve(__dirname, 'src/lib/expo-image-manipulator-stub.js'),
       'expo-secure-store': path.resolve(__dirname, 'src/lib/expo-secure-store-stub.js'),
+      'expo-notifications': path.resolve(__dirname, 'src/lib/expo-notifications-stub.js'),
       'react-native-gesture-handler': path.resolve(__dirname, 'src/lib/react-native-gesture-handler-stub.js'),
       'expo-constants': path.resolve(__dirname, 'src/lib/expo-constants-stub.js'),
+      'expo-splash-screen': path.resolve(__dirname, 'src/lib/expo-splash-screen-stub.js'),
       'expo-modules-core': path.resolve(__dirname, 'src/lib/expo-modules-core-stub.js'),
       'expo-image-picker': path.resolve(__dirname, 'src/lib/expo-image-picker-stub.js'),
       'expo-linear-gradient': path.resolve(__dirname, 'src/lib/expo-linear-gradient-stub.js'),
       'expo-auth-session': path.resolve(__dirname, 'src/lib/expo-auth-session-stub.js'),
       'expo-web-browser': path.resolve(__dirname, 'src/lib/expo-web-browser-stub.js'),
+      '@react-navigation/native': path.resolve(__dirname, 'src/lib/react-navigation-stub.js'),
+      'react-native-safe-area-context': path.resolve(__dirname, 'src/lib/react-native-safe-area-context-stub.js'),
       // Алиасы для компонентов и утилит
       '@/components': path.resolve(__dirname, '../components'),
       '@/hooks': path.resolve(__dirname, '../hooks'),
@@ -165,6 +169,15 @@ const nextConfig = {
         source: '/:all*(svg|jpg|jpeg|png|webp|avif|ico|woff|woff2)',
         headers: [
           { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+      {
+        // Universal links: Apple требует отдавать этот файл как application/json.
+        // У файла нет расширения, поэтому Next отдавал его
+        // application/octet-stream, и проверка ассоциации домена не проходила.
+        source: '/.well-known/apple-app-site-association',
+        headers: [
+          { key: 'Content-Type', value: 'application/json' },
         ],
       },
     ];

@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import { PageLoading } from '@/web/components/PageLoading';
 
 const ChatScreen = dynamic(
-  () => import('@/client/app/(tabs)/inbox/[chatId]').then(mod => ({ default: mod.default })),
+  () => import('@/client/app/(tabs)/(inbox)/inbox/[chatId]').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

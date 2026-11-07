@@ -28,6 +28,13 @@ export class FriendsController {
     return this.friendsService.listFriends(userId);
   }
 
+  // Статический сегмент, отдельный от `:friendId`, — чтобы маршрут не спорил
+  // с параметрическими и не зависел от порядка регистрации.
+  @Get('user/:userId')
+  listUserFriends(@Param('userId') userId: string) {
+    return this.friendsService.listUserFriends(userId);
+  }
+
   @Get('requests')
   listRequests(@RequestUser('userId') userId: string) {
     return this.friendsService.listRequests(userId);

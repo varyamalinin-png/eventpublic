@@ -3,6 +3,9 @@ import { NotificationsService } from './notifications.service';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { RequestUser } from '../shared/decorators/request-user.decorator';
 
+/** `?extended=1` — клиент знает новые типы уведомлений (сборка 4 и новее). */
+const isOn = (value?: string) => value === '1' || value === 'true';
+
 @Controller('notifications')
 @UseGuards(JwtAuthGuard)
 export class NotificationsController {
@@ -12,14 +15,18 @@ export class NotificationsController {
   async getNotifications(
     @RequestUser('userId') userId: string,
     @Query('includeRead') includeRead?: string,
+    @Query('extended') extended?: string,
   ) {
     const includeReadBool = includeRead === 'true';
-    return this.notificationsService.getUserNotifications(userId, includeReadBool);
+    return this.notificationsService.getUserNotifications(userId, includeReadBool, isOn(extended));
   }
 
   @Get('unread-count')
-  async getUnreadCount(@RequestUser('userId') userId: string) {
-    const count = await this.notificationsService.getUnreadCount(userId);
+  async getUnreadCount(
+    @RequestUser('userId') userId: string,
+    @Query('extended') extended?: string,
+  ) {
+    const count = await this.notificationsService.getUnreadCount(userId, isOn(extended));
     return { count };
   }
 

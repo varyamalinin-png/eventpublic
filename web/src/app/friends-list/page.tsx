@@ -5,7 +5,7 @@ import { PageLoading } from '@/web/components/PageLoading';
 import { Providers } from '../providers';
 
 const FriendsListScreen = dynamic(
-  () => import('@/client/app/friends-list').then(mod => ({ default: mod.default })),
+  () => import('@/client/screens/FriendsListScreen').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

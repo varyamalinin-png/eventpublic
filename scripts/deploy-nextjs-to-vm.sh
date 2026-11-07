@@ -1,9 +1,10 @@
 #!/bin/bash
 # Скрипт для деплоя Next.js приложения на прод-VM
 #
-# Прод (iwent.ru): та же VM, что и vk-app — 213.165.213.224
+# Прод (iwent.ru): VM на reg.ru — 91.197.99.213, веб лежит в /opt/iwent/web.
+# До 8 октября 2026 это была VM Яндекса 213.165.213.224; её дата-центр сгорел.
 #   Нужен SSH-доступ: добавьте ваш публичный ключ на сервер:
-#   ssh-copy-id -i ~/.ssh/yandex-cloud.pub ubuntu@213.165.213.224
+#   ssh-copy-id -i ~/.ssh/yandex-cloud.pub root@91.197.99.213
 #   Или вручную: скопировать содержимое ~/.ssh/yandex-cloud.pub в ~/.ssh/authorized_keys на VM.
 #   Затем: ./scripts/deploy-nextjs-to-vm.sh
 #
@@ -13,14 +14,14 @@ set -e
 
 echo "🚀 Деплой Next.js приложения на VM..."
 
-# Переменные: по умолчанию прод-VM iventapp.ru (Next + nginx рядом с /var/www/vk-app)
-VM_USER="${VM_USER:-ubuntu}"
-VM_HOST="${VM_HOST:-213.165.213.224}"
-VM_PATH="/home/ubuntu/iventapp-nextjs"
+# Переменные: по умолчанию прод-VM iwent.ru (Next + nginx на одной машине)
+VM_USER="${VM_USER:-root}"
+VM_HOST="${VM_HOST:-91.197.99.213}"
+VM_PATH="${VM_PATH:-/opt/iwent/web}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/yandex-cloud}"
 SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10"
 
-echo "📍 Цель: ${VM_USER}@${VM_HOST} (ключ: $SSH_KEY)"
+echo "📍 Цель: ${VM_USER}@${VM_HOST}:${VM_PATH} (ключ: $SSH_KEY)"
 
 cd "$(dirname "$0")/.."
 WEB_DIR="$(pwd)/web"
@@ -48,8 +49,8 @@ rsync -avz --delete -e "ssh $SSH_OPTS" \
 
 # Устанавливаем зависимости и запускаем на сервере
 echo "🔧 Устанавливаем зависимости и запускаем приложение..."
-ssh $SSH_OPTS ${VM_USER}@${VM_HOST} << 'ENDSSH'
-cd /home/ubuntu/iventapp-nextjs
+ssh $SSH_OPTS ${VM_USER}@${VM_HOST} "VM_PATH='${VM_PATH}' bash -s" << 'ENDSSH'
+cd "$VM_PATH"
 npm install --production
 # Очищаем кэш Next.js (Full Route Cache), иначе отдаётся старый пререндер
 rm -rf .next/cache

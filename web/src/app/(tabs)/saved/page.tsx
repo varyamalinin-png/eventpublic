@@ -6,7 +6,7 @@ import { PageLoading } from '@/web/components/PageLoading';
 import { useLanguage } from '@/client/context/LanguageContext';
 
 const SavedScreen = dynamicImport(
-  () => import('@/client/app/(tabs)/saved').then(mod => ({ default: mod.default })),
+  () => import('@/client/app/(tabs)/(profile)/saved').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

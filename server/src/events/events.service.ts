@@ -1,5 +1,7 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildEventVisibilityWhere } from './event-visibility';
+import { isBlockedBetween } from '../shared/blocks';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventRole, MembershipStatus, NotificationType, Prisma } from '@prisma/client';
@@ -68,12 +70,26 @@ export class EventsService {
         : undefined;
 
       // Метки - фильтруем дубликаты автоматических тегов из пользовательских
-      // Автоматические теги: 'recurring', 'women_only', 'age_18_plus', 'starting_soon', 'массовое'
-      const autoTagsToFilter = ['recurring', 'women_only', 'age_18_plus', 'starting_soon', 'массовое', 'регулярное', 'women only', '18+'];
+      // Автоматические теги: 'recurring', 'women_only', 'men_only', 'age_18_plus', 'starting_soon', 'массовое'
+      const autoTagsToFilter = ['recurring', 'women_only', 'men_only', 'age_18_plus', 'starting_soon', 'массовое', 'регулярное', 'women only', 'men only', '18+'];
       const filteredCustomTags = (customTags || []).filter(tag => {
         const normalizedTag = tag.toLowerCase().trim();
         return !autoTagsToFilter.some(autoTag => autoTag.toLowerCase().trim() === normalizedTag);
       });
+
+      /**
+       * Приглашения при создании идут не через inviteUser, а прямо здесь,
+       * поэтому те же правила повторяем: не зовём тех, кто не подходит под
+       * ограничение по полу, и тех, от кого событие скрыто настройками
+       * видимости. Иначе «только для мужчин» уходило женщинам, а человек из
+       * списка «все, кроме» получал приглашение и видел событие.
+       */
+      const allowedInviteeIds = await this.filterInvitees(
+        organizerId,
+        invitedUserIds || [],
+        genderRestriction,
+        visibility,
+      );
 
       const event = await this.prisma.event.create({
         data: {
@@ -117,7 +133,7 @@ export class EventsService {
                 status: MembershipStatus.ACCEPTED,
               },
               // Create invitations for invited users
-              ...(invitedUserIds?.map(userId => ({
+              ...(allowedInviteeIds.map(userId => ({
                 userId,
                 role: EventRole.PARTICIPANT,
                 status: MembershipStatus.PENDING,
@@ -277,64 +293,9 @@ export class EventsService {
     const viewerId = params.currentUserId;
     const isOwnProfile = !!(params.organizerId && params.organizerId === viewerId);
     if (!isOwnProfile) {
-      let friendIds: string[] = [];
-      if (viewerId) {
-        const friendships = await this.prisma.friendship.findMany({
-          where: {
-            OR: [
-              { requesterId: viewerId, status: 'ACCEPTED' },
-              { addresseeId: viewerId, status: 'ACCEPTED' },
-            ],
-          },
-          select: { requesterId: true, addresseeId: true },
-        });
-        friendIds = friendships.map(f =>
-          f.requesterId === viewerId ? f.addresseeId : f.requesterId,
-        );
-      }
-
-      const visibilityOr: any[] = [
-        { visibility: { equals: Prisma.AnyNull } },
-        { visibility: { path: ['type'], equals: 'all' } },
-      ];
-      if (viewerId) {
-        // Свои и уже присоединённые события видны всегда.
-        visibilityOr.push({ organizerId: viewerId });
-        visibilityOr.push({ memberships: { some: { userId: viewerId } } });
-        if (friendIds.length > 0) {
-          visibilityOr.push({
-            AND: [
-              { visibility: { path: ['type'], equals: 'friends' } },
-              { organizerId: { in: friendIds } },
-            ],
-          });
-        }
-        visibilityOr.push({
-          AND: [
-            { visibility: { path: ['type'], equals: 'all_except_friends' } },
-            { organizerId: { notIn: [...friendIds, viewerId] } },
-          ],
-        });
-        visibilityOr.push({
-          AND: [
-            { visibility: { path: ['type'], equals: 'all_except_excluded' } },
-            { NOT: { visibility: { path: ['excludedUsers'], array_contains: viewerId } } },
-          ],
-        });
-        visibilityOr.push({
-          AND: [
-            { visibility: { path: ['type'], equals: 'me_and_excluded' } },
-            { visibility: { path: ['excludedUsers'], array_contains: viewerId } },
-          ],
-        });
-      } else {
-        // Анонимный зритель точно не друг организатора и не может быть в
-        // списке-исключении по id — эти два режима остаются для него видимы.
-        visibilityOr.push({ visibility: { path: ['type'], equals: 'all_except_friends' } });
-        visibilityOr.push({ visibility: { path: ['type'], equals: 'all_except_excluded' } });
-      }
-
-      andConditions.push({ OR: visibilityOr });
+      // Условие вынесено в buildEventVisibilityWhere: тем же правилом теперь
+      // пользуются рекомендации и поиск, которые раньше не фильтровали ничего.
+      andConditions.push(await buildEventVisibilityWhere(this.prisma, viewerId));
     }
 
     const whereCondition: any = andConditions.length > 0 ? { AND: andConditions } : {};
@@ -750,6 +711,23 @@ export class EventsService {
     }
     const event = await this.prisma.event.findUnique({ where: { id: eventId } });
     if (!event) throw new BadRequestException('Event not found');
+
+    // К организатору, с которым есть блокировка, не вступаем.
+    if (await isBlockedBetween(this.prisma, userId, event.organizerId)) {
+      throw new ForbiddenException('This event is not available');
+    }
+
+    /**
+     * Ограничение по полу проверяется здесь, а не только в интерфейсе.
+     *
+     * Раньше «только женщины» было просто меткой на карточке: сервер
+     * genderRestriction не читал вовсе, и вступить мог кто угодно. Пол, не
+     * указанный в профиле, не отсекаем — он в регистрации необязателен, и
+     * иначе такие события оказались бы закрыты для большинства людей.
+     */
+    if (!this.fitsGenderRestriction(event.genderRestriction, (user as any).gender)) {
+      throw new ForbiddenException('This event is limited by gender');
+    }
 
     // Check event capacity before allowing join
     const currentCount = await this.prisma.eventMembership.count({
@@ -1225,13 +1203,33 @@ export class EventsService {
       },
       include: {
         event: {
-          select: { id: true, organizerId: true },
+          select: { id: true, organizerId: true, title: true, mediaUrl: true },
         },
+        user: { select: { name: true, username: true } },
       },
     });
 
     // Отправляем WebSocket событие об отклонении приглашения
     if (updatedMembership.event) {
+      // Тому, кто приглашал, — уведомление об отказе. Раньше отказ не оставлял
+      // следа вовсе: приглашение молча пропадало из «Исходящих».
+      if (membership.invitedBy) {
+        void this.notificationsService
+          .createNotification({
+            userId: membership.invitedBy,
+            type: 'EVENT_INVITE_DECLINED' as NotificationType,
+            payload: {
+              actorId: userId,
+              actorName:
+                updatedMembership.user?.name || updatedMembership.user?.username || undefined,
+              eventId: updatedMembership.event.id,
+              eventTitle: updatedMembership.event.title,
+              eventMediaUrl: updatedMembership.event.mediaUrl || undefined,
+            },
+          })
+          .catch(() => undefined);
+      }
+
       await this.websocketService.emitToEventParticipants(
         updatedMembership.event.id,
         userId,
@@ -1369,16 +1367,20 @@ export class EventsService {
         select: { id: true, name: true, username: true },
       });
       
-      // Удаляем пользователя из participants профиля
-      const deleted = await this.prisma.eventProfileParticipant.deleteMany({
+      // Помечаем выход, а не удаляем строку: участники события (и организатор)
+      // должны видеть в списке и тех, кто вышел — с пометкой. Для остальных
+      // такие строки отфильтровываются при чтении профиля.
+      const deleted = await this.prisma.eventProfileParticipant.updateMany({
         where: {
           profileId: profile.id,
           userId: userId,
+          leftAt: null,
         },
+        data: { leftAt: new Date() },
       });
       
-      const remainingCount = profile.participants.length - deleted.count;
-      logger.info(`User removed from event profile for past event, deleted: ${deleted.count}`);
+      const remainingCount = profile.participants.filter(p => !p.leftAt).length - deleted.count;
+      logger.info(`User marked as left in event profile for past event, updated: ${deleted.count}`);
       logger.info(`Remaining participants: ${remainingCount}`);
       
       // КРИТИЧЕСКИ ВАЖНО: Для прошедших событий НЕ применяем правило удаления по количеству участников
@@ -1388,7 +1390,7 @@ export class EventsService {
       
       // Получаем список оставшихся участников ДО удаления (из исходного профиля)
       const remainingParticipantIds = profile.participants
-        .filter(p => p.userId !== userId)
+        .filter(p => p.userId !== userId && !p.leftAt)
         .map(p => p.userId);
       
       // КРИТИЧЕСКИ ВАЖНО: Отправляем WebSocket уведомление другим участникам о том, что список участников обновился
@@ -1416,6 +1418,8 @@ export class EventsService {
         );
       }
       
+      await this.removeEventFromOwnFolders(eventId, userId);
+
       return { success: true, message: 'Removed from event profile', deletedCount: deleted.count };
     }
     
@@ -1446,17 +1450,21 @@ export class EventsService {
     });
 
     if (profile) {
-      const participantsBefore = profile.participants.length;
+      const participantsBefore = profile.participants.filter(p => !p.leftAt).length;
       
-      const deleted = await this.prisma.eventProfileParticipant.deleteMany({
+      // Пометка «вышел» вместо удаления строки — список участников события
+      // должен помнить всех, кто в нём был (см. EventProfileParticipant.leftAt).
+      const deleted = await this.prisma.eventProfileParticipant.updateMany({
         where: {
           profileId: profile.id,
           userId: userId,
+          leftAt: null,
         },
+        data: { leftAt: new Date() },
       });
       
       const remainingCount = participantsBefore - deleted.count;
-      logger.info(`User removed from event profile, remaining participants: ${remainingCount}, isPastEvent: ${isPastEventCheck}`);
+      logger.info(`User marked as left in event profile, remaining participants: ${remainingCount}, isPastEvent: ${isPastEventCheck}`);
       
       // КРИТИЧЕСКИ ВАЖНО: Правило удаления события по количеству участников применяется ТОЛЬКО для предстоящих событий
       // Для прошедших событий (Memories) событие остается для других участников, просто удаленный участник исключается из списка
@@ -1481,7 +1489,7 @@ export class EventsService {
         // Для прошедших событий отправляем WebSocket уведомления другим участникам
         if (profile && remainingCount > 0) {
           const remainingParticipantIds = profile.participants
-            .filter(p => p.userId !== userId)
+            .filter(p => p.userId !== userId && !p.leftAt)
             .map(p => p.userId);
           
           logger.info(`Отправляем WebSocket уведомление оставшимся участникам прошедшего события: ${remainingParticipantIds.length}`);
@@ -1525,7 +1533,31 @@ export class EventsService {
     // Удаляем пользователя из чата события с системным сообщением
     await this.removeUserFromEventChat(eventId, userId, user.name || user.username || 'Пользователь');
 
+    await this.removeEventFromOwnFolders(eventId, userId);
+
     return this.prisma.eventMembership.delete({ where: { id: membership.id } });
+  }
+
+  /**
+   * Вышел из события — убираем его из СВОИХ папок.
+   *
+   * Папка событий — личная подборка; держать в ней событие, из которого
+   * человек вышел, нечего. Раньше запись оставалась, и карточка так и висела
+   * в папке после нажатия «удалить». Чужие папки не трогаем.
+   */
+  private async removeEventFromOwnFolders(eventId: string, userId: string) {
+    try {
+      const folders = await this.prisma.eventFolder.findMany({
+        where: { ownerId: userId },
+        select: { id: true },
+      });
+      if (folders.length === 0) return;
+      await this.prisma.eventFolderEvent.deleteMany({
+        where: { eventId, folderId: { in: folders.map(f => f.id) } },
+      });
+    } catch (error) {
+      logger.warn(`Не удалось убрать событие из папок пользователя: ${error?.message}`);
+    }
   }
   // 🗑️ ОТМЕНА СОБЫТИЯ (organizer, ≤2 участников)
   async cancelEvent(eventId: string, userId: string) {
@@ -1759,6 +1791,101 @@ export class EventsService {
   }
 
   // 👤 ПЕРЕДАЧА РОЛИ ОРГАНИЗАТОРА
+  /**
+   * Передать роль организатора.
+   *
+   * Роль переходит СРАЗУ, согласия принимающего не требуется — он лишь получает
+   * уведомление о том, что стал организатором. Промежуточная заявка с
+   * «принять/отклонить» была лишним шагом: организатор в этот момент уже вышел
+   * из события, и пока адресат не ответил, событие оставалось без хозяина.
+   *
+   * Записи OrganizerTransfer больше не создаются. Прежние висящие заявки
+   * закрываем здесь же, чтобы они не всплывали в уведомлениях.
+   */
+  async requestOrganizerTransfer(eventId: string, currentOrganizerId: string, newOrganizerId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        organizer: { select: { id: true, name: true, username: true } },
+      },
+    });
+    if (!event) throw new BadRequestException('Event not found');
+    if (event.organizerId !== currentOrganizerId) {
+      throw new ForbiddenException('Only the organizer can transfer the role');
+    }
+    if (newOrganizerId === currentOrganizerId) {
+      throw new BadRequestException('Cannot transfer the role to yourself');
+    }
+
+    const result = await this.transferOrganizerRole(eventId, currentOrganizerId, newOrganizerId);
+
+    await this.prisma.organizerTransfer.updateMany({
+      where: { eventId, toUserId: newOrganizerId, status: 'PENDING' },
+      data: { status: 'ACCEPTED' },
+    });
+
+    // Уведомления рассылает transferOrganizerRole — второй раз не пишем.
+
+    this.websocketService.emitToUser(newOrganizerId, 'event:organizer_transfer:status', {
+      eventId,
+      fromUserId: currentOrganizerId,
+      status: 'ACCEPTED',
+    });
+
+    return result;
+  }
+
+  /** Все ожидающие меня предложения стать организатором. */
+  async listOrganizerTransfers(userId: string) {
+    return this.prisma.organizerTransfer.findMany({
+      where: { toUserId: userId, status: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        event: { select: { id: true, title: true, organizerId: true } },
+      },
+    });
+  }
+
+  /** Принять или отклонить предложение стать организатором. */
+  async respondToOrganizerTransfer(transferId: string, userId: string, accept: boolean) {
+    const transfer = await this.prisma.organizerTransfer.findUnique({
+      where: { id: transferId },
+    });
+    if (!transfer) throw new BadRequestException('Transfer not found');
+    if (transfer.toUserId !== userId) {
+      throw new ForbiddenException('This transfer is addressed to another user');
+    }
+    if (transfer.status !== 'PENDING') {
+      return transfer;
+    }
+
+    if (!accept) {
+      const rejected = await this.prisma.organizerTransfer.update({
+        where: { id: transferId },
+        data: { status: 'REJECTED' },
+      });
+      this.websocketService.emitToUser(transfer.fromUserId, 'event:organizer_transfer:status', {
+        id: transferId,
+        eventId: transfer.eventId,
+        status: 'REJECTED',
+      });
+      return rejected;
+    }
+
+    // Согласие — только теперь роль действительно переходит.
+    await this.transferOrganizerRole(transfer.eventId, transfer.fromUserId, userId);
+    const accepted = await this.prisma.organizerTransfer.update({
+      where: { id: transferId },
+      data: { status: 'ACCEPTED' },
+    });
+    this.websocketService.emitToUser(transfer.fromUserId, 'event:organizer_transfer:status', {
+      id: transferId,
+      eventId: transfer.eventId,
+      status: 'ACCEPTED',
+    });
+    return accepted;
+  }
+
   async transferOrganizerRole(eventId: string, currentOrganizerId: string, newOrganizerId: string) {
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
@@ -1808,7 +1935,7 @@ export class EventsService {
     }
 
     // Выполняем передачу роли в транзакции
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // 1. Обновляем событие - назначаем нового организатора
       await tx.event.update({
         where: { id: eventId },
@@ -1818,7 +1945,6 @@ export class EventsService {
       });
 
       // 2. Обновляем роли в memberships
-      // Старый организатор становится обычным участником
       const oldOrganizerMembership = await tx.eventMembership.findUnique({
         where: {
           userId_eventId: {
@@ -1828,12 +1954,22 @@ export class EventsService {
         },
       });
 
+      // Прежний организатор выходит из события — ровно то, что обещает окно
+      // передачи роли («Передать роль и выйти из события»). Раньше он тут
+      // оставался обычным участником: клиент прятал событие как будто его
+      // владелец из него вышел, сервер держал его в участниках, и после
+      // ближайшей синхронизации событие возвращалось в его же профиль.
       if (oldOrganizerMembership) {
-        await tx.eventMembership.update({
-          where: { id: oldOrganizerMembership.id },
-          data: {
-            role: EventRole.PARTICIPANT,
-          },
+        await tx.eventMembership.delete({ where: { id: oldOrganizerMembership.id } });
+      }
+
+      // И из списка участников профиля события — с пометкой «вышел»,
+      // строку не удаляем (см. EventProfileParticipant.leftAt).
+      const profile = await tx.eventProfile.findUnique({ where: { eventId } });
+      if (profile) {
+        await tx.eventProfileParticipant.updateMany({
+          where: { profileId: profile.id, userId: currentOrganizerId, leftAt: null },
+          data: { leftAt: new Date() },
         });
       }
 
@@ -1858,16 +1994,10 @@ export class EventsService {
         },
       );
 
-      // Отправляем уведомление новому организатору
-      await this.notificationsService.createNotification({
-        userId: newOrganizerId,
-        type: 'EVENT_ORGANIZER_TRANSFERRED' as NotificationType,
-        payload: {
-          actorId: currentOrganizerId,
-          actorName: event.organizer.name || event.organizer.username,
-          eventId,
-        },
-      });
+      // Отдельного уведомления новому организатору тут нет: notifyEventParticipants
+      // выше уже написал всем участникам, кроме самого отправителя, и новый
+      // организатор среди них. Раньше их было два, а с учётом такого же вызова
+      // в requestOrganizerTransfer — три одинаковых подряд.
 
       // 4. Отправляем WebSocket события
       await this.websocketService.emitToEventParticipants(
@@ -1895,6 +2025,21 @@ export class EventsService {
         newOrganizerName: newOrganizer.name || newOrganizer.username,
       };
     });
+
+    // Чат правим уже вне транзакции: метод ходит в базу сам и внутри tx
+    // держал бы вложенное соединение.
+    try {
+      const oldOrganizer = event.organizer;
+      await this.removeUserFromEventChat(
+        eventId,
+        currentOrganizerId,
+        oldOrganizer?.name || oldOrganizer?.username || 'Пользователь',
+      );
+    } catch (error) {
+      logger.warn(`Не удалось убрать прежнего организатора из чата события: ${error?.message}`);
+    }
+
+    return result;
   }
 
   // ❌ ОТМЕНА ЗАПРОСА НА УЧАСТИЕ (waiting → non_member)
@@ -1931,13 +2076,110 @@ export class EventsService {
     });
   }
 
+  /** Кого из приглашённых можно звать с учётом пола и видимости события. */
+  private async filterInvitees(
+    organizerId: string,
+    inviteeIds: string[],
+    genderRestriction: string[] | null | undefined,
+    visibility: { type?: string; excludedUsers?: string[] } | null | undefined,
+  ): Promise<string[]> {
+    const unique = Array.from(new Set(inviteeIds)).filter(id => id !== organizerId);
+    if (unique.length === 0) return [];
+
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: unique } },
+      select: { id: true, gender: true },
+    });
+    const genderById = new Map(users.map(u => [u.id, u.gender]));
+
+    const excluded = new Set(
+      visibility?.type === 'all_except_excluded' ? visibility.excludedUsers || [] : [],
+    );
+    let friendIds = new Set<string>();
+    if (visibility?.type === 'all_except_friends') {
+      const links = await this.prisma.friendship.findMany({
+        where: {
+          status: 'ACCEPTED',
+          OR: [{ requesterId: organizerId }, { addresseeId: organizerId }],
+        },
+        select: { requesterId: true, addresseeId: true },
+      });
+      friendIds = new Set(
+        links.map(link => (link.requesterId === organizerId ? link.addresseeId : link.requesterId)),
+      );
+    }
+
+    return unique.filter(
+      id =>
+        genderById.has(id) &&
+        this.fitsGenderRestriction(genderRestriction, genderById.get(id)) &&
+        !excluded.has(id) &&
+        !friendIds.has(id),
+    );
+  }
+
+  /** Подходит ли человек под ограничение по полу. Пустое ограничение и неуказанный пол — подходит. */
+  private fitsGenderRestriction(restriction: string[] | null | undefined, gender: string | null | undefined): boolean {
+    if (!Array.isArray(restriction) || restriction.length === 0) return true;
+    if (!gender) return true;
+    return restriction.includes(gender);
+  }
+
   async inviteUser(eventId: string, organizerId: string, invitedUserId: string) {
-    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    // Приглашать заблокированного нельзя.
+    if (await isBlockedBetween(this.prisma, organizerId, invitedUserId)) {
+      throw new ForbiddenException('This user is not available');
+    }
+
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: { organizer: { select: { id: true, name: true, username: true } } },
+    });
     if (!event) {
       throw new BadRequestException('Event not found');
     }
     if (event.organizerId !== organizerId) {
       throw new ForbiddenException('Only organizer can invite users');
+    }
+
+    const invitee = await this.prisma.user.findUnique({
+      where: { id: invitedUserId },
+      select: { gender: true },
+    });
+    if (!this.fitsGenderRestriction(event.genderRestriction, invitee?.gender)) {
+      throw new BadRequestException('This event is limited by gender');
+    }
+
+    /**
+     * Нельзя одновременно спрятать событие от человека и позвать его.
+     *
+     * Членство (в том числе приглашение) делает событие видимым всегда — так
+     * задумано, иначе приглашённый не увидел бы приглашения. Поэтому раньше
+     * человек из списка «все, кроме» получал приглашение и видел событие,
+     * хотя организатор его от этого человека скрыл.
+     */
+    const visibility = (event.visibility as any) || null;
+    if (
+      visibility?.type === 'all_except_excluded' &&
+      Array.isArray(visibility.excludedUsers) &&
+      visibility.excludedUsers.includes(invitedUserId)
+    ) {
+      throw new BadRequestException('This user is hidden from the event');
+    }
+    if (visibility?.type === 'all_except_friends') {
+      const friendship = await this.prisma.friendship.findFirst({
+        where: {
+          status: 'ACCEPTED',
+          OR: [
+            { requesterId: organizerId, addresseeId: invitedUserId },
+            { requesterId: invitedUserId, addresseeId: organizerId },
+          ],
+        },
+        select: { id: true },
+      });
+      if (friendship) {
+        throw new BadRequestException('This user is hidden from the event');
+      }
     }
 
     const existing = await this.prisma.eventMembership.findUnique({
@@ -1947,24 +2189,84 @@ export class EventsService {
     if (existing) {
       if (existing.status === MembershipStatus.REJECTED) {
         // Re-invite rejected user
-        return this.prisma.eventMembership.update({
+        const reinvited = await this.prisma.eventMembership.update({
           where: { id: existing.id },
           data: {
             status: MembershipStatus.PENDING,
             invitedBy: organizerId,
           },
         });
+        await this.notifyInvitedUser(event, organizerId, invitedUserId);
+        return reinvited;
       }
       throw new BadRequestException('User already invited or member');
     }
 
-    return this.prisma.eventMembership.create({
+    const membership = await this.prisma.eventMembership.create({
       data: {
         eventId,
         userId: invitedUserId,
         role: EventRole.PARTICIPANT,
         status: MembershipStatus.PENDING,
         invitedBy: organizerId, // Mark as invitation
+      },
+    });
+
+    await this.notifyInvitedUser(event, organizerId, invitedUserId);
+    return membership;
+  }
+
+  /**
+   * Уведомление о приглашении на событие.
+   *
+   * Раньше приглашение существовало только как запись EventMembership: узнать
+   * о нём можно было, лишь открыв раздел заявок. Ни уведомления в ленте, ни
+   * пуша не приходило — вся отправка пушей висит на createNotification.
+   */
+  private async notifyInvitedUser(
+    event: { id: string; title: string; organizer?: { name: string | null; username: string } | null },
+    organizerId: string,
+    invitedUserId: string,
+  ) {
+    try {
+      await this.notificationsService.createNotification({
+        userId: invitedUserId,
+        type: 'EVENT_INVITE' as NotificationType,
+        payload: {
+          actorId: organizerId,
+          actorName: event.organizer?.name || event.organizer?.username || undefined,
+          eventId: event.id,
+          eventTitle: event.title,
+        },
+      });
+    } catch {
+      // Приглашение уже создано — уведомление его не отменяет.
+    }
+  }
+
+  /**
+   * Все заявки на участие во ВСЕХ моих событиях — одним запросом.
+   *
+   * Клиент собирал их поштучно: на каждое организованное событие свой
+   * GET /events/:id/requests, все параллельно. На 36 событиях это 36
+   * одновременных запросов при каждой синхронизации и при каждом событии
+   * сокета. Часть из них упиралась в ограничитель частоты и молча падала
+   * (клиент ловит ошибку и возвращает пустой массив) — и заявка на участие
+   * просто не доезжала до экрана уведомлений. Кнопок «принять/отклонить»
+   * при этом не появлялось вовсе: показывать было нечего.
+   */
+  async listOrganizerPendingRequests(userId: string) {
+    return this.prisma.eventMembership.findMany({
+      where: {
+        status: MembershipStatus.PENDING,
+        event: { organizerId: userId },
+      },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        user: {
+          select: { id: true, name: true, username: true, avatarUrl: true },
+        },
+        event: { select: { id: true, organizerId: true } },
       },
     });
   }
@@ -2117,6 +2419,9 @@ export class EventsService {
       where: {
         startTime: { gte: new Date() },
         id: { notIn: userEventIds }, // Exclude events user already joined
+        // Рекомендации обходили настройку видимости целиком: сюда попадали и
+        // события «только друзьям», и «только я» — кому угодно.
+        ...(await buildEventVisibilityWhere(this.prisma, userId)),
       },
       include: {
         organizer: {
@@ -2445,5 +2750,106 @@ export class EventsService {
     } catch (error) {
       logger.error(`Error removing user from event chat:`, error);
     }
+  }
+
+  /**
+   * Личная видимость ПРОШЕДШЕГО события.
+   *
+   * Настройка касается только «меморис» самого человека: кто увидит это
+   * событие, зайдя в ЕГО профиль. У других участников того же события своя
+   * настройка (или её нет — и тогда у них событие видно всем).
+   *
+   * 'all' — строку удаляем, это состояние по умолчанию.
+   */
+  async setMemoryVisibility(eventId: string, userId: string, visibility: string) {
+    const allowed = ['all', 'friends', 'only_me'];
+    if (!allowed.includes(visibility)) {
+      throw new BadRequestException('Unknown visibility');
+    }
+
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { id: true, organizerId: true },
+    });
+    if (!event) {
+      throw new BadRequestException('Event not found');
+    }
+
+    // Настраивать может только тот, у кого это событие вообще есть в профиле.
+    let isMember = event.organizerId === userId;
+    if (!isMember) {
+      const membership = await this.prisma.eventMembership.findUnique({
+        where: { userId_eventId: { userId, eventId } },
+      });
+      isMember = membership?.status === MembershipStatus.ACCEPTED;
+    }
+    if (!isMember) {
+      const profile = await this.prisma.eventProfile.findUnique({
+        where: { eventId },
+        select: { id: true },
+      });
+      if (profile) {
+        const row = await this.prisma.eventProfileParticipant.findUnique({
+          where: { profileId_userId: { profileId: profile.id, userId } },
+        });
+        isMember = !!row && !row.leftAt;
+      }
+    }
+    if (!isMember) {
+      throw new ForbiddenException('Only a participant can change memory visibility');
+    }
+
+    if (visibility === 'all') {
+      await this.prisma.eventMemoryVisibility.deleteMany({ where: { eventId, userId } });
+      return { eventId, visibility: 'all' };
+    }
+
+    await this.prisma.eventMemoryVisibility.upsert({
+      where: { eventId_userId: { eventId, userId } },
+      update: { visibility },
+      create: { eventId, userId, visibility },
+    });
+    return { eventId, visibility };
+  }
+
+  /**
+   * Что зритель должен знать о личных настройках чужого профиля.
+   *
+   * Себе отдаём сами настройки — по ним рисуются значки на мини-карточках.
+   * Чужому — только список событий, которые ему показывать нельзя; сами
+   * настройки не раскрываем.
+   */
+  async getMemoryVisibility(ownerId: string, viewerId: string) {
+    const rows = await this.prisma.eventMemoryVisibility.findMany({
+      where: { userId: ownerId },
+      select: { eventId: true, visibility: true },
+    });
+
+    if (ownerId === viewerId) {
+      return { settings: rows, hiddenEventIds: [] as string[] };
+    }
+
+    const onlyMe = rows.filter(r => r.visibility === 'only_me').map(r => r.eventId);
+    const friendsOnly = rows.filter(r => r.visibility === 'friends').map(r => r.eventId);
+
+    let viewerIsFriend = false;
+    if (friendsOnly.length > 0 && viewerId) {
+      const link = await this.prisma.friendship.findFirst({
+        where: {
+          status: 'ACCEPTED',
+          OR: [
+            { requesterId: ownerId, addresseeId: viewerId },
+            { requesterId: viewerId, addresseeId: ownerId },
+          ],
+        },
+        select: { id: true },
+      });
+      viewerIsFriend = !!link;
+    }
+
+    return {
+      settings: [] as Array<{ eventId: string; visibility: string }>,
+      hiddenEventIds: viewerIsFriend ? onlyMe : [...onlyMe, ...friendsOnly],
+    };
   }
 }

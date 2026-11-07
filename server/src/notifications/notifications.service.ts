@@ -2,6 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationType } from '@prisma/client';
 import { WebSocketService } from '../ws/websocket.service';
+import { ApnsService } from './apns.service';
+import { FcmService } from './fcm.service';
+import { buildPushText } from './push-texts';
 
 export interface CreateNotificationPayload {
   userId: string;
@@ -16,14 +19,37 @@ export interface CreateNotificationPayload {
     eventTime?: string;
     changedField?: string; // 'location', 'time', 'date', etc.
     postId?: string;
+    /** Первое фото публикации — превью в ленте для лайков и комментариев. */
+    postPhotoUrl?: string;
+    /** Начало комментария, чтобы в ленте и пуше было видно, что написали. */
+    commentPreview?: string;
   };
 }
+
+/**
+ * Типы, которых не знают сборки до 1.0.0 (4).
+ *
+ * Сборка 3 рисует незнакомый тип пустой строкой «Новое уведомление», а
+ * уведомление из сокета кладёт в ленту как есть, без проверки типа. Поэтому
+ * такие уведомления отдаются только клиенту, который сам попросил расширенный
+ * набор (`GET /notifications?extended=1`), и по сокету приходят отдельным
+ * событием `notification:created`, на которое старый клиент не подписан.
+ * Пуш уходит всем: это готовый текст, рисовать его приложению не нужно.
+ */
+export const EXTENDED_NOTIFICATION_TYPES: NotificationType[] = [
+  NotificationType.FRIEND_REQUEST_ACCEPTED,
+  NotificationType.EVENT_INVITE_DECLINED,
+  NotificationType.EVENT_POST_LIKED,
+  NotificationType.EVENT_POST_COMMENTED,
+];
 
 @Injectable()
 export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly websocketService: WebSocketService,
+    private readonly apns: ApnsService,
+    private readonly fcm: FcmService,
   ) {}
 
   /**
@@ -38,13 +64,37 @@ export class NotificationsService {
       },
     });
 
-    // Отправляем WebSocket событие о новом уведомлении
-    this.websocketService.emitToUser(data.userId, 'notification:new', {
+    // Отправляем WebSocket событие о новом уведомлении. Новые типы — под
+    // другим именем, чтобы сборка 3 их не подхватила (EXTENDED_NOTIFICATION_TYPES).
+    const socketEvent = EXTENDED_NOTIFICATION_TYPES.includes(notification.type)
+      ? 'notification:created'
+      : 'notification:new';
+    this.websocketService.emitToUser(data.userId, socketEvent, {
       id: notification.id,
       type: notification.type,
       payload: notification.payload,
       createdAt: notification.createdAt,
     });
+
+    // И пуш — на все устройства пользователя. Одна точка на все виды
+    // уведомлений: сюда сходятся и события, и заявки, и сообщения, поэтому
+    // отдельно расставлять отправку по местам не нужно.
+    //
+    // Намеренно без await: пуш не должен задерживать (и тем более ронять)
+    // действие, которое его породило. Ошибки гасятся внутри ApnsService.
+    const pushText = (language: string) => buildPushText(data.type, data.payload, language);
+    const pushData = {
+      notificationId: notification.id,
+      type: notification.type,
+      eventId: data.payload.eventId,
+      actorId: data.payload.actorId,
+      // По тапу на пуш о лайке или комментарии открывается сама публикация.
+      postId: data.payload.postId,
+    };
+    // Два адресата, но двойной отправки не будет: каждый сервис выбирает свои
+    // токены по platform, и у человека с айфоном android-токенов попросту нет.
+    void this.apns.sendToUser(data.userId, pushText, pushData);
+    void this.fcm.sendToUser(data.userId, pushText, pushData);
 
     return notification;
   }
@@ -128,13 +178,17 @@ export class NotificationsService {
   }
 
   /**
-   * Получает все уведомления пользователя
+   * Получает все уведомления пользователя.
+   *
+   * extended — клиент знает новые типы (сборка 4 и новее). Без этого флага они
+   * не отдаются, см. EXTENDED_NOTIFICATION_TYPES.
    */
-  async getUserNotifications(userId: string, includeRead: boolean = true) {
+  async getUserNotifications(userId: string, includeRead: boolean = true, extended: boolean = false) {
     return this.prisma.notification.findMany({
       where: {
         userId,
         ...(includeRead ? {} : { readAt: null }),
+        ...(extended ? {} : { type: { notIn: EXTENDED_NOTIFICATION_TYPES } }),
       },
       orderBy: {
         createdAt: 'desc',
@@ -175,11 +229,12 @@ export class NotificationsService {
   /**
    * Получает количество непрочитанных уведомлений
    */
-  async getUnreadCount(userId: string) {
+  async getUnreadCount(userId: string, extended: boolean = false) {
     return this.prisma.notification.count({
       where: {
         userId,
         readAt: null,
+        ...(extended ? {} : { type: { notIn: EXTENDED_NOTIFICATION_TYPES } }),
       },
     });
   }

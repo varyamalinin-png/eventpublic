@@ -87,7 +87,7 @@ class ErrorBoundary extends Component<
 
 // Динамический импорт с обработкой ошибок
 const ExploreScreen = dynamicImport(
-  () => import('@/client/app/(tabs)/explore')
+  () => import('@/client/app/(tabs)/(explore)/explore')
     .then(mod => {
       if (!mod || !mod.default) {
         throw new Error('ExploreScreen component not found in module');

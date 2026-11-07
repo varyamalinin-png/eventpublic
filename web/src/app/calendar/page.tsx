@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import { PageLoading } from '@/web/components/PageLoading';
 
 const CalendarScreen = dynamic(
-  () => import('@/client/app/calendar').then(mod => ({ default: mod.default })),
+  () => import('@/client/screens/CalendarScreen').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

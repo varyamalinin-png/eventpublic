@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildEventVisibilityWhere } from '../events/event-visibility';
+import { blockedUserIds } from '../shared/blocks';
 
 export interface SearchEventsParams {
   q?: string;
@@ -15,13 +17,15 @@ export interface SearchUsersParams {
   q?: string;
   limit?: number;
   offset?: number;
+  /** Кто ищет — нужен, чтобы убрать из выдачи заблокированных. */
+  viewerId?: string;
 }
 
 @Injectable()
 export class SearchService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async searchEvents(params: SearchEventsParams) {
+  async searchEvents(params: SearchEventsParams & { viewerId?: string }) {
     const {
       q,
       location,
@@ -30,6 +34,7 @@ export class SearchService {
       organizerId,
       limit = 20,
       offset = 0,
+      viewerId,
     } = params;
 
     const where: any = {
@@ -37,6 +42,15 @@ export class SearchService {
       organizer: {
         isBlocked: false,
       } as any,
+      /**
+       * И настройку видимости — раньше поиск её не знал вовсе и отдавал
+       * события «только я» и «только друзьям» кому угодно. Условие кладём в
+       * AND: OR у этого запроса уже занят поиском по тексту.
+       *
+       * Ручка без авторизации, поэтому зритель здесь всегда анонимный: ему
+       * доступны только по-настоящему открытые события.
+       */
+      AND: [await buildEventVisibilityWhere(this.prisma, viewerId)],
     };
 
     // Поиск по тексту (название, описание)
@@ -144,10 +158,15 @@ export class SearchService {
   }
 
   async searchUsers(params: SearchUsersParams) {
-    const { q, limit = 20, offset = 0 } = params;
+    const { q, limit = 20, offset = 0, viewerId } = params;
+
+    // isBlocked — это блокировка модератором. Отдельно убираем тех, с кем у
+    // ищущего личная блокировка (в любую сторону), и его самого.
+    const hidden = await blockedUserIds(this.prisma, viewerId);
 
     const where: any = {
-      isBlocked: false, // Не показываем заблокированных пользователей
+      isBlocked: false,
+      ...(hidden.length > 0 ? { id: { notIn: hidden } } : {}),
     } as any;
 
     // Поиск по тексту (username, name, bio)
@@ -223,7 +242,7 @@ export class SearchService {
     };
   }
 
-  async globalSearch(q: string, limit: number = 10) {
+  async globalSearch(q: string, limit: number = 10, viewerId?: string) {
     if (!q || q.length < 2) {
       return {
         events: [],
@@ -231,12 +250,16 @@ export class SearchService {
       };
     }
 
+    const globalHidden = await blockedUserIds(this.prisma, viewerId);
+
     const [events, users] = await Promise.all([
       this.prisma.event.findMany({
         where: {
           organizer: {
             isBlocked: false,
           } as any,
+          // Видимость: без этого глобальный поиск показывал скрытые события.
+          AND: [await buildEventVisibilityWhere(this.prisma, viewerId)],
           OR: [
             {
               title: {
@@ -279,6 +302,7 @@ export class SearchService {
       this.prisma.user.findMany({
         where: {
           isBlocked: false,
+          ...(globalHidden.length > 0 ? { id: { notIn: globalHidden } } : {}),
           OR: [
             {
               username: {

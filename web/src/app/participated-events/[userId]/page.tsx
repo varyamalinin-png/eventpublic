@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import { PageLoading } from '@/web/components/PageLoading';
 
 const ParticipatedEventsScreen = dynamic(
-  () => import('@/client/app/participated-events/[userId]').then(mod => ({ default: mod.default })),
+  () => import('@/client/screens/ParticipatedEventsScreen').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

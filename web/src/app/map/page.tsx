@@ -5,7 +5,7 @@ import { PageLoading } from '@/web/components/PageLoading';
 
 // На вебе нужна именно map.web: map.tsx реэкспортирует map.native (react-native-maps), что в Next даёт undefined → React error #130
 const MapScreen = dynamic(
-  () => import('@/client/app/map.web').then(mod => ({ default: mod.default })),
+  () => import('@/client/screens/MapScreen.web').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

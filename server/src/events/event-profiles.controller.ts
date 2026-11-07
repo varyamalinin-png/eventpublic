@@ -23,7 +23,8 @@ export class EventProfilesController {
   async getProfile(@Param('eventId') eventId: string, @RequestUser('userId') userId: string) {
     try {
       logger.info(`📥 GET profile for eventId: ${eventId}, user: ${userId}`);
-      const result = await this.eventProfilesService.getProfile(eventId);
+      // userId — чтобы участники события увидели и тех, кто из него вышел.
+      const result = await this.eventProfilesService.getProfile(eventId, userId);
       logger.info(`Profile retrieved successfully: ${result ? 'found' : 'not found'}`);
       
       // Профиль события доступен ВСЕМ для просмотра
@@ -119,10 +120,11 @@ export class EventProfilesController {
         });
         logger.info(`File uploaded, URL: ${publicUrl}`);
         dto.photoUrl = publicUrl;
-        // Дополнительно, если content пуст - заполняем им тоже для обратной совместимости
-        if (!dto.content) {
-          dto.content = publicUrl;
-        }
+        // content НЕ трогаем. Здесь в пустой content подставлялся сам URL
+        // фотографии «для обратной совместимости». Пока подпись поста нигде не
+        // показывалась, это было незаметно; теперь подпись видна — и у каждого
+        // фото без подписи под ним стояла ссылка на файл, которую человек не
+        // писал. Адрес картинки и так лежит в photoUrl.
       } else if (file && dto.photoUrls) {
         logger.warn(`⚠️ File received but photoUrls already in DTO - ignoring file (this is for carousel final post)`);
       }

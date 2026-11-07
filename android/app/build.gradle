@@ -9,7 +9,21 @@ def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
  * By default you don't need to apply any configuration, just uncomment the lines you need.
  */
 react {
-    entryFile = file(["node", "-e", "require('expo/scripts/resolveAppEntry')", projectRoot, "android", "absolute"].execute(null, rootDir).text.trim())
+    // JS собирается из client/, а не из корня репозитория.
+    //
+    // Корень — нативная оболочка (ios/, android/, иконки, ключи, подпись),
+    // а весь код приложения лежит в client/, и это отдельный Expo-проект со
+    // своим node_modules и своим app.json. Сборщик определяет каталог
+    // маршрутов по своему рабочему каталогу: запущенный из корня, он ищет
+    // ./app рядом с package.json, не находит и молча кладёт в бандл пустой
+    // роутер. Приложение ставится и падает на старте с «No routes found» —
+    // так было и на Android, и на iOS.
+    //
+    // Проверено: из корня — 952 модуля без единого экрана, из client/ —
+    // 1879 модулей и все экраны на месте (оба раза с --reset-cache, потому
+    // что тёплый кэш Metro делает картину ложно хорошей).
+    root = file("../../client")
+    entryFile = file("../../client/node_modules/expo-router/entry.js")
     reactNativeDir = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
     hermesCommand = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsolutePath() + "/sdks/hermesc/%OS-BIN%/hermesc"
     codegenDir = new File(["node", "--print", "require.resolve('@react-native/codegen/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
@@ -93,7 +107,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.0.0"
+        versionName "1.0.1"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -104,15 +118,27 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // Ключ загрузки для Google Play. Путь и пароль — в
+        // ~/.gradle/gradle.properties, вне репозитория. Без этих свойств
+        // сборка не падает, а подписывается отладочным ключом.
+        // ВНИМАНИЕ: `expo prebuild --clean` стирает этот блок, накладывать заново.
+        release {
+            if (project.hasProperty('IWENT_UPLOAD_STORE_FILE')) {
+                storeFile file(IWENT_UPLOAD_STORE_FILE)
+                storePassword IWENT_UPLOAD_STORE_PASSWORD
+                keyAlias IWENT_UPLOAD_KEY_ALIAS
+                keyPassword IWENT_UPLOAD_KEY_PASSWORD
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig project.hasProperty('IWENT_UPLOAD_STORE_FILE')
+                ? signingConfigs.release
+                : signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
@@ -180,3 +206,5 @@ dependencies {
         implementation jscFlavor
     }
 }
+
+apply plugin: 'com.google.gms.google-services'

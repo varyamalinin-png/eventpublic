@@ -392,9 +392,10 @@ export class AuthController {
     }
   }
 
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('reset-password')
   async resetPassword(@Body() dto: ResetPasswordDto) {
-    const user = await this.authService.resetPassword(dto.token, dto.password);
+    const user = await this.authService.resetPassword(dto.email, dto.code, dto.password);
     return { user, message: 'Password updated successfully' };
   }
 

@@ -248,10 +248,27 @@ export const useLocalSearchParams = () => {
   return {};
 };
 
+// Заглушка для useNavigation — на вебе нет нативного 'tabPress' события таб-бара,
+// поэтому addListener просто ничего не делает (colбэк никогда не вызывается),
+// а не бросает ошибку "is not a function", как было до появления этого экспорта.
+export const useNavigation = () => ({
+  addListener: () => () => {},
+  isFocused: () => true,
+  // Родительского навигатора на вебе тоже нет; без этого метода падал /profile.
+  getParent: () => null,
+});
+
+// На вебе экран не «получает фокус» — он просто смонтирован. Но выполнять
+// колбэк ровно один раз при монтировании нельзя: в этот момент сессия из
+// localStorage ещё не прочитана, и экран, который грузит данные отсюда
+// (воспоминания), оставался пустым навсегда при заходе по прямой ссылке.
+// Все вызывающие оборачивают колбэк в useCallback, поэтому реагируем на его
+// смену — так же, как это делает настоящий useFocusEffect.
 export const useFocusEffect = (callback) => {
   React.useEffect(() => {
-    callback();
-  }, []);
+    const cleanup = callback();
+    return typeof cleanup === 'function' ? cleanup : undefined;
+  }, [callback]);
 };
 
 export const Redirect = ({ href }) => {

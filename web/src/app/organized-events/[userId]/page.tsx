@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import { PageLoading } from '@/web/components/PageLoading';
 
 const OrganizedEventsScreen = dynamic(
-  () => import('@/client/app/organized-events/[userId]').then(mod => ({ default: mod.default })),
+  () => import('@/client/screens/OrganizedEventsScreen').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

@@ -5,7 +5,7 @@ import { WebTabBar } from '../../../components/WebTabBar';
 import { PageLoading } from '@/web/components/PageLoading';
 
 const EventFolderScreen = dynamicImport(
-  () => import('@/client/app/event-folder/[id]').then(mod => ({ default: mod.default })),
+  () => import('@/client/screens/EventFolderScreen').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

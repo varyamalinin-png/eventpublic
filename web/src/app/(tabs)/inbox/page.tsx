@@ -7,7 +7,7 @@ import { PageLoading } from '@/web/components/PageLoading';
 import { useLanguage } from '@/client/context/LanguageContext';
 
 const InboxScreen = dynamicImport(
-  () => import('@/client/app/(tabs)/inbox').then(mod => ({ default: mod.default })),
+  () => import('@/client/app/(tabs)/(inbox)/inbox').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

@@ -9,3 +9,21 @@ PROJECT_INFO.md
 yandex-key*.json
 
 node_modules
+
+# Выходные каталоги xcodebuild (-derivedDataPath), несколько ГБ
+ios/build/
+ios/build-sim/
+ios/build-device/
+
+# Кэш экспорта expo (генерируется при сборках)
+.expo/web/cache/
+
+# Временные рабочие файлы (выгрузки чатов, скрипты разбора)
+tmp/chat-export-full.txt
+tmp/chat_*.txt
+tmp/analyze_chat.py
+tmp/extract_prompts.py
+
+# Итоговые отчёты-артефакты в корне
+Итоговый_отчет_*.pdf
+Итоговый_отчет_*.md

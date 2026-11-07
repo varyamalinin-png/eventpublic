@@ -11,7 +11,17 @@ export class RedisIoAdapter extends IoAdapter {
     private readonly app: INestApplicationContext,
     private readonly redisService: RedisService,
   ) {
-    super();
+    /**
+     * app передаём в базовый адаптер ОБЯЗАТЕЛЬНО.
+     *
+     * Без него у IoAdapter нет HTTP-сервера, и createIOServer(0) делает
+     * `new Server(0)` — отдельный socket.io на СЛУЧАЙНОМ порту. Так и было на
+     * проде: Nest слушал 4000, а сокеты — какой-нибудь 38027, до которого не
+     * доходит ни nginx, ни клиент. /socket.io/ на 4000 отвечал 404, realtime не
+     * работал вовсе: сообщения, заявки и уведомления появлялись только после
+     * ручного обновления.
+     */
+    super(app);
   }
 
   createIOServer(port: number, options?: ServerOptions) {

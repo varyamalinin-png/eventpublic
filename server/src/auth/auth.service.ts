@@ -6,12 +6,39 @@ import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { MailerService } from '../mailer/mailer.service';
-import { randomBytes, randomInt } from 'crypto';
+import { createHash, randomInt } from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 
 type JwtPayload = { sub: string; username: string };
 
 type SanitizedUser = Awaited<ReturnType<UsersService['findById']>>;
+
+/**
+ * Сколько refresh-токенов храним на пользователя. Запас нужен не для числа
+ * устройств, а для параллельных обновлений с одного: клиент при истёкшем
+ * access-токене присылает несколько запросов подряд, и каждый создаёт строку.
+ */
+const REFRESH_TOKENS_PER_USER = 8;
+
+/**
+ * Сколько секунд только что погашенный refresh-токен ещё принимается.
+ *
+ * Клиент при истёкшем access-токене уходит на обновление НЕСКОЛЬКИМИ запросами
+ * разом, с одним и тем же токеном. Первый проходит и гасит его, второй приходит
+ * через долю секунды и по-честному получает 401 — а приложение считает это
+ * «сессия недействительна» и стирает её. В логах это выглядит так:
+ *
+ *   17:24:54  /auth/refresh  201
+ *   17:24:55  /auth/refresh  401
+ *   17:25:02  /auth/login    201     <- человека выкинуло на экран входа
+ *
+ * В клиенте это уже исправлено (опоздавшие ждут то обновление, которое идёт),
+ * но у всех, кто поставил приложение из магазина, старая версия, и обновится
+ * она нескоро. Поэтому держим окно на сервере: опоздавшему отдаём тот же
+ * результат, что получил первый. Повторный ответ идемпотентен — новых токенов
+ * не плодит, срок жизни не продлевает.
+ */
+const REFRESH_GRACE_MS = 60_000;
 
 @Injectable()
 export class AuthService {
@@ -34,12 +61,17 @@ export class AuthService {
 
   async register(dto: RegisterDto) {
     this.logger.log(`Register called for email: ${dto.email}`);
-    const normalizedPhone = dto.phone.replace(/[^\d+]/g, '');
+    // Номер может не прийти вовсе — он необязателен (см. RegisterDto).
+    // Занятость проверяем, только когда он есть: findUnique по null Prisma
+    // не принимает, да и пустых номеров в базе будет много.
+    const normalizedPhone = dto.phone ? dto.phone.replace(/[^\d+]/g, '') : null;
 
     const [existingEmail, existingUsername, existingPhone] = await Promise.all([
       this.usersService.findByEmail(dto.email),
       this.usersService.findByUsername(dto.username),
-      this.prisma.user.findUnique({ where: { phone: normalizedPhone } }),
+      normalizedPhone
+        ? this.prisma.user.findUnique({ where: { phone: normalizedPhone } })
+        : Promise.resolve(null),
     ]);
 
     if (existingEmail) {
@@ -171,28 +203,104 @@ export class AuthService {
     });
   }
 
-  async refreshTokens(userId: string, token: string) {
-    const tokens = await this.prisma.refreshToken.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-    });
+  /**
+   * Недавно погашенные токены и то, что было выдано в обмен на них.
+   * Живёт в памяти процесса: сервер работает одним экземпляром (см. §5.12
+   * в CLAUDE.md), а потеря окна при перезапуске ничем не грозит — худшее,
+   * что случится, это один лишний выход из аккаунта.
+   */
+  private readonly recentlyRotated = new Map<
+    string,
+    { issuedAt: number; result: Awaited<ReturnType<AuthService['buildRefreshResult']>> }
+  >();
 
-    const matched = await Promise.all(tokens.map((t) => argon2.verify(t.token, token)));
-    const hasValid = matched.includes(true);
+  private graceKey(userId: string, token: string): string {
+    return userId + ':' + createHash('sha256').update(token).digest('hex');
+  }
 
-    if (!hasValid) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-
-    await this.prisma.refreshToken.deleteMany({ where: { userId } });
-
+  private async buildRefreshResult(userId: string) {
     const user = await this.usersService.findById(userId);
     if (!user) {
       throw new UnauthorizedException();
     }
     const issued = await this.issueTokens(user.id, user.username);
     return { user, ...issued };
+  }
+
+  async refreshTokens(userId: string, token: string) {
+    const graceKey = this.graceKey(userId, token);
+    const now = Date.now();
+
+    // Чистим протухшие записи, чтобы карта не росла бесконечно.
+    for (const [key, entry] of this.recentlyRotated) {
+      if (now - entry.issuedAt > REFRESH_GRACE_MS) this.recentlyRotated.delete(key);
+    }
+
+    const tokens = await this.prisma.refreshToken.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: REFRESH_TOKENS_PER_USER,
+    });
+
+    // Проверяем по одному, начиная с самого свежего: обычно совпадает первый же,
+    // а argon2 намеренно медленный — считать все хеши разом незачем.
+    let matchedId: string | null = null;
+    for (const row of tokens) {
+      const ok = await argon2.verify(row.token, token).catch(() => false);
+      if (ok) {
+        matchedId = row.id;
+        break;
+      }
+    }
+
+    if (!matchedId) {
+      // Токена в базе нет. Если его погасили только что — это опоздавший
+      // запрос той же пачки, а не чужой токен: отдаём тот же результат.
+      const recent = this.recentlyRotated.get(graceKey);
+    if (recent && now - recent.issuedAt <= REFRESH_GRACE_MS) {
+        return recent.result;
+      }
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    // Раньше здесь стояло deleteMany по ВСЕМ токенам пользователя, и это
+    // выкидывало людей из приложения примерно раз в час. Когда истекает
+    // access-токен, клиент уходит на обновление сразу несколькими запросами
+    // (ленту тянут восемь синхронизаций разом). Каждый из них проходил
+    // проверку, получал 201 с новым токеном — и тут же стирал строки, которые
+    // успели создать соседние. Живым оставался ровно один токен из четырёх, а
+    // приложение сохраняло тот, что вернулся последним. Через час оно шло
+    // обновляться мёртвым токеном, получало 401 и показывало экран входа.
+    // Теперь гасим только предъявленный токен, а список подрезаем по размеру.
+    await this.prisma.refreshToken
+      .delete({ where: { id: matchedId } })
+      .catch(() => undefined); // параллельный запрос мог удалить ту же строку
+
+    const result = await this.buildRefreshResult(userId);
+    this.recentlyRotated.set(graceKey, { issuedAt: Date.now(), result });
+    await this.pruneRefreshTokens(userId);
+    return result;
+  }
+
+  /**
+   * Чистим просроченные строки и держим не больше REFRESH_TOKENS_PER_USER
+   * свежих сессий: без удаления «всех разом» список иначе растёт бесконечно.
+   */
+  private async pruneRefreshTokens(userId: string) {
+    await this.prisma.refreshToken.deleteMany({
+      where: { userId, expiresAt: { lt: new Date() } },
+    });
+    const extra = await this.prisma.refreshToken.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+      skip: REFRESH_TOKENS_PER_USER,
+    });
+    if (extra.length > 0) {
+      await this.prisma.refreshToken.deleteMany({
+        where: { id: { in: extra.map((row) => row.id) } },
+      });
+    }
   }
 
   async revokeRefreshTokens(userId: string) {
@@ -270,14 +378,23 @@ export class AuthService {
   }
 
   async requestPasswordReset(email: string) {
-    const user = await this.usersService.findByEmail(email);
+    const user = await this.usersService.findByEmail(email.trim());
     if (!user) {
-      // Avoid leaking whether email exists
+      // Ответ одинаковый и для несуществующего адреса: иначе по нему можно
+      // перебирать, кто здесь зарегистрирован.
       return { success: true };
     }
 
-    const token = await this.createPasswordResetToken(user.id);
-    await this.mailer.sendPasswordResetEmail(email, token);
+    const cooldownMs = await this.getResetCooldownMs(user.id);
+    if (cooldownMs > 0) {
+      throw new BadRequestException({
+        message: 'Please wait before requesting a new code',
+        retryAfterSeconds: Math.ceil(cooldownMs / 1000),
+      });
+    }
+
+    const code = await this.createPasswordResetToken(user.id);
+    await this.mailer.sendPasswordResetEmail(user.email, code);
     return { success: true };
   }
 
@@ -338,16 +455,52 @@ export class AuthService {
     }
   }
 
-  async resetPassword(token: string, password: string) {
-    const record = await this.prisma.passwordResetToken.findUnique({ where: { token } });
-    if (!record || record.expiresAt < new Date()) {
-      throw new BadRequestException('Reset token is invalid or expired');
+  /**
+   * Смена пароля по коду из письма.
+   *
+   * Логика ровно та же, что у подтверждения адреса: код ищется в паре с
+   * пользователем, попытки считаются, при исчерпании код сгорает. Сообщение
+   * об ошибке одно на все случаи — иначе по нему различался бы существующий
+   * адрес от несуществующего.
+   */
+  async resetPassword(email: string, code: string, password: string) {
+    const normalized = code.replace(/\D/g, '');
+    const invalid = () => new BadRequestException('Reset code is invalid or expired');
+    if (normalized.length !== 6) throw invalid();
+
+    const user = await this.usersService.findByEmail(email.trim());
+    if (!user) throw invalid();
+
+    const record = await this.prisma.passwordResetToken.findFirst({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!record) throw invalid();
+
+    if (record.expiresAt < new Date()) {
+      await this.prisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
+      throw invalid();
+    }
+
+    if (record.attempts >= AuthService.OTP_MAX_ATTEMPTS) {
+      await this.prisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
+      throw new BadRequestException('Too many attempts. Request a new code.');
+    }
+
+    if (record.token !== normalized) {
+      await this.prisma.passwordResetToken.update({
+        where: { id: record.id },
+        data: { attempts: { increment: 1 } },
+      });
+      throw invalid();
     }
 
     const passwordHash = await argon2.hash(password);
-    const user = await this.usersService.updatePassword(record.userId, passwordHash);
-    await this.prisma.passwordResetToken.deleteMany({ where: { userId: record.userId } });
-    return user;
+    const updated = await this.usersService.updatePassword(user.id, passwordHash);
+    await this.prisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
+    // Пароль сменился — старые сессии на других устройствах больше не наши.
+    await this.prisma.refreshToken.deleteMany({ where: { userId: user.id } });
+    return updated;
   }
 
   async loginWithGoogle(idToken: string) {
@@ -441,16 +594,28 @@ export class AuthService {
   }
 
   private async createPasswordResetToken(userId: string) {
-    const token = randomBytes(32).toString('hex');
+    const token = this.generateOtp();
     await this.prisma.passwordResetToken.deleteMany({ where: { userId } });
     await this.prisma.passwordResetToken.create({
       data: {
         userId,
         token,
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        expiresAt: new Date(Date.now() + AuthService.OTP_TTL_MS),
       },
     });
     return token;
+  }
+
+  /** Столько миллисекунд осталось до следующего письма со сбросом (0 — можно слать). */
+  private async getResetCooldownMs(userId: string): Promise<number> {
+    const last = await this.prisma.passwordResetToken.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    if (!last) return 0;
+    const passed = Date.now() - last.createdAt.getTime();
+    return Math.max(0, AuthService.OTP_RESEND_COOLDOWN_MS - passed);
   }
 
   private parseTtl(ttl: string | undefined): number {

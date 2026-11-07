@@ -7,7 +7,7 @@ import { PageLoading } from '@/web/components/PageLoading';
 import { useLanguage } from '@/client/context/LanguageContext';
 
 const MemoriesScreen = dynamicImport(
-  () => import('@/client/app/(tabs)/memories').then(mod => ({ default: mod.default })),
+  () => import('@/client/app/(tabs)/(memories)/memories').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

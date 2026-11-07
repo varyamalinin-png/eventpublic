@@ -21,9 +21,6 @@ type SendPayload = {
 export class MailerService {
   private readonly logger = new Logger(MailerService.name);
   private readonly fromEmail: string;
-  private readonly backendBaseUrl: string;
-  private readonly verificationRedirectUrl: string;
-  private readonly resetRedirectUrl: string;
   private readonly yandexCloudEnabled: boolean;
   private readonly authMethod: 'postbox' | 'iam' | null;
   private readonly sesClient?: SESv2Client;
@@ -35,14 +32,6 @@ export class MailerService {
     this.fromEmail =
       this.configService.get<string>('email.yandexCloudFromEmail') ??
       'noreply@iwent.ru';
-    this.backendBaseUrl =
-      this.configService.get<string>('app.backendBaseUrl') ?? 'http://localhost:4000';
-    this.verificationRedirectUrl =
-      this.configService.get<string>('email.verificationRedirectUrl') ??
-      'https://example.com/verify-email';
-    this.resetRedirectUrl =
-      this.configService.get<string>('email.passwordResetRedirectUrl') ??
-      'https://example.com/reset-password';
 
     const yandexCloudFromEmail = this.configService.get<string>('email.yandexCloudFromEmail');
     const yandexCloudAccessKeyId = this.configService.get<string>('email.yandexCloudAccessKeyId');
@@ -179,22 +168,26 @@ export class MailerService {
       this.logger.error(errorMsg);
       throw new Error(errorMsg);
     }
-    // В ссылку кладём и адрес: код теперь проверяется только в паре с ним.
-    const verifyLink = `${this.backendBaseUrl}/auth/verify-email?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
-    const callToActionLink = `${this.verificationRedirectUrl}?token=${encodeURIComponent(token)}`;
+    /**
+     * Только код, без ссылок, и текст по-английски.
+     *
+     * Подтверждение — это шесть цифр, которые человек вводит в приложении
+     * (см. OtpInput). Ссылки в письме были лишними с самого перехода на код:
+     * одна вела на бэкенд, вторая — на EMAIL_VERIFICATION_REDIRECT_URL,
+     * который на проде так и остался localhost:8081, то есть в письме живому
+     * пользователю лежал заведомо нерабочий адрес. Срок жизни кода — 15 минут
+     * (AuthService.OTP_TTL_MS), а в письме почему-то были обещаны сутки.
+     */
     const htmlContent = `
-      <p>Здравствуйте!</p>
-      <p>Спасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, перейдя по ссылке:</p>
-      <p><a href="${verifyLink}">Подтвердить e-mail</a></p>
-      <p>Если вы открываете письмо на телефоне, можно использовать альтернативную ссылку:</p>
-      <p><a href="${callToActionLink}">${callToActionLink}</a></p>
-      <p>Или скопируйте токен и вставьте его в приложении:</p>
-      <p style="font-family: monospace; font-size: 14px; background-color: #f5f5f5; padding: 10px; border-radius: 4px; word-break: break-all;">${token}</p>
-      <p>Ссылка действительна 24 часа.</p>
+      <p>Hello!</p>
+      <p>Thanks for signing up. Enter this code in the app to confirm your email address:</p>
+      <p style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 28px; font-weight: 700; letter-spacing: 6px; background-color: #f5f5f5; padding: 16px 20px; border-radius: 8px; display: inline-block;">${token}</p>
+      <p>The code is valid for 15 minutes.</p>
+      <p style="color: #666; font-size: 13px;">If you did not sign up for iWent, just ignore this email.</p>
     `;
-    const textContent = `Здравствуйте!\n\nСпасибо за регистрацию. Пожалуйста, подтвердите ваш e-mail, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${verifyLink}\n\nСсылка действительна 24 часа.`;
+    const textContent = `Hello!\n\nThanks for signing up. Enter this code in the app to confirm your email address:\n\n${token}\n\nThe code is valid for 15 minutes.\n\nIf you did not sign up for iWent, just ignore this email.`;
     try {
-      await this.sendViaYandexCloud(email, 'Подтвердите ваш e-mail', htmlContent, textContent);
+      await this.sendViaYandexCloud(email, 'Confirm your email address', htmlContent, textContent);
       this.logger.log(`✅ Verification email sent to ${email}`);
     } catch (error: any) {
       this.logger.error(`❌ Failed to send verification email to ${email}: ${error?.message || error}`);
@@ -207,16 +200,18 @@ export class MailerService {
       this.logger.error(`Email service is not configured. Cannot send password reset email to ${email}`);
       throw new Error('Email service is not configured');
     }
-    const resetLink = `${this.resetRedirectUrl}?token=${encodeURIComponent(token)}`;
+    // Тоже только код: с 06.09.2026 сброс пароля работает по шести цифрам,
+    // которые вводятся в приложении, а не по ссылке с длинным токеном.
     const htmlContent = `
-      <p>Здравствуйте!</p>
-      <p>Мы получили запрос на сброс пароля. Вы можете задать новый пароль, перейдя по ссылке:</p>
-      <p><a href="${resetLink}">Сбросить пароль</a></p>
-      <p>Если вы не запрашивали изменение пароля, просто проигнорируйте это письмо.</p>
+      <p>Hello!</p>
+      <p>We received a request to reset your iWent password. Enter this code in the app to set a new one:</p>
+      <p style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 28px; font-weight: 700; letter-spacing: 6px; background-color: #f5f5f5; padding: 16px 20px; border-radius: 8px; display: inline-block;">${token}</p>
+      <p>The code is valid for 15 minutes.</p>
+      <p style="color: #666; font-size: 13px;">If you did not request a password reset, just ignore this email — your password stays unchanged.</p>
     `;
-    const textContent = `Здравствуйте!\n\nМы получили запрос на сброс пароля. Вы можете задать новый пароль, используя токен:\n\n${token}\n\nИли перейдите по ссылке: ${resetLink}\n\nЕсли вы не запрашивали изменение пароля, просто проигнорируйте это письмо.`;
+    const textContent = `Hello!\n\nWe received a request to reset your iWent password. Enter this code in the app to set a new one:\n\n${token}\n\nThe code is valid for 15 minutes.\n\nIf you did not request a password reset, just ignore this email - your password stays unchanged.`;
     try {
-      await this.sendViaYandexCloud(email, 'Сброс пароля', htmlContent, textContent);
+      await this.sendViaYandexCloud(email, 'Reset your password', htmlContent, textContent);
       this.logger.log(`✅ Password reset email sent to ${email}`);
     } catch (error: any) {
       this.logger.error(`❌ Failed to send password reset email to ${email}:`, error?.message || error);

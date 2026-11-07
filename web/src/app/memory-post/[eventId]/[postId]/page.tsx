@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import { PageLoading } from '@/web/components/PageLoading';
 
 const MemoryPostScreen = dynamic(
-  () => import('@/client/app/memory-post/[eventId]/[postId]').then(mod => ({ default: mod.default })),
+  () => import('@/client/screens/MemoryPostScreen').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

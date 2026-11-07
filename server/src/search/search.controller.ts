@@ -1,6 +1,7 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { SearchService } from './search.service';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
+import { RequestUser } from '../shared/decorators/request-user.decorator';
 
 @Controller('search')
 export class SearchController {
@@ -27,14 +28,18 @@ export class SearchController {
     });
   }
 
+  // Поиск людей — под авторизацией: без неё не отсеять заблокированных.
   @Get('users')
+  @UseGuards(JwtAuthGuard)
   async searchUsers(
+    @RequestUser('userId') viewerId: string,
     @Query('q') q?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
     return this.searchService.searchUsers({
       q,
+      viewerId,
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
     });
@@ -43,11 +48,12 @@ export class SearchController {
   @Get('global')
   @UseGuards(JwtAuthGuard)
   async globalSearch(
+    @RequestUser('userId') userId: string,
     @Query('q') q?: string,
     @Query('limit') limit?: string,
   ) {
     const limitNumber = limit ? parseInt(limit, 10) : 10;
-    return this.searchService.globalSearch(q || '', limitNumber);
+    return this.searchService.globalSearch(q || '', limitNumber, userId);
   }
 }
 

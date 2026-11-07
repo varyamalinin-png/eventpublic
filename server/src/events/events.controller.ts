@@ -104,6 +104,38 @@ export class EventsController {
     }
   }
 
+  // 🎫 Предложения стать организатором, ожидающие моего ответа.
+  @UseGuards(JwtAuthGuard)
+  @Get('transfers/incoming')
+  async listOrganizerTransfers(@RequestUser('userId') userId: string) {
+    return this.eventsService.listOrganizerTransfers(userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('transfers/:transferId/respond')
+  async respondToOrganizerTransfer(
+    @Param('transferId') transferId: string,
+    @Body() body: { accept: boolean },
+    @RequestUser('userId') userId: string,
+  ) {
+    return this.eventsService.respondToOrganizerTransfer(transferId, userId, !!body.accept);
+  }
+
+  // 📥 ВСЕ ЗАЯВКИ НА УЧАСТИЕ ВО ВСЕХ МОИХ СОБЫТИЯХ — одним запросом.
+  // Объявлен ДО '/:id/requests': иначе 'requests' попал бы в параметр id.
+  @UseGuards(JwtAuthGuard)
+  @Get('requests/organizer')
+  async listOrganizerRequests(@RequestUser('userId') userId: string) {
+    try {
+      const result = await this.eventsService.listOrganizerPendingRequests(userId);
+      logger.info(`Organizer pending requests: ${result?.length || 0}`);
+      return result;
+    } catch (error) {
+      logger.error(`Error getting organizer requests: ${error?.message}`, error?.stack);
+      throw error;
+    }
+  }
+
   // 📥 ПОЛУЧЕНИЕ ЗАПРОСОВ ПОЛЬЗОВАТЕЛЯ (входящие и исходящие приглашения, а также исходящие join-запросы)
   @UseGuards(JwtAuthGuard)
   @Get('requests/user')
@@ -134,6 +166,31 @@ export class EventsController {
       logger.error(`Error getting recommended events: ${error?.message}`, error?.stack);
       throw error;
     }
+  }
+
+  /**
+   * Личные настройки видимости прошедших событий в профиле пользователя.
+   *
+   * Маршрут стоит ВЫШЕ `@Get(':id')` — иначе Nest примет 'memory-visibility'
+   * за идентификатор события.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('memory-visibility/:userId')
+  async getMemoryVisibility(
+    @Param('userId') ownerId: string,
+    @RequestUser('userId') viewerId: string,
+  ) {
+    return this.eventsService.getMemoryVisibility(ownerId, viewerId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':eventId/memory-visibility')
+  async setMemoryVisibility(
+    @Param('eventId') eventId: string,
+    @RequestUser('userId') userId: string,
+    @Body() body: { visibility: string },
+  ) {
+    return this.eventsService.setMemoryVisibility(eventId, userId, body?.visibility);
   }
 
   @UseGuards(OptionalJwtAuthGuard)
@@ -369,7 +426,7 @@ export class EventsController {
   ) {
     try {
       logger.info(`📤 POST transfer organizer role: ${eventId}, from userId: ${userId}, to userId: ${body.newOrganizerId}`);
-      const result = await this.eventsService.transferOrganizerRole(eventId, userId, body.newOrganizerId);
+      const result = await this.eventsService.requestOrganizerTransfer(eventId, userId, body.newOrganizerId);
       logger.info(`Organizer role transferred successfully`);
       return result;
     } catch (error) {

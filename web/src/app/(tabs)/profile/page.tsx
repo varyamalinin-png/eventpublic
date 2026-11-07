@@ -8,7 +8,7 @@ import { PageLoading } from '@/web/components/PageLoading';
 import { useLanguage } from '@/client/context/LanguageContext';
 
 const ProfileScreen = dynamicImport(
-  () => import('@/client/app/(tabs)/profile').then(mod => ({ default: mod.default })).catch(() => ({ default: () => null })),
+  () => import('@/client/app/(tabs)/(profile)/profile').then(mod => ({ default: mod.default })).catch(() => ({ default: () => null })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

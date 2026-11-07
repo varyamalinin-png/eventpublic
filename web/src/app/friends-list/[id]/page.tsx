@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import { PageLoading } from '@/web/components/PageLoading';
 
 const FriendsListDetailScreen = dynamic(
-  () => import('@/client/app/friends-list/[id]').then(mod => ({ default: mod.default })),
+  () => import('@/client/screens/UserFriendsListScreen').then(mod => ({ default: mod.default })),
   { ssr: false, loading: () => <PageLoading /> }
 );
 

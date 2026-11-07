@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, MinLength, IsIn } from 'class-validator';
+import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength, IsIn } from 'class-validator';
 
 export class RegisterDto {
   @IsEmail()
@@ -12,17 +12,18 @@ export class RegisterDto {
   })
   username!: string;
 
-  // Телефон обязателен при регистрации. Проверки владения номером пока нет,
-  // поэтому формат не ужесточаем — только длина и допустимые символы, чтобы
-  // не отсечь международные записи вида +7 (999) 123-45-67.
+  // Телефон НЕобязателен: Apple отклонила сборку 3 по 5.1.1(v) — требовать
+  // данные, без которых приложение работает, нельзя. Если номер всё же ввели,
+  // проверяем только длину и символы: подтверждения владения номером нет, и
+  // формат не ужесточаем, чтобы не отсечь записи вида +7 (999) 123-45-67.
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MinLength(5)
   @MaxLength(24)
   @Matches(/^[+()\-\s\d]+$/, {
     message: 'Phone may contain digits, spaces, brackets, dashes and a leading plus',
   })
-  phone!: string;
+  phone?: string;
 
   @IsString()
   @MinLength(8)
