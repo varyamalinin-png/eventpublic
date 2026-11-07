@@ -7,17 +7,14 @@ import { PageLoading } from '@/web/components/PageLoading';
 
 function AppContent() {
   const router = useRouter();
-  const { isAuthenticated, initializing } = useAuth();
+  const { initializing } = useAuth();
 
   useEffect(() => {
     if (!initializing) {
-      if (isAuthenticated) {
-        router.replace('/explore');
-      } else {
-        router.replace('/login');
-      }
+      // Гостевой режим: лента открыта и без аккаунта (параметры заблюрены).
+      router.replace('/explore');
     }
-  }, [isAuthenticated, initializing, router]);
+  }, [initializing, router]);
 
   return <PageLoading />;
 }

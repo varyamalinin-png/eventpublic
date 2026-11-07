@@ -3,8 +3,9 @@
 import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useLanguage } from '@/client/context/LanguageContext';
+import { hasStoredSession } from '@/web/lib/publicPage';
 
 const ACCENT = '#FF8D32';
 const SURFACE = '#141417';
@@ -75,8 +76,18 @@ const AUTH_PATHS = ['/login', '/verify-email', '/add-account', '/add-account-ver
 export function DesktopSidebar() {
   const { t } = useLanguage();
   const pathname = usePathname();
+  const router = useRouter();
 
   if (AUTH_PATHS.some(p => pathname === p || pathname?.startsWith(p + '/'))) return null;
+
+  // Гостю открыта только лента Explore — остальные разделы ведут на
+  // регистрацию. Сессия читается из localStorage (см. publicPage).
+  const guardGuest = (e: React.MouseEvent, path: string) => {
+    if (path !== '/explore' && !hasStoredSession()) {
+      e.preventDefault();
+      router.push('/login?mode=register');
+    }
+  };
 
   return (
     <>
@@ -142,6 +153,7 @@ export function DesktopSidebar() {
               href={tab.path}
               prefetch={true}
               aria-current={active ? 'page' : undefined}
+              onClick={(e) => guardGuest(e, tab.path)}
               className={`iwent-sidebar-link${active && !isCreate ? ' active' : ''}${isCreate ? ' create' : ''}`}
             >
               <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
@@ -154,7 +166,7 @@ export function DesktopSidebar() {
 
         <div style={{ flex: 1 }} />
 
-        <Link href="/settings" className="iwent-sidebar-link" style={{ marginTop: 8 }}>
+        <Link href="/settings" className="iwent-sidebar-link" style={{ marginTop: 8 }} onClick={(e) => guardGuest(e, '/settings')}>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />

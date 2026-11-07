@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { hasStoredSession } from '@/web/lib/publicPage';
 
 const icons = {
   explore: (
@@ -89,6 +90,12 @@ export function WebTabBar() {
   const [pendingPath, setPendingPath] = useState<string | null>(null);
 
   const handleTabPress = useCallback((path: string) => {
+    // Гостю открыта только лента Explore — остальные разделы ведут
+    // на регистрацию. Сессия читается из localStorage (см. publicPage).
+    if (path !== '/explore' && !hasStoredSession()) {
+      router.push('/login?mode=register');
+      return;
+    }
     setPendingPath(path);
     router.push(path);
     // Сбрасываем pending когда pathname обновится (через useEffect ниже)

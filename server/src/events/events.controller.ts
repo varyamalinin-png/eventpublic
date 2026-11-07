@@ -10,6 +10,7 @@ import { RequestUser } from '../shared/decorators/request-user.decorator';
 import { StorageService } from '../storage/storage.service';
 import { createLogger } from '../shared/utils/logger';
 import { normalizePublicMediaUrl } from '../shared/public-site';
+import { sanitizeEventForGuest, sanitizeEventsForGuest } from './guest-sanitize';
 import type { Express } from 'express';
 
 const logger = createLogger('EventsController');
@@ -72,17 +73,21 @@ export class EventsController {
     @RequestUser('userId') currentUserId?: string,
   ) {
     try {
+      // Гостю (без JWT) отдаём только будущие события, с ограничением по
+      // количеству и с вырезанными датой/местом — см. sanitizeEventsForGuest.
+      const isGuest = !currentUserId;
       const parsedLimit = limit ? Math.min(parseInt(limit, 10) || 50, 100) : undefined;
       logger.info(`📥 GET events, limit: ${parsedLimit}, cursor: ${cursor}, currentUserId: ${currentUserId}`);
       const result = await this.eventsService.findAll({
         organizerId,
-        upcoming: upcoming === 'true',
+        upcoming: upcoming === 'true' || isGuest,
         currentUserId,
-        limit: parsedLimit,
+        limit: parsedLimit ?? (isGuest ? 50 : undefined),
         cursor,
       });
       logger.info(`Events retrieved: ${result?.length || 0} events`);
-      return normalizeEventMediaUrls(result);
+      const visible = isGuest ? sanitizeEventsForGuest(result) : result;
+      return normalizeEventMediaUrls(visible);
     } catch (error) {
       logger.error(`Error getting events: ${error?.message}`, error?.stack);
       throw error;
@@ -200,7 +205,8 @@ export class EventsController {
       logger.info(`📥 GET event by id: ${id}, currentUserId: ${currentUserId}`);
       const result = await this.eventsService.findOne(id, currentUserId);
       logger.info(`Event retrieved: ${result ? result.id : 'not found'}`);
-      return normalizeEventMediaUrls(result);
+      // Анониму — та же гостевая выдача, что и в ленте: без даты и места.
+      return normalizeEventMediaUrls(currentUserId ? result : sanitizeEventForGuest(result));
     } catch (error) {
       logger.error(`Error getting event: ${error?.message}`, error?.stack);
       throw error;

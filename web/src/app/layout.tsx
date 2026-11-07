@@ -4,6 +4,7 @@ import { Providers } from './providers';
 import { DesktopSidebar } from '../components/DesktopSidebar';
 import { DesktopRightRail } from '../components/DesktopRightRail';
 import { NavigationProgress } from '../components/NavigationProgress';
+import { GuestGate } from '../components/GuestGate';
 
 export const metadata: Metadata = {
   title: 'iwent — события рядом',
@@ -87,6 +88,7 @@ export default function RootLayout({
       <body style={{ margin: 0, padding: 0, overflowX: 'hidden', overflowY: 'auto' }}>
         <NavigationProgress />
         <Providers>
+          <GuestGate />
           <DesktopSidebar />
           <DesktopRightRail />
           {children}

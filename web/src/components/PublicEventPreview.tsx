@@ -14,8 +14,9 @@ type PublicEvent = {
   title?: string;
   description?: string;
   mediaUrl?: string;
-  startTime?: string;
-  location?: string;
+  startTime?: string | null;
+  location?: string | null;
+  price?: string | null;
 };
 
 function formatWhen(startTime: string | undefined, ru: boolean): string {
@@ -57,13 +58,25 @@ export function PublicEventPreview({ eventId }: { eventId: string }) {
         open: 'Открыть в приложении',
         signIn: 'Войти',
         more: 'Фотографии, участники и чат события — в приложении.',
+        hiddenDate: '12 декабря, 19:00',
+        hiddenPlace: 'Москва, центр',
+        hiddenHint: 'Дата и место видны после регистрации',
       }
     : {
         notFound: 'This event is not available any more',
         open: 'Open in the app',
         signIn: 'Sign in',
         more: 'Photos, participants and the event chat are in the app.',
+        hiddenDate: 'December 12, 7:00 PM',
+        hiddenPlace: 'City center',
+        hiddenHint: 'The date and place are visible after sign-up',
       };
+
+  const when = formatWhen(event?.startTime ?? undefined, ru);
+  // Гостю сервер отдаёт событие без даты и места (они занулены) — рисуем
+  // заблюренные плейсхолдеры, как на карточках в ленте. Цена видна всегда.
+  const dateHidden = !!event && !when;
+  const placeHidden = !!event && !event.location;
 
   return (
     <div style={styles.page}>
@@ -83,10 +96,12 @@ export function PublicEventPreview({ eventId }: { eventId: string }) {
           ) : (
             <>
               <h1 style={styles.title}>{event?.title || ' '}</h1>
-              {formatWhen(event?.startTime, ru) && (
-                <p style={styles.meta}>{formatWhen(event?.startTime, ru)}</p>
-              )}
+              {when && <p style={styles.meta}>{when}</p>}
+              {dateHidden && <p style={styles.meta}><span style={styles.blurred}>{t.hiddenDate}</span></p>}
               {event?.location && <p style={styles.meta}>{event.location}</p>}
+              {placeHidden && <p style={styles.meta}><span style={styles.blurred}>{t.hiddenPlace}</span></p>}
+              {(dateHidden || placeHidden) && <p style={styles.hiddenHint}>{t.hiddenHint}</p>}
+              {event?.price && <p style={styles.meta}>{event.price}</p>}
               {event?.description && <p style={styles.description}>{event.description}</p>}
             </>
           )}
@@ -127,6 +142,13 @@ const styles: Record<string, React.CSSProperties> = {
   body: { padding: 20 },
   title: { color: '#F4F4F5', fontSize: 22, lineHeight: 1.25, margin: '0 0 10px' },
   meta: { color: 'rgba(244,244,245,0.66)', fontSize: 14, margin: '0 0 4px' },
+  blurred: {
+    filter: 'blur(5px)',
+    WebkitFilter: 'blur(5px)',
+    userSelect: 'none',
+    display: 'inline-block',
+  },
+  hiddenHint: { color: 'rgba(244,244,245,0.4)', fontSize: 12, margin: '2px 0 4px' },
   description: {
     color: 'rgba(244,244,245,0.8)',
     fontSize: 15,
