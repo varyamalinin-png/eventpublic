@@ -115,9 +115,32 @@ function OrganizerAvatarButton({
   imageNativeId: string;
 }) {
   const [loadFailed, setLoadFailed] = useState(false);
+  const retryRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setLoadFailed(false);
+    retryRef.current = 0;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, [remoteUri]);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
+
+  const handleError = useCallback(() => {
+    if (!remoteUri) return;
+    setLoadFailed(true);
+    // Как и у обложки: одна сетевая неудача не навсегда. Повторяем с
+    // нарастающей задержкой, потом оставляем заглушку.
+    const attempt = retryRef.current;
+    if (attempt >= IMAGE_RETRY_DELAYS_MS.length) return;
+    retryRef.current = attempt + 1;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setLoadFailed(false), IMAGE_RETRY_DELAYS_MS[attempt]);
   }, [remoteUri]);
 
   const uri = remoteUri && !loadFailed ? remoteUri : ORGANIZER_AVATAR_PLACEHOLDER_URI;
@@ -130,25 +153,51 @@ function OrganizerAvatarButton({
           source={{ uri }}
           style={organizerAvatarButtonStyles.image}
           resizeMode="cover"
-          onError={() => {
-            if (remoteUri) setLoadFailed(true);
-          }}
+          onError={handleError}
         />
       </View>
     </TouchableOpacity>
   );
 }
 
+/**
+ * Одна неудачная загрузка не должна навсегда прятать картинку за заглушкой:
+ * сеть могла просто моргнуть. После onError перезапускаем попытку с
+ * нарастающей задержкой; когда попытки кончились (реальный 404) — остаётся
+ * заглушка до смены primaryUri.
+ */
+const IMAGE_RETRY_DELAYS_MS = [4000, 10000, 20000, 40000, 60000, 60000];
+
 function useImageFallbackUri(primaryUri: string | undefined, fallbackUri: string) {
   const [failed, setFailed] = useState(false);
+  const retryRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setFailed(false);
+    retryRef.current = 0;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
   }, [primaryUri]);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
+
+  const onError = useCallback(() => {
+    setFailed(true);
+    const attempt = retryRef.current;
+    if (attempt >= IMAGE_RETRY_DELAYS_MS.length) return;
+    retryRef.current = attempt + 1;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setFailed(false), IMAGE_RETRY_DELAYS_MS[attempt]);
+  }, []);
 
   return {
     uri: !primaryUri || failed ? fallbackUri : primaryUri,
-    onError: () => setFailed(true),
+    onError,
   };
 }
 
