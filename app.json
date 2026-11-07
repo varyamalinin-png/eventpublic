@@ -3,7 +3,7 @@
     "name": "iwent",
     "scheme": "iwent",
     "slug": "iwent",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -26,7 +26,7 @@
         "applinks:iwent.ru",
         "applinks:www.iwent.ru"
       ],
-      "buildNumber": "6",
+      "buildNumber": "7",
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false,
