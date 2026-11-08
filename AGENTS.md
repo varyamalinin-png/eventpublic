@@ -1024,30 +1024,42 @@ Still missing, and each needs an account only the owner can create:
   must then run **closed testing with 12 testers for 14 consecutive days**
   before production access. That 14-day clock, not the code, is the long pole.
 
-## 2.9 reg.ru's upstream DDoS filter quietly blocks *your* IP — looks like an app bug
+## 2.9 "Site is down" that is actually the owner's VPN — check exit IPs first
 
-Twice in the night of 2026-11-08 the Mac suddenly could not reach iwent.ru at
-all — `curl` 000/timeout, 100% ping loss — while the site was **fully up for
-the rest of the world** (verified via an external fetch service and by
-strangers' traffic in `/var/log/nginx/access.log`). SSH to the VM kept working
-the whole time; only web ports (80/443) and ICMP were dropped, and the blocked
-IP never appeared in nginx's log — the packets are dropped **upstream of the
-VM**, at reg.ru's DDoS-scrubbing layer, almost certainly triggered by the
-night's heavy deploy/test traffic from one IP. There is nothing to fix on the
-VM (`iptables` clean, fail2ban only has the sshd jail). The block lifts by
-itself — observed windows were ~3 and ~20 minutes — and flaps if you keep
-hammering while testing.
+Night of 2026-11-08 looked like reg.ru's DDoS filter flapping on the Mac's IP
+(curl 000/timeout, 100% ping loss, SSH alive, zero trace in nginx logs) while
+the site served the rest of the world fine. The real cause turned out to be
+simpler and dumber: **the Mac's traffic exits through a VPN in Amsterdam**
+(`155.117.99.130` = RedSwitches, a hosting ASN — exactly the kind of exit a
+DDoS scrubber rate-limits or drops), and the owner's iPhone had a VPN tunnel
+active too (`interface: utun6[lte]` in the network log), whose connections to
+iwent.ru:443 got **TCP-reset mid-TLS-handshake** (`SSLHandshake failed
+(-9806)`, `-1200 "A TLS error caused the secure connection to fail"`). Direct
+RU traffic works: the phone's requests that bypassed the tunnel arrived from
+`91.79.42.43` (MTS Moscow) and got 200s, including `POST /auth/login`.
 
-The diagnostic trap: the iOS simulator shares the Mac's network, so during a
-blocked window the app shows covers as "no cover" placeholders and empty
-skeletons — indistinguishable from a media/frontend bug. The simulator log
-(`xcrun simctl spawn <udid> log show --predicate 'process == "iwent"'`) tells
-the truth: every image task ends `-1001 "The request timed out"` with 0
-response bytes. Before debugging "images don't load", check plain
-`curl https://iwent.ru` from the same machine and an external vantage point.
-Companion fix shipped the same night (`client` 216e759): `EventCard`'s image
-fallback no longer latches the placeholder on the first failed load — cover
-and avatar retry with backoff (4s/10s/20s/40s/60s/60s) before settling.
+So the diagnostic order for "everything times out / TLS errors on one device
+only" is:
+
+1. `curl https://ipinfo.io/json` on the affected machine — if the country is
+   not RU, it's a VPN exit problem, not a server problem.
+2. External vantage point (any fetch service) for `https://iwent.ru` — if it
+   answers, the site is up.
+3. `tail /var/log/nginx/access.log` on the VM — requests that never appear
+   there died on the way (VPN exit / scrubber), not in nginx or the app.
+   nginx error.log had **zero** SSL handshake failures through all of this.
+4. Client-side tell: `-1001` timeouts AND `-1200`/`-9816` TLS aborts to the
+   same host that sometimes answers = on-path interference, not app code.
+
+Fix on the user's side: disable the VPN or split-tunnel `iwent.ru` /
+`91.197.99.213`. Nothing to change on the server. (First version of this note
+blamed "reg.ru blocking an IP after heavy deploy traffic" — that attribution
+was wrong; the traffic volume was a coincidence, the exit ASN was the cause.)
+
+Companion resilience fix shipped the same night (`client` 216e759):
+`EventCard`'s image fallback no longer latches the "no cover" placeholder on
+the first failed load — cover and avatar retry with backoff
+(4s/10s/20s/40s/60s/60s) before settling.
 
 ## 3. Native app builds
 
