@@ -513,6 +513,15 @@ non-obvious mechanics:
   the same blurred placeholders for date/place and now renders `price`.
 - **Login screen** has a "Continue without an account" link back to
   `/explore`; `?mode=register` opens the register form directly.
+- **Account-bound card actions are gated too** (2026-11-08): in
+  `EventCard.handleActionPress` a guest tapping **save** or **report**
+  goes to `/login?mode=register` (save used to silently stash the event
+  locally; report would have died on a 401). Share stays public.
+  `utils/openUserProfile.ts` sends guests to register instead of
+  `/profile/<id>` — `GET /users/:id` is 401 for anonymous, so the guest
+  used to land on an empty skeleton named "user". All ~16 call sites
+  pass `currentUserId` from `authUser?.id`, so the gate sits in that one
+  function.
 
 ### TypeScript/ESLint are not a build gate
 
