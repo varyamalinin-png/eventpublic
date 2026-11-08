@@ -17,7 +17,14 @@ import { router } from 'expo-router';
  */
 export function openUserProfile(userId: string, currentUserId?: string | null): void {
   if (!userId) return;
-  if (currentUserId && userId === currentUserId) {
+  // Гость: чужой профиль всё равно недоступен без аккаунта
+  // (GET /users/:id отвечает 401), поэтому сразу ведём на регистрацию,
+  // а не показываем пустой скелетон.
+  if (!currentUserId) {
+    router.push('/(auth)/login?mode=register');
+    return;
+  }
+  if (userId === currentUserId) {
     router.push('/profile');
     return;
   }

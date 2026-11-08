@@ -857,6 +857,15 @@ function EventCard({
 
   // Обработчик действий из модального окна
   const handleActionPress = useCallback((actionId: string) => {
+    // Гость: действия, привязанные к аккаунту (сохранить, пожаловаться),
+    // ведут на регистрацию — сохранять локально «в никуда» бессмысленно,
+    // а жалоба без аккаунта всё равно не уйдёт на сервер.
+    // Share остаётся доступным: ссылка публичная.
+    if (isGuest && (actionId === 'save' || actionId === 'report')) {
+      setShowEventActionsModal(false);
+      router.push('/(auth)/login?mode=register');
+      return;
+    }
     if (actionId === 'share') {
       setShowShareModal(true);
       setShowEventActionsModal(false);
