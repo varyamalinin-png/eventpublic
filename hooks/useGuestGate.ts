@@ -25,9 +25,16 @@ export function useGuestGate(): boolean {
   const isGuest = !initializing && !user;
 
   useEffect(() => {
-    if (isGuest) {
+    if (!isGuest) return;
+    // Небольшая отсрочка: replace, брошенный в момент маунта экрана по
+    // диплинку, может проиграть гонку с самой навигацией диплинка — тогда
+    // гость остаётся на белом экране. 100 мс незаметны (экран всё это время
+    // рендерит null), а навигация успевает завершиться. Страховкой служит
+    // гейт на уровне (tabs)/_layout.tsx.
+    const timer = setTimeout(() => {
       router.replace('/(auth)/login?mode=register');
-    }
+    }, 100);
+    return () => clearTimeout(timer);
   }, [isGuest, router]);
 
   return isGuest;

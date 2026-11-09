@@ -1,10 +1,10 @@
 import { Tabs } from 'expo-router';
 import { Ionicons, FontAwesome, MaterialIcons } from '@expo/vector-icons';
 import { View, StyleSheet, TouchableOpacity, Text, Platform, Animated } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { Link, useRouter, usePathname } from 'expo-router';
 import { useEvents } from '../../context/EventsContext';
 import { useAuth } from '../../context/AuthContext';
-import { useMemo, useRef, useCallback } from 'react';
+import { useMemo, useRef, useCallback, useEffect } from 'react';
 import { createLogger } from '../../utils/logger';
 import { useLanguage } from '../../context/LanguageContext';
 
@@ -55,8 +55,24 @@ export default function TabLayout() {
 
 
   const { chats, unreadNotificationsCount } = useEvents();
-  const { user } = useAuth();
+  const { user, initializing } = useAuth();
   const currentUserId = useMemo(() => user?.id ?? null, [user]);
+  const pathname = usePathname();
+
+  // Вторая линия гостевого гейта (первая — guestGuardListeners на табах,
+  // экранные useGuestGate — третья). Диплинки вида iwent://map, /calendar,
+  // /inbox, /event-profile/<id> попадают на экраны разделов В ОБХОД таб-бара,
+  // а редирект из эффекта только что смонтированного экрана может проиграть
+  // гонку навигации диплинка — экран тогда остаётся белым. Этот лейаут живёт
+  // над всеми экранами разделов и не размонтируется при переходах, поэтому
+  // его эффект срабатывает уже ПОСЛЕ завершения навигации и надёжно уводит
+  // гостя на регистрацию со всего, кроме открытой ленты.
+  useEffect(() => {
+    if (Platform.OS === 'web') return; // на вебе этот лейаут не используется
+    if (initializing || user) return;
+    if (pathname === '/explore' || pathname === '/') return;
+    router.replace('/(auth)/login?mode=register');
+  }, [pathname, user, initializing, router]);
 
   // Гостю (без аккаунта) открыт только Explore — остальные табы ведут
   // на регистрацию. Explore свободен: лента видна с заблюренными параметрами.
