@@ -522,6 +522,42 @@ non-obvious mechanics:
   used to land on an empty skeleton named "user". All ~16 call sites
   pass `currentUserId` from `authUser?.id`, so the gate sits in that one
   function.
+- **Deep links bypassed all of the above (fixed 2026-11-09/10).** A guest
+  opening `iwent://map`, `/calendar`, `/inbox`, `/saved`, `/memories`,
+  `/event-profile/<id>`, `/profile/<id>`, `/friends-list/<id>` etc.
+  landed straight on the real screen, because none of the guards above
+  fire for in-app navigation. Two layers now close this:
+  - `client/hooks/useGuestGate.ts` — returns
+    `isGuest = !initializing && !user`; on guest it does
+    `router.replace('/(auth)/login?mode=register')` and the screen renders
+    `null`. Used by every gated screen (map, calendar, create, inbox ×4,
+    memories, saved, UserProfileScreen, both friends lists, all/organized/
+    participated/shared events, both folder screens, MemoryPostScreen,
+    EventProfileScreen). **The replace MUST be deferred ~100 ms**
+    (`setTimeout` inside the effect): a deep link's own navigation commits
+    in the same commit phase, and an immediate replace loses the race —
+    the guest saw a blank screen that never redirected. That was the one
+    real bug in the first version of this gate.
+  - A second gate inside `client/app/(tabs)/_layout.tsx` itself: a
+    `usePathname()` effect replaces to register for any tab route other
+    than `/explore`/`/` while logged out. The tab layout never unmounts
+    on in-app navigation, so this catches anything the per-screen hooks
+    miss. It is disabled on web (`Platform.OS === 'web'`), where the
+    root-layout `GuestGate` already handles it — otherwise the two race.
+- **The EventCard organizer chip** also goes through
+  `openUserProfile(organizerId, currentUserId)` now, so a guest tapping
+  the organizer avatar/name hits the register wall like any other
+  profile tap.
+- **`MemoryPost` save/report** used `handleSave`'s own navigation helper
+  rather than `useRouter` — a guest got a fake "Report sent" toast. Both
+  now route through the same register redirect.
+- **Smoke-test note:** session tokens live in the Keychain and survive
+  `simctl uninstall`/`install` — to test the guest path you must log out
+  inside the app (Settings → Log out), reinstalling is not enough.
+- Verified end-to-end on the simulator (2026-11-10): all deep links above
+  land on the register screen for a guest; after signing in, map,
+  calendar, feed (unblurred) and profile all work — the layout gate does
+  not interfere with authenticated users.
 
 ### TypeScript/ESLint are not a build gate
 
