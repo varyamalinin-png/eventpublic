@@ -13,6 +13,7 @@ import { useLanguage } from '../../../../../context/LanguageContext';
 import { createLogger } from '../../../../../utils/logger';
 import { TabBarSpacer } from '../../../../../constants/DesignSystem';
 import { apiRequest } from '../../../../../services/api';
+import { useGuestGate } from '../../../../../hooks/useGuestGate';
 
 const logger = createLogger('RequestsTab');
 
@@ -45,6 +46,8 @@ function sortByCreatedAtDesc<T extends { id: string }>(
 
 export default function RequestsTab({ initialTab }: RequestsTabProps = {}) {
   const router = useRouter();
+  // Гостю уведомления/заявки закрыты (диплинк /inbox/requests идёт в обход таб-бара).
+  const isGuest = useGuestGate();
   const { t } = useLanguage();
   const { 
     friendRequests, 
@@ -619,6 +622,9 @@ export default function RequestsTab({ initialTab }: RequestsTabProps = {}) {
       />
     );
   };
+
+  // Гостю список заявок не рендерим — редирект на регистрацию уже пошёл.
+  if (isGuest) return null;
 
   return (
     <View style={styles.container}>

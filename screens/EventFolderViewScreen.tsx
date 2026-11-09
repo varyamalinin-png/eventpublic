@@ -7,11 +7,14 @@ import { useEvents } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import type { EventFolder } from '../types/EventFolder';
+import { useGuestGate } from '../hooks/useGuestGate';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function EventFolderViewScreen() {
   const router = useRouter();
+  // Гость: папки событий закрыты (диплинк в обход таб-бара).
+  const isGuest = useGuestGate();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { getEventFolderById, eventFolders, events: allEvents, isEventPast } = useEvents();
   const { user: authUser } = useAuth();
@@ -46,6 +49,9 @@ export default function EventFolderViewScreen() {
 
     loadFolder();
   }, [id, getEventFolderById, eventFolders]);
+
+  // Гостю папку не показываем — редирект на регистрацию уже пошёл.
+  if (isGuest) return null;
 
   if (loading) {
     return (

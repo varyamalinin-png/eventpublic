@@ -5,8 +5,12 @@ import MessagesTab from './messages';
 import RequestsTab from './requests';
 import { useEvents } from '../../../../context/EventsContext';
 import { useLanguage } from '../../../../context/LanguageContext';
+import { useGuestGate } from '../../../../hooks/useGuestGate';
 
 export default function InboxScreen() {
+  // Гость: инбокс закрыт — уходим на регистрацию (диплинк iwent://inbox
+  // попадает сюда в обход таб-бара с его guestGuardListeners).
+  const isGuest = useGuestGate();
   /**
    * Вкладку можно задать при переходе: /inbox?tab=requests&requestsTab=outgoing.
    *
@@ -91,6 +95,9 @@ export default function InboxScreen() {
       wasOnRequestsTabRef.current = true;
     }
   };
+
+  // Гостю инбокс не рендерим — редирект на регистрацию уже пошёл.
+  if (isGuest) return null;
 
   return (
     <View style={styles.container}>

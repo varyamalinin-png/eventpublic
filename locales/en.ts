@@ -338,6 +338,8 @@ export const en = {
     myEventsTitle: 'My events',
     selectEventToView: 'Pick an event to view',
     friendsTitle: 'Friends',
+    friendsOf: "{name}'s friends",
+    friendsCount: 'friends: {count}',
     loadError: 'Failed to load profile data',
     selectAtLeastOneEvent: 'Select at least one event',
     deleteEventsQuestion: 'Delete events?',

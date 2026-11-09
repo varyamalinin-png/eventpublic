@@ -12,11 +12,14 @@ import { cacheKey } from '../utils/queryCache';
 import { FriendListSkeleton } from '../components/FriendRowSkeleton';
 import { normalizeMediaUrl } from '../context/EventsContext.helpers';
 import { sizedImage } from '../utils/imageSize';
+import { useGuestGate } from '../hooks/useGuestGate';
 
 export default function UserFriendsListScreen() {
   const { id } = useLocalSearchParams();
   const { getUserData } = useEvents();
   const { user, accessToken } = useAuth();
+  // Гость: список друзей закрыт (диплинк /friends-list/<id> идёт в обход таб-бара).
+  const isGuest = useGuestGate();
 
   const userId = Array.isArray(id) ? id[0] : id || '';
   const userData = getUserData(userId);
@@ -55,11 +58,14 @@ export default function UserFriendsListScreen() {
     </Link>
   );
 
+  // Гостю список не рендерим — редирект на регистрацию уже пошёл.
+  if (isGuest) return null;
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Друзья {userData.name}</Text>
-        <Text style={styles.subtitle}>{userStats.friends} друзей</Text>
+        <Text style={styles.title}>{(t.profile.friendsOf || 'Друзья — {name}').replace('{name}', userData.name || userData.username || '')}</Text>
+        <Text style={styles.subtitle}>{(t.profile.friendsCount || 'друзей: {count}').replace('{count}', String(userStats.friends))}</Text>
       </View>
       
       <FlatList

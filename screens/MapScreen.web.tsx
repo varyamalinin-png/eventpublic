@@ -20,6 +20,7 @@ import { apiRequest } from '../services/api';
 import type { Event } from '../context/EventsContext';
 import { AppIcon } from '../components/ui/AppIcon';
 import { Palette } from '../constants/DesignSystem';
+import { useGuestGate } from '../hooks/useGuestGate';
 
 const logger = createLogger('Map');
 
@@ -340,6 +341,7 @@ function buildMapHtml(
 // ──────────────────────────────────────────────────────────────────────────────
 export default function MapScreen() {
   const router = useRouter();
+  const isGuest = useGuestGate();
   const params = useLocalSearchParams<{ userId?: string; exploreTab?: string; eventId?: string }>();
   const { events, isEventPast, getEventPhotoForUser, getGlobalEvents, getFriendsForEvents, isUserEventMember } = useEvents();
   const { user, accessToken } = useAuth();
@@ -572,6 +574,10 @@ export default function MapScreen() {
   // ── Determine if filter tabs should show ──
   const showFilterTabs = !rawEventId;
   const showTitle = !!rawEventId;
+
+  // Гость: уходим на регистрацию (useGuestGate уже инициировал replace),
+  // карту не показываем.
+  if (isGuest) return null;
 
   return (
     <View style={styles.root}>

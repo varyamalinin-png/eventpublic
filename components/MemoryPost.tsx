@@ -492,6 +492,12 @@ function MemoryPostContent({ post, showOptions = false, onNavigate, reserveCapti
   };
 
   const handleSave = () => {
+    // Гость: сохранять некуда — на регистрацию, а не молчаливый локальный сейв.
+    if (!authUser) {
+      setShowOptionsModal(false);
+      handleNavigate('/(auth)/login?mode=register');
+      return;
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (isSaved) {
       removeSavedMemoryPost(post.eventId, post.id);
@@ -504,6 +510,13 @@ function MemoryPostContent({ post, showOptions = false, onNavigate, reserveCapti
   };
 
   const handleReport = () => {
+    // Гость: жалоба требует аккаунта (POST /complaints → 401), раньше при этом
+    // показывался ложный «Report sent» — вместо этого ведём на регистрацию.
+    if (!authUser) {
+      setShowOptionsModal(false);
+      handleNavigate('/(auth)/login?mode=register');
+      return;
+    }
     Alert.alert(
       t.common.reportPost || 'Report post?',
       t.common.reportPostConfirm || 'Are you sure you want to report this post?',

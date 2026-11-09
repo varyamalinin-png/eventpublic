@@ -25,6 +25,7 @@ import ProfileEventsGrid from '../components/ProfileEventsGrid';
 import { eventSortTime, folderSortTime } from '../utils/profileSort';
 import { collectFolderEventIds } from '../utils/folderEventIds';
 import { sizedImage } from '../utils/imageSize';
+import { useGuestGate } from '../hooks/useGuestGate';
 
 const logger = createLogger('OtherProfile');
 
@@ -47,6 +48,8 @@ export default function OtherProfileScreen() {
   // подсвечивать его, а не Profile (это чужой аккаунт, не свой)
   const { id, eventId, from } = useLocalSearchParams();
   const router = useSafeRouter();
+  // Гость: чужой профиль закрыт (GET /users/:id всё равно 401) — на регистрацию.
+  const isGuest = useGuestGate();
   const { events, eventProfiles, getUserData: contextGetUserData, fetchUserById, getOrganizerStats, getFriendsList, getEventProfile, createEventProfile, fetchEventProfile, sendFriendRequest, removeFriend, isFriend, userFolders, addUserToFolder, removeUserFromFolder, createPersonalChat, getChatsForUser, isUserParticipant, isEventUpcoming, isEventPast, isUserOrganizer, isUserAttendee, isUserEventMember, friendRequests, respondToFriendRequest, getUserRequestStatus, getUserFriendsList, messageFolders, addChatsToMessageFolder, removeChatFromMessageFolder, syncFriendRequestsFromServer } = useEvents();
   const { user: authUser, accessToken } = useAuth();
   const { t } = useLanguage();
@@ -790,6 +793,8 @@ export default function OtherProfileScreen() {
     return <View style={styles.container} />;
   }
 
+  // Гостю чужой профиль не рендерим — редирект на регистрацию уже пошёл.
+  if (isGuest) return null;
 
   return (
     <View style={containerStyle}>

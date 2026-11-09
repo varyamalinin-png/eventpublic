@@ -1595,7 +1595,7 @@ function EventCard({
   const handleScheduleEvent = () => {
     // Отправляем заявку на участие в событии (старая логика - сохраняем для совместимости)
     if (!currentUserId) {
-      router.push('/(auth)');
+      router.push('/(auth)/login?mode=register');
       return;
     }
     if (organizerId !== currentUserId) {
@@ -2054,11 +2054,10 @@ function EventCard({
                         style={[exploreStyles.exploreOrganizerContainer, { position: 'absolute' }]}
                         onPress={(e) => {
                           e.stopPropagation();
-                          if (currentUserId === organizerId) {
-                            router.push('/(tabs)/profile');
-                          } else {
-                            router.push(`/profile/${organizerId}`);
-                          }
+                          // Единая точка навигации на профиль: гостю — регистрация,
+                          // себе — свой таб, чужому — профиль. Прямой router.push
+                          // в обход openUserProfile пускал гостя на чужой профиль.
+                          openUserProfile(organizerId, currentUserId);
                         }}
                         activeOpacity={0.8}
                       >
@@ -2558,7 +2557,7 @@ function EventCard({
                               style={styles.recurringDateItem}
                               onPress={async () => {
                                 if (!currentUserId) {
-                                  router.push('/(auth)');
+                                  router.push('/(auth)/login?mode=register');
                                   return;
                                 }
                                 try {
@@ -2589,7 +2588,7 @@ function EventCard({
                             style={[styles.recurringDateItem, styles.scheduleAllButton]}
                             onPress={async () => {
                               if (!currentUserId) {
-                                router.push('/(auth)');
+                                router.push('/(auth)/login?mode=register');
                                 return;
                               }
                               try {

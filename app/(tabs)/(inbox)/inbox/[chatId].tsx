@@ -20,6 +20,7 @@ import { formatUsername } from '../../../../utils/username';
 import { openUserProfile } from '../../../../utils/openUserProfile';
 import { setActiveChatId } from '../../../../utils/activeChat';
 import { sizedImage } from '../../../../utils/imageSize';
+import { useGuestGate } from '../../../../hooks/useGuestGate';
 
 const logger = createLogger('ChatScreen');
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -27,6 +28,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export default function ChatScreen() {
   const { chatId } = useLocalSearchParams();
   const router = useRouter();
+  const isGuest = useGuestGate();
   const { user, accessToken } = useAuth();
   const { t, language } = useLanguage();
   const dateLocale = language === 'ru' ? 'ru-RU' : 'en-US';
@@ -216,7 +218,7 @@ export default function ChatScreen() {
   const handleSend = async () => {
     if (!inputText.trim() || !chatId) return;
     if (!currentUserId) {
-      router.push('/(auth)');
+      router.push('/(auth)/login?mode=register');
       return;
     }
     if (isSending) return;
@@ -638,6 +640,9 @@ export default function ChatScreen() {
 
   const isIOS = Platform.OS === 'ios';
   const isAndroid = Platform.OS === 'android';
+
+  // Гостю чат не рендерим — редирект на регистрацию уже пошёл.
+  if (isGuest) return null;
 
   return (
     <KeyboardAvoidingView 

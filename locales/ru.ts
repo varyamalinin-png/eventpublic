@@ -334,6 +334,8 @@ export const ru = {
     myEventsTitle: 'Мои события',
     selectEventToView: 'Выберите событие для просмотра',
     friendsTitle: 'Друзья',
+    friendsOf: 'Друзья — {name}',
+    friendsCount: 'друзей: {count}',
     loadError: 'Ошибка загрузки данных профиля',
     selectAtLeastOneEvent: 'Выберите хотя бы одно событие',
     deleteEventsQuestion: 'Удалить события?',

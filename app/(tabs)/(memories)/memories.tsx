@@ -13,6 +13,7 @@ import { apiRequest } from '../../../services/api';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { cacheKey } from '../../../utils/queryCache';
 import { normalizeMediaUrl } from '../../../context/EventsContext.helpers';
+import { useGuestGate } from '../../../hooks/useGuestGate';
 import { MemoryFeedSkeleton } from '../../../components/MemoryFeedSkeleton';
 import { useTabPress } from '../../../hooks/useTabPress';
 
@@ -42,6 +43,9 @@ export default function MemoriesScreen() {
   const { getUserData, cacheServerUsers } = useEvents();
   const { user: authUser, accessToken } = useAuth();
   const { t } = useLanguage();
+  // Гость: Memories закрыты — диплинк /memories попадает сюда в обход
+  // таб-бара с его guestGuardListeners, поэтому гейт нужен и на экране.
+  const isGuest = useGuestGate();
 
   // Функция навигации для передачи в MemoryPost
   const handleNavigate = (path: string) => {
@@ -202,16 +206,10 @@ export default function MemoriesScreen() {
     }
   };
 
-  if (!authUser) {
-    return (
-      <View style={[styles.container, styles.centered]}>
-        <Text style={styles.loginPromptTitle}>{t.auth.pleaseSignIn}</Text>
-        <Text style={styles.loginPromptText}>
-          Войдите, чтобы просматривать воспоминания ваших событий и друзей.
-        </Text>
-      </View>
-    );
-  }
+  // Гостю Memories не показываем совсем: useGuestGate уже отправил его на
+  // регистрацию. Раньше здесь был экран «войдите в аккаунт» — заменён
+  // редиректом, как и все остальные закрытые разделы.
+  if (isGuest || !authUser) return null;
 
   return (
     <View style={styles.container}>

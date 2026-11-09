@@ -11,11 +11,14 @@ import { useCachedQuery } from '../hooks/useCachedQuery';
 import { cacheKey } from '../utils/queryCache';
 import { FriendListSkeleton } from '../components/FriendRowSkeleton';
 import { sizedImage } from '../utils/imageSize';
+import { useGuestGate } from '../hooks/useGuestGate';
 
 export default function FriendsListScreen() {
   const { getUserData } = useEvents();
   const { t } = useLanguage();
   const { user, accessToken } = useAuth();
+  // Гость: список друзей закрыт (диплинк идёт в обход таб-бара).
+  const isGuest = useGuestGate();
 
   /**
    * Свой список — тем же запросом и тем же кэшом, что и чужой: рисуется
@@ -46,6 +49,9 @@ export default function FriendsListScreen() {
       </TouchableOpacity>
     </Link>
   );
+
+  // Гостю список не рендерим — редирект на регистрацию уже пошёл.
+  if (isGuest) return null;
 
   return (
     <View style={styles.container}>

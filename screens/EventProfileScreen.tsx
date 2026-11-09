@@ -25,6 +25,7 @@ import { eventCardStyles } from '../components/EventCard/EventCard.styles';
 import { AppIcon } from '../components/ui/AppIcon';
 import { Palette, TabBarSpacer } from '../constants/DesignSystem';
 import { sizedImage } from '../utils/imageSize';
+import { useGuestGate } from '../hooks/useGuestGate';
 
 const logger = createLogger('EventProfile');
 const styles = eventProfileStyles || StyleSheet.create({
@@ -56,6 +57,11 @@ const styles = eventProfileStyles || StyleSheet.create({
 export default function EventProfileScreen() {
   const { id, viewerUserId } = useLocalSearchParams();
   const router = useSafeRouter();
+  // Гость: страница события внутри приложения закрыта — как и тап по карточке
+  // в ленте, ведём на регистрацию. Диплинк /event-profile/<id> попадает сюда
+  // в обход ленты, поэтому гейт нужен прямо на экране. Публичный предпросмотр
+  // по https-ссылке — отдельная история, он живёт в web/ (PublicEventPreview).
+  const isGuest = useGuestGate();
   
   // Функция навигации для передачи в MemoryPost
   const handleNavigate = (path: string) => {
@@ -244,6 +250,12 @@ export default function EventProfileScreen() {
   // Редактирование доступно только участникам (проверяется через canEditEventProfile)
   // ВАЖНО: показываем экран, как только есть displayProfile, даже если объекта event ещё нет в состоянии.
   // Это позволяет открывать страницу по прямой ссылке, когда событие не подгружено в общий список events.
+  //
+  // Гостю страницу не рендерим вовсе — редирект на регистрацию уже пошёл
+  // из useGuestGate. Проверка ПОСЛЕ всех хуков, но ДО загрузочного состояния:
+  // гость не должен видеть даже спиннер этой страницы.
+  if (isGuest) return null;
+
   if (!displayProfile) {
     // Показываем loading состояние вместо null, чтобы избежать черного экрана
     return (

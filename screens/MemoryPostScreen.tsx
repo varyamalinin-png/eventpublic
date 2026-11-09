@@ -6,12 +6,15 @@ import { useEvents } from '../context/EventsContext';
 import MemoryPost from '../components/MemoryPost';
 import TopBar from '../components/TopBar';
 import { useLanguage } from '../context/LanguageContext';
+import { useGuestGate } from '../hooks/useGuestGate';
 
 export default function MemoryPostScreen() {
   const { t } = useLanguage();
   const { eventId, postId } = useLocalSearchParams<{ eventId: string; postId: string }>();
   const router = useSafeRouter();
   const { getEventProfile, fetchEventProfile } = useEvents();
+  // Гость: меморис-посты закрыты (диплинк в обход таб-бара).
+  const isGuest = useGuestGate();
 
   const eventProfile = eventId ? getEventProfile(eventId) : null;
   const post = eventProfile?.posts.find(p => p.id === postId);
@@ -43,6 +46,9 @@ export default function MemoryPostScreen() {
   const handleNavigate = (path: string) => {
     router.push(path);
   };
+
+  // Гостю пост не показываем — редирект на регистрацию уже пошёл.
+  if (isGuest) return null;
 
   if (!post || !eventId) {
     return (

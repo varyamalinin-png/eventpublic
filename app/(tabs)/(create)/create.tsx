@@ -17,6 +17,7 @@ import { AppIcon } from '../../../components/ui/AppIcon';
 import { Palette } from '../../../constants/DesignSystem';
 import { usePathname } from 'expo-router';
 import { useScrollToTop } from '@react-navigation/native';
+import { useGuestGate } from '../../../hooks/useGuestGate';
 
 const logger = createLogger('CreateEvent');
 
@@ -83,6 +84,7 @@ interface EventFormData {
 
 export default function CreateEventScreen() {
   const router = useRouter();
+  const isGuest = useGuestGate();
   const params = useLocalSearchParams();
   const { createEvent, updateEvent, deleteEvent, events, getFriendsList, eventRequests, user: eventsAuthUser } = useEvents() as any;
   const { user: authUser, accessToken } = useAuth();
@@ -1351,7 +1353,7 @@ export default function CreateEventScreen() {
 
     if (!currentUserId) {
       Alert.alert(t.createEvent.loginRequired, t.createEvent.signInToCreate, [
-        { text: 'OK', onPress: () => router.push('/(auth)') },
+        { text: 'OK', onPress: () => router.push('/(auth)/login?mode=register') },
       ]);
       return;
     }
@@ -2400,6 +2402,10 @@ export default function CreateEventScreen() {
         return null;
     }
   };
+
+  // Гость: уходим на регистрацию (useGuestGate уже инициировал replace),
+  // форму создания не показываем.
+  if (isGuest) return null;
 
   return (
     <View style={styles.container}>

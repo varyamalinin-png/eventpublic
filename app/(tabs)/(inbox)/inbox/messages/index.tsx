@@ -16,6 +16,7 @@ import { Palette, ScreenPadding, TabBarSpacer } from '../../../../../constants/D
 import { getChatDisplayName } from '../../../../../utils/chatDisplayName';
 import { localizeSystemMessage } from '../../../../../utils/systemMessage';
 import { sizedImage } from '../../../../../utils/imageSize';
+import { useGuestGate } from '../../../../../hooks/useGuestGate';
 
 const logger = createLogger('MessagesTab');
 
@@ -31,6 +32,8 @@ const logger = createLogger('MessagesTab');
  */
 export default function MessagesTab({ embedded = false }: { embedded?: boolean } = {}) {
   const router = useRouter();
+  // Гостю чаты закрыты (диплинк /inbox/messages приходит в обход таб-бара).
+  const isGuest = useGuestGate();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { t, language } = useLanguage();
@@ -537,6 +540,9 @@ export default function MessagesTab({ embedded = false }: { embedded?: boolean }
     );
   }, [currentUserId, getUserData, handleChatPress, handleRemoveChatFromFolder, removingChatIds, selectedFolderData?.chatIds, selectedFolderData?.type, swipedChatId, t.chat.eventSent, t.chat.remove]);
 
+
+  // Гостю список чатов не рендерим — редирект на регистрацию уже пошёл.
+  if (isGuest) return null;
 
   return (
     <View style={[styles.container, !embedded && { paddingTop: insets.top }]}>

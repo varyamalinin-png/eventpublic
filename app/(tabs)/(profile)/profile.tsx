@@ -893,7 +893,7 @@ export default function ProfileScreen() {
     // который во время бутстрапа остаётся false — на вебе это уводило на /login
     // сразу после перехода, а затем логин перекидывал на explore.
     if (!authUser && !authLoading && !authInitializing) {
-      router.replace('/(auth)/login' as any);
+      router.replace('/(auth)/login?mode=register' as any);
     }
   }, [authUser, authLoading, authInitializing]);
 

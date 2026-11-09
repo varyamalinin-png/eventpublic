@@ -8,6 +8,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { useLanguage } from '../../../context/LanguageContext';
 import { AppIcon } from '../../../components/ui/AppIcon';
 import { matchesSearchQuery } from '../../../utils/searchMatch';
+import { useGuestGate } from '../../../hooks/useGuestGate';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -15,6 +16,9 @@ export default function SavedScreen() {
   const router = useRouter();
   const { getSavedEvents, getSavedMemoryPosts, getUserData, eventProfiles } = useEvents();
   const { user: authUser } = useAuth();
+  // Гость: сохранённое закрыто — уводим на регистрацию (диплинк /saved идёт
+  // в обход таб-бара с его guestGuardListeners).
+  const isGuest = useGuestGate();
   const { t } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -156,24 +160,10 @@ export default function SavedScreen() {
             );
   }, [cellSize, router]);
 
-  if (!authUser) {
-    return (
-      <View style={styles.container}>
-        <TopBar
-          searchPlaceholder={t.empty.searchSaved}
-          onSearchChange={handleSavedSearch}
-          searchQuery={searchQuery}
-        />
-        <View style={styles.emptyContainer}>
-          <AppIcon name="lock" size={60} color="rgba(244,244,245,0.25)" />
-          <Text style={styles.emptyTitle}>{t.auth.signInToAccount}</Text>
-          <Text style={styles.emptyText}>
-            Авторизуйтесь, чтобы просматривать сохранённые события
-          </Text>
-        </View>
-      </View>
-    );
-  }
+  // Гостю сохранённое не показываем совсем: useGuestGate уже отправил его
+  // на регистрацию. Раньше здесь был экран с замком — заменён редиректом,
+  // как и все остальные закрытые разделы.
+  if (isGuest || !authUser) return null;
 
 
 

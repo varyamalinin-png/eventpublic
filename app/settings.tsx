@@ -223,7 +223,7 @@ export default function SettingsScreen() {
       <View style={[styles.container, styles.centered]}>
         <Text style={styles.loginPromptTitle}>{t.settings.authorize}</Text>
         <Text style={styles.loginPromptText}>{t.settings.authorizePrompt}</Text>
-        <TouchableOpacity style={styles.loginButton} onPress={() => router.push('/(auth)')}>
+        <TouchableOpacity style={styles.loginButton} onPress={() => router.push('/(auth)/login?mode=register')}>
           <Text style={styles.loginButtonText}>{t.settings.goToLogin}</Text>
         </TouchableOpacity>
       </View>

@@ -13,8 +13,14 @@ import { AppIcon } from '../components/ui/AppIcon';
 import { Palette } from '../constants/DesignSystem';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { sizedImage } from '../utils/imageSize';
+import { useGuestGate } from '../hooks/useGuestGate';
 
 const logger = createLogger('Map');
+
+// Алерт о запрете геолокации — не чаще одного раза за сессию приложения.
+// Иначе он всплывал при КАЖДОМ маунте карты и преследовал пользователя
+// по всем экранам (алерты ставятся в очередь и показываются поверх всего).
+let locationDeniedAlertShown = false;
 
 type EventMarkerProps = {
   eventId: string;
@@ -163,6 +169,7 @@ const darkMapStyle = [
 
 export default function MapScreen() {
   const router = useRouter();
+  const isGuest = useGuestGate();
   const insets = useSafeAreaInsets();
   const { t, language } = useLanguage();
   const dateLocale = language === 'ru' ? 'ru-RU' : 'en-US';
@@ -330,8 +337,10 @@ export default function MapScreen() {
 
 
   useEffect(() => {
-    getCurrentLocation();
-  }, []);
+    // Гостю геолокацию не запрашиваем: его всё равно уводит на регистрацию,
+    // а системный диалог/алерт ему не нужен.
+    if (!isGuest) getCurrentLocation();
+  }, [isGuest]);
 
 
   // Вычисляем центр карты и регион
@@ -402,7 +411,10 @@ export default function MapScreen() {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert(t.common.error, t.messages.locationPermissionDenied);
+        if (!locationDeniedAlertShown) {
+          locationDeniedAlertShown = true;
+          Alert.alert(t.common.error, t.messages.locationPermissionDenied);
+        }
         return;
       }
 
@@ -488,6 +500,10 @@ export default function MapScreen() {
     }
     return t.map.eventsMap || 'Events map';
   };
+
+  // Гость: уходим на регистрацию (useGuestGate уже инициировал replace),
+  // карту и её запросы не показываем.
+  if (isGuest) return null;
 
   return (
     <View style={styles.container}>

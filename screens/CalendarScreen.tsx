@@ -9,6 +9,7 @@ import { PinchGestureHandler, GestureHandlerRootView } from 'react-native-gestur
 import { ApiError } from '../services/api';
 import { createLogger } from '../utils/logger';
 import { AppIcon } from '../components/ui/AppIcon';
+import { useGuestGate } from '../hooks/useGuestGate';
 
 const logger = createLogger('Calendar');
 
@@ -42,6 +43,7 @@ interface HourSlot {
 
 export default function CalendarScreen() {
   const router = useRouter();
+  const isGuest = useGuestGate();
   const params = useLocalSearchParams();
   const { t } = useLanguage();
   const { 
@@ -1126,7 +1128,7 @@ export default function CalendarScreen() {
                               } else {
                                 // Если нет приглашения - отправляем запрос на участие
                                 if (!currentUserId) {
-                                  router.push('/(auth)');
+                                  router.push('/(auth)/login?mode=register');
                                   return;
                                 }
                                 
@@ -1312,6 +1314,10 @@ export default function CalendarScreen() {
       </>
     );
   };
+
+  // Гость: уходим на регистрацию (useGuestGate уже инициировал replace),
+  // календарь не показываем.
+  if (isGuest) return null;
 
   if (!readyToRender) {
     return (

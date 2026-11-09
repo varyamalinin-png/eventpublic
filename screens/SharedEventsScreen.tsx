@@ -7,12 +7,15 @@ import { useEvents, Event } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import ProfileEventsGrid from '../components/ProfileEventsGrid';
+import { useGuestGate } from '../hooks/useGuestGate';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function SharedEventsScreen() {
   const { userId } = useLocalSearchParams();
   const router = useRouter();
+  // Гость: списки событий пользователя закрыты (диплинк в обход таб-бара).
+  const isGuest = useGuestGate();
   const { events, eventProfiles, getUserData, isUserEventMember, isEventPast } = useEvents();
   const { user: authUser } = useAuth();
   const { t } = useLanguage();
@@ -69,6 +72,9 @@ export default function SharedEventsScreen() {
   // Одна ссылка на событие вместо новой стрелки на каждый рендер —
   // иначе memo у EventCard не срабатывает
   const getEventPressHandler = useStableItemHandler(sharedEvents, handleEventPress);
+
+  // Гостю экран не рендерим — редирект на регистрацию уже пошёл.
+  if (isGuest) return null;
 
   // Если показываем ленту событий
   if (showEventFeed) {

@@ -17,12 +17,15 @@ import { interpolate } from '../utils/interpolate';
 import ProfileEventsGrid from '../components/ProfileEventsGrid';
 import ParticipantsModal from '../components/ParticipantsModal';
 import { sizedImage } from '../utils/imageSize';
+import { useGuestGate } from '../hooks/useGuestGate';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function EventFolderScreen() {
   const expoRouter = useRouter();
   const router = useSafeRouter();
+  // Гость: папки событий закрыты (диплинк в обход таб-бара).
+  const isGuest = useGuestGate();
   const params = useLocalSearchParams<{ id: string }>();
   
   // На вебе параметры могут не передаваться через expo-router, получаем из URL напрямую
@@ -168,6 +171,9 @@ export default function EventFolderScreen() {
 
     loadFolder();
   }, [id, getEventFolderById, eventFolders, accessToken, authUser, authInitializing]);
+
+  // Гостю папку не показываем — редирект на регистрацию уже пошёл.
+  if (isGuest) return null;
 
   if (loading) {
     return (
