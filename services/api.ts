@@ -79,6 +79,11 @@ export async function apiRequest(
   // Таймаут: для auth/refresh на мобильных даём больше времени (слабый сигнал/переключение сетей)
   const timeoutMs = path === '/auth/refresh' ? 60000 : 30000;
 
+  // GET безопасно повторять после таймаута: на нестабильной сети (мобильный
+  // МТС) крупные ответы часто зависают и умирают по abort, хотя само
+  // соединение живо, — повтор почти всегда доезжает.
+  const isIdempotentRead = !options.method || options.method.toUpperCase() === 'GET';
+
   for (let attempt = 0; attempt < 2; attempt++) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
@@ -119,6 +124,16 @@ export async function apiRequest(
       // Retry once on network errors (TypeError from fetch)
       if (attempt === 0 && error instanceof TypeError) {
         await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
+
+      // Retry once on timeout for idempotent reads (see isIdempotentRead above)
+      const isTimeout =
+        error?.name === 'AbortError' ||
+        error?.message?.includes('timeout') ||
+        error?.message?.includes('Aborted');
+      if (attempt === 0 && isIdempotentRead && isTimeout) {
+        await new Promise(r => setTimeout(r, 800));
         continue;
       }
 

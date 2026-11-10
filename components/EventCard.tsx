@@ -15,7 +15,7 @@ import { formatRecurringEventDate } from '../utils/dateHelpers';
 import { createLogger } from '../utils/logger';
 import { getAllRecurringDates } from '../utils/recurringEventUtils';
 import { eventCardStyles } from './EventCard/EventCard.styles';
-import { LazyImage } from './ui/LazyImage';
+import { ResilientImage } from './ResilientImage';
 import { useEventCardActions } from '../hooks/events/useEventCardActions';
 import EventCardActionsModal from './EventCard/EventCardActionsModal';
 import { showInDevelopmentHint } from '../utils/showInDevelopmentHint';
@@ -27,7 +27,7 @@ import InviteFriendsModal from './InviteFriendsModal';
 import { AppIcon, AppIconName } from './ui/AppIcon';
 import { GuestBlurredValue } from './GuestBlurredValue';
 import { Palette, Radius } from '../constants/DesignSystem';
-import { sizedImage } from '../utils/imageSize';
+import { sizedImage, sizedImageFallback, originalImageCdn } from '../utils/imageSize';
 
 const logger = createLogger('EventCard');
 
@@ -2042,8 +2042,9 @@ function EventCard({
                               backgroundPosition: 'center',
                             },
                           })
-                        : <LazyImage
+                        : <ResilientImage
                             source={{ uri: sizedImage(eventMedia.uri, 200) }}
+                            fallbackUri={sizedImageFallback(eventMedia.uri, 200)}
                             style={exploreStyles.exploreImage}
                             onError={eventMedia.onError}
                           />
@@ -2847,8 +2848,9 @@ function EventCard({
                 || event?.originalMediaUrl
                 || displayMediaUrl;
               return originalUrl ? (
-                <Image 
-                  source={{ uri: originalUrl }} 
+                <ResilientImage
+                  source={{ uri: originalImageCdn(originalUrl) }}
+                  fallbackUri={originalUrl}
                   style={styles.imageModalImage}
                   resizeMode="contain"
                 />

@@ -30,7 +30,8 @@ import { eventSortTime, folderSortTime } from '../../../utils/profileSort';
 import { collectFolderEventIds } from '../../../utils/folderEventIds';
 import MemoryVisibilityBadge, { eventVisibilityBadgeKind } from '../../../components/MemoryVisibilityBadge';
 import { profileStyles } from '../../../styles/profile.styles';
-import { sizedImage } from '../../../utils/imageSize';
+import { sizedImage, sizedImageFallback } from '../../../utils/imageSize';
+import { ResilientImage } from '../../../components/ResilientImage';
 
 const logger = createLogger('Profile');
 
@@ -1093,8 +1094,9 @@ export default function ProfileScreen() {
           // Веб: аватарка по центру, минималистичный карандаш справа от неё
           <View style={styles.avatarContainerWeb}>
             <TouchableOpacity onPress={() => setShowAvatarModal(true)}>
-              <Image 
-                source={{ uri: sizedImage(userData.avatar, 100) }} 
+              <ResilientImage
+                source={{ uri: sizedImage(userData.avatar, 100) }}
+                fallbackUri={sizedImageFallback(userData.avatar, 100)}
                 style={styles.profileAvatar}
               />
             </TouchableOpacity>
@@ -1121,8 +1123,9 @@ export default function ProfileScreen() {
           // раньше шестерёнка лежала прямо на аватарке отдельным оверлеем
           <View style={styles.avatarContainer}>
             <TouchableOpacity onPress={() => setShowAvatarModal(true)}>
-              <Image
+              <ResilientImage
                 source={{ uri: sizedImage(userData.avatar, 100) }}
+                fallbackUri={sizedImageFallback(userData.avatar, 100)}
                 style={styles.profileAvatar}
               />
             </TouchableOpacity>
@@ -1471,8 +1474,9 @@ export default function ProfileScreen() {
             {/* Аватарка во весь экран. 100 сюда попало при массовой замене на
                 уменьшенные варианты — это ширина кружка в шапке, а не в модалке.
                 Просим полный размер, иначе картинка мылит. */}
-            <Image
+            <ResilientImage
               source={{ uri: sizedImage(userData.avatar, 320) }}
+              fallbackUri={sizedImageFallback(userData.avatar, 320)}
               style={styles.avatarModalImage}
               resizeMode="cover"
             />

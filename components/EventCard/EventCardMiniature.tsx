@@ -7,7 +7,8 @@ import { useEvents } from '../../context/EventsContext';
 import { eventCardStyles } from './EventCard.styles';
 import { AppIcon } from '../ui/AppIcon';
 import { getPersonalEventPhoto } from '../../utils/personalEventPhoto';
-import { sizedImage } from '../../utils/imageSize';
+import { sizedImage, sizedImageFallback } from '../../utils/imageSize';
+import { ResilientImage } from '../ResilientImage';
 
 const MINI_EVENT_MEDIA_PLACEHOLDER_URI = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270" viewBox="0 0 480 270">' +
@@ -108,8 +109,9 @@ export default function EventCardMiniature({
         {/* Фоновое изображение события */}
         {miniPhoto ? (
           <View style={eventCardStyles.miniatureBackgroundContainer}>
-            <Image
+            <ResilientImage
               source={{ uri: sizedImage(media.uri, 200) }}
+              fallbackUri={sizedImageFallback(media.uri, 200)}
               style={eventCardStyles.miniatureBackgroundImage}
               onError={media.onError}
             />

@@ -24,7 +24,8 @@ import { eventProfileStyles } from '../styles/event-profile.styles';
 import { eventCardStyles } from '../components/EventCard/EventCard.styles';
 import { AppIcon } from '../components/ui/AppIcon';
 import { Palette, TabBarSpacer } from '../constants/DesignSystem';
-import { sizedImage } from '../utils/imageSize';
+import { sizedImage, sizedImageFallback, originalImageCdn } from '../utils/imageSize';
+import { ResilientImage } from '../components/ResilientImage';
 import { useGuestGate } from '../hooks/useGuestGate';
 
 const logger = createLogger('EventProfile');
@@ -1188,7 +1189,12 @@ export default function EventProfileScreen() {
                   onPress={() => { setFullImageUrl(event.originalMediaUrl || event.mediaUrl || photoUri); setShowImageModal(true); }}
                   style={StyleSheet.absoluteFill}
                 >
-                  <Image source={{ uri: sizedImage(photoUri, 400) }} style={[epHeaderStyles.image, StyleSheet.absoluteFillObject]} resizeMode="cover" />
+                  <ResilientImage
+                    source={{ uri: sizedImage(photoUri, 400) }}
+                    fallbackUri={sizedImageFallback(photoUri, 400)}
+                    style={[epHeaderStyles.image, StyleSheet.absoluteFillObject]}
+                    resizeMode="cover"
+                  />
                 </TouchableOpacity>
 
                 {/* Organizer — top-left */}
@@ -1721,8 +1727,9 @@ export default function EventProfileScreen() {
             onPress={() => setShowImageModal(false)}
           />
           {fullImageUrl && (
-            <Image
-              source={{ uri: fullImageUrl }}
+            <ResilientImage
+              source={{ uri: originalImageCdn(fullImageUrl) }}
+              fallbackUri={fullImageUrl}
               style={styles.fullImage}
               resizeMode="contain"
             />

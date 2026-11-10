@@ -10,9 +10,9 @@ import { useLanguage } from '../context/LanguageContext';
 import { formatUsername } from '../utils/username';
 import { createLogger } from '../utils/logger';
 import { AppIcon } from './ui/AppIcon';
-import { LazyImage } from './ui/LazyImage';
+import { ResilientImage } from './ResilientImage';
 import { Palette } from '../constants/DesignSystem';
-import { sizedImage } from '../utils/imageSize';
+import { sizedImage, sizedImageFallback } from '../utils/imageSize';
 
 const logger = createLogger('MemoryPost');
 
@@ -590,8 +590,9 @@ function MemoryPostContent({ post, showOptions = false, onNavigate, reserveCapti
                           }}
                         />
                       ) : (
-                      <LazyImage
+                      <ResilientImage
                         source={{ uri: sizedImage(photoUri, 400) }}
+                        fallbackUri={sizedImageFallback(photoUri, 400)}
                         style={styles.mediaContent}
                         resizeMode="contain"
                         onError={(error) => {
@@ -653,8 +654,9 @@ function MemoryPostContent({ post, showOptions = false, onNavigate, reserveCapti
             onPress={handlePhotoPress} 
             activeOpacity={0.9}
           >
-            <LazyImage
+            <ResilientImage
               source={{ uri: sizedImage(photoUri, 400) }}
+              fallbackUri={sizedImageFallback(photoUri, 400)}
               style={styles.mediaContent}
               resizeMode="contain"
               onError={(error) => {
@@ -671,8 +673,9 @@ function MemoryPostContent({ post, showOptions = false, onNavigate, reserveCapti
             activeOpacity={0.9}
           >
             <View style={styles.videoContainer}>
-              <Image 
-                source={{ uri: sizedImage(post.photoUrl || post.content, 400) }} 
+              <ResilientImage
+                source={{ uri: sizedImage(post.photoUrl || post.content, 400) }}
+                fallbackUri={sizedImageFallback(post.photoUrl || post.content, 400)}
                 style={styles.mediaContent}
                 resizeMode="contain"
               />
@@ -690,8 +693,9 @@ function MemoryPostContent({ post, showOptions = false, onNavigate, reserveCapti
             activeOpacity={0.9}
           >
             <View style={styles.musicContainer}>
-              <Image 
-                source={{ uri: sizedImage(post.artwork_url || post.photoUrl || post.content, 400) }} 
+              <ResilientImage
+                source={{ uri: sizedImage(post.artwork_url || post.photoUrl || post.content, 400) }}
+                fallbackUri={sizedImageFallback(post.artwork_url || post.photoUrl || post.content, 400)}
                 style={styles.musicArtwork}
                 resizeMode="cover"
               />
@@ -997,8 +1001,9 @@ function MemoryPostContent({ post, showOptions = false, onNavigate, reserveCapti
                   activeOpacity={1}
                   onPress={closePhotoModal}
                 >
-                  <Image 
-                    source={{ uri: sizedImage(photoUri, 400) }} 
+                  <ResilientImage
+                    source={{ uri: sizedImage(photoUri, 400) }}
+                    fallbackUri={sizedImageFallback(photoUri, 400)}
                     style={styles.photoModalImage}
                     resizeMode="contain"
                   />
@@ -1022,8 +1027,9 @@ function MemoryPostContent({ post, showOptions = false, onNavigate, reserveCapti
               activeOpacity={1}
               onPress={closePhotoModal}
             >
-              <Image 
-                source={{ uri: sizedImage(photos[0], 400) }} 
+              <ResilientImage
+                source={{ uri: sizedImage(photos[0], 400) }}
+                fallbackUri={sizedImageFallback(photos[0], 400)}
                 style={styles.photoModalImage}
                 resizeMode="contain"
               />

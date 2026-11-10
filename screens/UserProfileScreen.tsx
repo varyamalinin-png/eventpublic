@@ -24,7 +24,8 @@ import { formatNameAndAge } from '../utils/username';
 import ProfileEventsGrid from '../components/ProfileEventsGrid';
 import { eventSortTime, folderSortTime } from '../utils/profileSort';
 import { collectFolderEventIds } from '../utils/folderEventIds';
-import { sizedImage } from '../utils/imageSize';
+import { sizedImage, sizedImageFallback } from '../utils/imageSize';
+import { ResilientImage } from '../components/ResilientImage';
 import { useGuestGate } from '../hooks/useGuestGate';
 
 const logger = createLogger('OtherProfile');
@@ -832,12 +833,13 @@ export default function OtherProfileScreen() {
           // Веб-версия собственного профиля: аватарка и минималистичный карандаш справа
           <View style={styles.avatarRowWeb}>
             <TouchableOpacity onPress={() => setShowAvatarModal(true)}>
-              <Image 
-                source={{ uri: sizedImage(userData.avatar, 100) }} 
+              <ResilientImage
+                source={{ uri: sizedImage(userData.avatar, 100) }}
+                fallbackUri={sizedImageFallback(userData.avatar, 100)}
                 style={styles.profileAvatar}
               />
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.settingsButtonWeb}
               onPress={() => {
                 logger.debug('Navigating to settings');
@@ -859,8 +861,9 @@ export default function OtherProfileScreen() {
           // Мобильная версия собственного профиля и просмотр чужого профиля
           <View style={styles.avatarContainer}>
             <TouchableOpacity onPress={() => setShowAvatarModal(true)}>
-              <Image 
-                source={{ uri: sizedImage(userData.avatar, 100) }} 
+              <ResilientImage
+                source={{ uri: sizedImage(userData.avatar, 100) }}
+                fallbackUri={sizedImageFallback(userData.avatar, 100)}
                 style={styles.profileAvatar}
               />
             </TouchableOpacity>
@@ -1361,8 +1364,9 @@ export default function OtherProfileScreen() {
             {/* Аватарка во весь экран. 100 сюда попало при массовой замене на
                 уменьшенные варианты — это ширина кружка в шапке, а не в модалке.
                 Просим полный размер, иначе картинка мылит. */}
-            <Image
+            <ResilientImage
               source={{ uri: sizedImage(userData.avatar, 320) }}
+              fallbackUri={sizedImageFallback(userData.avatar, 320)}
               style={styles.avatarModalImage}
               resizeMode="cover"
             />
