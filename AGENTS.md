@@ -949,6 +949,64 @@ The full investigation chain, so nobody re-derives it:
    its own), or moving `/storage` behind a CDN so media doesn't depend
    on the single reg.ru path.
 
+### 2.6 Media moved to direct S3 CDN + client retries (2026-11-10, both levers from §2.4 applied)
+
+Varya's MTS path got worse (feed and profile stopped loading entirely), so
+both levers from the note above were pulled:
+
+- **Variants live in the bucket next to originals.** For every uploaded
+  image the server now generates `<key without extension>__w<N>.webp`
+  (N = 200/400/600/800/1200, only widths below the source width) right after
+  upload, fire-and-forget (`StorageService.scheduleVariantGeneration`,
+  `server/src/storage/storage.service.ts`). All ~176 pre-existing originals
+  were backfilled (`scripts/backfill-variants.js`, idempotent — runs on the
+  VM with `node /tmp/backfill-variants.js`, safe to re-run;
+  `scripts/check-variants.js` counts originals vs variants). The bucket is
+  publicly readable, so variants are reachable without the backend.
+- **The client fetches images straight from the bucket**, bypassing
+  `iwent.ru` entirely for media: `sizedImage()` in `client/utils/imageSize.ts`
+  rewrites any `/storage/` URL to
+  `https://event-app-storage.storage.yandexcloud.net/<key>__w<N>.webp`.
+  `originalImageCdn()` does the same for originals (fullscreen viewer).
+  The hardcoded CDN base is deliberate, same pattern as
+  `https://iwent.ru/storage` in `normalizeMediaUrl`.
+- **Fallback route kept.** If a variant is missing in the bucket (edge
+  cases), `client/components/ResilientImage.tsx` retries the same URL once
+  after 1.5s, then falls back to `sizedImageFallback()` — the old
+  `iwent.ru/storage/<key>?w=N` on-the-fly resize (ImageVariantService).
+  ResilientImage wraps expo-image on native (keeps the memory-disk cache)
+  and is applied to: event card main photo + fullscreen, event profile
+  header + fullscreen, both profile screens' avatars + avatar modals,
+  EventCardMiniature background, MemoryPost photos. It calls the parent's
+  `onError` only after giving up, so existing placeholder logic still works.
+- **API retry:** `apiRequest` in `client/services/api.ts` now also retries
+  once after an abort/timeout for GET requests (large `/events` responses
+  were dying on her network too), in addition to the existing retries on
+  TypeError/5xx.
+- API still goes through reg.ru — if her network also kills API calls,
+  that's a separate migration (this change only moves media).
+
+**xcodebuild 290s-timeout lesson (2026-11-10/11):** repeated
+foreground `xcodebuild` runs killed at ~290s corrupt build progress, not
+the code: killed clang children keep running as orphans and finish their
+files, but the build DB never records task completion, so the next pass
+re-runs them — and every pass pays ~200s in the always-run
+`[CP-User] Replace Hermes/RNDeps` script phases before compiling anything.
+Net effect: an infinite loop of recompiling the same
+`ReactCodegen/.../safeareacontext/ComponentDescriptors.cpp`. Fixes that
+worked: wait for `ps aux | grep "clang -cc1"` to be empty before the next
+pass, never overlap passes. The reliable way to build is ONE uninterrupted
+run (~10-15 min) — Xcode GUI or a terminal, not short repeated CLI calls.
+Manual bundling trick (used once, works): `npx expo export:embed --platform
+ios --dev false --entry-file <client>/node_modules/expo-router/entry.js
+--bundle-output <products>/main.jsbundle --assets-dest <products>/iwent.app`,
+then `ios/Pods/hermes-engine/destroot/bin/hermesc -emit-binary -O -out
+<products>/iwent.app/main.jsbundle <products>/main.jsbundle`, with
+`SKIP_BUNDLING=1` in `ios/.xcode.env.local`. **`SKIP_BUNDLING` was removed
+again afterwards** — if it ever lingers, GUI Archive builds silently ship
+the stale embedded bundle.
+
+
 ### 2.5 Signing state: fine for device builds, not yet for TestFlight
 
 `xcodebuild archive` succeeds, but the archive is signed with the

@@ -12,6 +12,7 @@ import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuid } from 'uuid';
 import * as path from 'path';
+import sharp from 'sharp';
 import { ImageOptimizerService } from './image-optimizer.service';
 
 type UploadParams = {
@@ -21,6 +22,14 @@ type UploadParams = {
 };
 
 const IMMUTABLE_MEDIA_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+
+/**
+ * Ширины уменьшенных вариантов — тот же набор, что в ImageVariantService и в
+ * клиентском sizedImage(). Варианты лежат в бакете рядом с оригиналом под
+ * именем `<ключ без расширения>__w<N>.webp`; клиент забирает их напрямую из
+ * публичного бакета, минуя бэкенд.
+ */
+const VARIANT_WIDTHS = [200, 400, 600, 800, 1200];
 
 @Injectable()
 export class StorageService {
@@ -158,6 +167,7 @@ export class StorageService {
         }),
       );
       this.logger.log(`Avatar uploaded successfully: ${key}`);
+      this.scheduleVariantGeneration(key, optimizedBuffer);
     } catch (error) {
       if (this.isMissingBucketError(error)) {
         this.logger.warn(
@@ -206,6 +216,7 @@ export class StorageService {
       await uploader.done();
       const publicUrl = this.buildPublicUrl(key);
       this.logger.log(`✅ Event media uploaded: ${publicUrl}`);
+      this.scheduleVariantGeneration(key, optimizedBuffer);
       return publicUrl;
     } catch (error: any) {
       this.logger.error(`❌ Failed to upload event media: ${error?.message || error}`);
@@ -256,6 +267,48 @@ export class StorageService {
     const s3Url = `https://${this.bucket}.s3.amazonaws.com/${key}`;
     this.logger.debug(`Built public URL from S3 fallback: ${s3Url}`);
     return s3Url;
+  }
+
+  /**
+   * После успешной загрузки кладёт рядом с оригиналом уменьшенные варианты
+   * `<ключ>__w<N>.webp`, чтобы клиент мог забирать их напрямую из публичного
+   * бакета. Запускается в фоне: загрузка не должна ждать ресайз, а сбой
+   * генерации не отменяет уже загруженный файл — тогда клиент откатывается на
+   * серверный ресайз на лету через ?w=N (ImageVariantService).
+   */
+  private scheduleVariantGeneration(key: string, source: Buffer) {
+    void this.generateVariants(key, source).catch((error) => {
+      this.logger.warn(`Failed to generate variants for ${key}: ${(error as Error)?.message || error}`);
+    });
+  }
+
+  private async generateVariants(key: string, source: Buffer) {
+    const metadata = await sharp(source).metadata();
+    if (!metadata.width) return;
+
+    const baseKey = key.replace(/\.(webp|jpe?g|png)$/i, '');
+    const widths = VARIANT_WIDTHS.filter((width) => width < metadata.width!);
+    if (!widths.length) return;
+
+    await Promise.all(
+      widths.map(async (width) => {
+        const variant = await sharp(source)
+          .rotate()
+          .resize({ width, withoutEnlargement: true })
+          .webp({ quality: 82 })
+          .toBuffer();
+        await this.s3.send(
+          new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: `${baseKey}__w${width}.webp`,
+            Body: variant,
+            ContentType: 'image/webp',
+            CacheControl: IMMUTABLE_MEDIA_CACHE_CONTROL,
+          }),
+        );
+      }),
+    );
+    this.logger.log(`Generated ${widths.length} variant(s) for ${key}`);
   }
 
   private isMissingBucketError(error: unknown) {

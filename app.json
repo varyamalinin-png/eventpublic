@@ -26,7 +26,7 @@
         "applinks:iwent.ru",
         "applinks:www.iwent.ru"
       ],
-      "buildNumber": "7",
+      "buildNumber": "9",
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false,
