@@ -630,6 +630,11 @@ note in this file that names `213.165.213.224`, `/home/ubuntu/...` or the user
   `prisma:generate`, `build` — are already defined in `server/package.json`).
   For anything that needs a file edit on the VM, edit the file locally and
   `scp` the complete file up rather than running an edit script remotely.
+- **Network tunables (set 2026-11-10, persist):**
+  `net.ipv4.tcp_mtu_probing=1` in `/etc/sysctl.d/99-iwent-mtu.conf`.
+  Interface MTU is already 1450 via netplan (`/etc/netplan/50-cloud-init.yaml`).
+  Why: "photos load on cards but not inside screens" turned out to be the
+  *user's* network, not the app — see §2.4.
 
 ### 2.1 The production server's git state — reconciled 2026-08-14/15, was a mess before
 
@@ -909,6 +914,40 @@ profile carrying `aps-environment: production` and the exported build takes
 the value from that profile, not from the entitlements file. Setting
 `production` in the file would instead break local device builds, which are
 signed with a development profile.
+
+### 2.4 "Photos don't load in the event profile / in my profile" — it's the client's network (diagnosed 2026-11-10)
+
+Twice Varya reported that card covers and avatars render in the feed but
+the same images are blank inside the event profile / her own profile.
+The full investigation chain, so nobody re-derives it:
+
+1. **Server side is healthy.** All `mediaUrl`/`originalMediaUrl`/
+   `avatarUrl` values in Postgres return 200 (script: dump all three
+   columns, curl each). Every `?w=` variant (200..1200) of the storage
+   files serves in <0.3s, HTTP/1.1 and HTTP/2 alike. `EventPersonalPhoto`
+   is empty — personal-photo staleness is not a factor.
+2. **The client renders these exact screens fine** on the simulator with
+   the same build — including past events' profile headers (which use
+   `originalMediaUrl` via `getEventPhotoForUser(..., useOriginal=true)`).
+3. **Her phone's failing image requests never reach nginx.** From her MTS
+   IP the access log shows only ≤1KB API responses; the `?w=600/1200`
+   image requests her Xcode log shows timing out client-side
+   (`NSURLErrorDomain -1001`, `_kCFStreamErrorCodeKey=-2102`) are absent
+   from the server log for that window — while other clients load the
+   same URLs fine. Cards show photos because iOS caches images from
+   earlier healthy-network sessions; any image requested for the first
+   time on the bad network just never arrives.
+4. **Pattern: bulk transfers stall, small API calls pass** on her MTS
+   paths (both mobile and pppoe home links). This is the classic
+   PMTUD/middlebox blackhole. Server-side mitigation applied:
+   `tcp_mtu_probing=1` (kernel probes stalled connections down to a
+   smaller segment size and caches it per route — persisted in
+   `/etc/sysctl.d/99-iwent-mtu.conf`). Interface MTU 1450 (netplan)
+   already keeps server packets below pppoe's 1492.
+5. If it ever recurs after these mitigations, the next levers are: an
+   image-retry wrapper in the client (failed RN `Image` does not retry on
+   its own), or moving `/storage` behind a CDN so media doesn't depend
+   on the single reg.ru path.
 
 ### 2.5 Signing state: fine for device builds, not yet for TestFlight
 
