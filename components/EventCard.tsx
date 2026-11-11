@@ -262,6 +262,13 @@ function EventCard({
   tags = [],
   folderId,
 }: EventCardProps) {
+  // React при построении componentStack для ошибки рендера (describeFiber →
+  // DetermineComponentFrameRoot) вызывает функциональный компонент ещё раз с
+  // undefined-пропсами. Без этого раннего выхода деструктуризация пропсов
+  // бросала второе исключение уже внутри обработчика первого — оно улетало
+  // наружу как Unhandled JS Exception и убивало приложение, маскируя
+  // настоящую ошибку (так был скрыт краш гостевого режима 2026-11-11).
+  if (!id) return null;
   const router = useRouter();
   const { user: authUser } = useAuth();
   const currentUserId = authUser?.id ?? null;

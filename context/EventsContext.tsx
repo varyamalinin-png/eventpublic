@@ -1861,7 +1861,12 @@ export function EventsProvider({ children }: EventsProviderProps) {
       (event.participantsData ?? []).forEach(p => {
         if (p.userId) participants.add(p.userId);
       });
-      profile?.participants.forEach(id => participants.add(id));
+      // Форма `(profile?.participants ?? [])` вместо `profile?.participants.forEach` —
+      // НЕ косметика: terser (5.44–5.46, metro-minify-terser) сливает этот вызов с
+      // таким же незащищённым в then-ветке выше и выносит общий хвост БЕЗ гарда —
+      // минифицированный релиз падал с "Cannot read property 'participants' of
+      // undefined" для любого события без профиля (гостевой режим). См. AGENTS.md.
+      (profile?.participants ?? []).forEach(id => participants.add(id));
     }
 
     // Вышедших не показываем нигде: у них отдельный раздел в модалке
