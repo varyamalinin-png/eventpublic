@@ -27,3 +27,5 @@ tmp/extract_prompts.py
 # Итоговые отчёты-артефакты в корне
 Итоговый_отчет_*.pdf
 Итоговый_отчет_*.md
+
+ios/build-archive/
