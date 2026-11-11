@@ -559,6 +559,60 @@ non-obvious mechanics:
   calendar, feed (unblurred) and profile all work — the layout gate does
   not interfere with authenticated users.
 
+### 1.7 Terser eats optional-chaining guards in release bundles (found 2026-11-11)
+
+**Release builds (archive/TestFlight/App Store) ran a DIFFERENT, broken
+program than dev until this was fixed.** `metro-minify-terser` (terser
+5.44.0; reproduced verbatim on 5.46.2, so "upgrade terser" does not save
+you) miscompiles this exact shape:
+
+```ts
+if (cond && obj && obj.items.length > 0) {
+  obj.items.forEach(f);        // then
+} else {
+  sideEffects();
+  obj?.items.forEach(f);       // else — guarded
+}
+```
+
+Terser treats the two `…items.forEach(f)` tails as identical, hoists one
+shared call and DROPS the `?.` guard: the minified bundle executes
+`obj.items.forEach(f)` unconditionally. In `getEventParticipants`
+(`client/context/EventsContext.tsx`) `obj` was the event profile, which
+guests never have — so the entire guest feed died at first render with
+`TypeError: Cannot read property 'participants' of undefined`, while dev
+(unminified) builds were fine. That is why build 8/9 looked healthy in
+development and crashed instantly in the release .app.
+
+**Never write `X?.y.method(...)` when a sibling if/else branch calls the
+same `X.y.method(...)` unguarded** — write `(X?.y ?? []).forEach(...)`
+instead; that form minifies correctly (verified against the same terser
+config). A grep for the pattern across `client/` after the fix found no
+other live instances, but any NEW one reintroduces a release-only crash
+that `tsc`, Metro dev and the unminified bundle all miss.
+
+Two diagnostic lessons that cost hours and are reusable:
+
+- **React masks the real error.** While building the componentStack for a
+  render error, React's `describeFiber → DetermineComponentFrameRoot`
+  RE-CALLS the function component with `props === undefined`. EventCard's
+  parameter destructuring then threw a *second* TypeError inside the error
+  handler, which escaped as the "Unhandled JS Exception" and hid the
+  primary one (the reported `main.jsbundle` position and even the property
+  name pointed at the wrong read). `EventCard` now returns `null` early
+  when called without `id`. If a release crash's stack ever looks
+  self-contradictory, suspect this and instrument
+  `throwAndUnwindWorkLoop(root, wip, lane, thrownValue)` in the bundle —
+  the third/fourth argument is the REAL error with the real stack.
+- **How to instrument a release bundle:** `npx expo export:embed --dev
+  false` (add `--minify false` to get readable code, or `--sourcemap-output`),
+  compile with `ios/Pods/hermes-engine/destroot/bin/hermesc -emit-binary -O`,
+  copy over `main.jsbundle` inside the installed simulator `.app`
+  (`simctl get_app_container <udid> <bundle id> app`), relaunch. Text-level
+  console.error patches survive minification if you anchor on unique
+  minified substrings; swapping the file inside the .app works without
+  re-signing on the simulator.
+
 ### TypeScript/ESLint are not a build gate
 
 `web/next.config.js` sets `typescript.ignoreBuildErrors: true` and
